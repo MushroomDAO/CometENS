@@ -93,9 +93,9 @@ export default defineConfig({
             if (url === '/set-addr') {
               const msg = payload.message ?? {}
               const message = {
-                node: msg.node,
+                node: msg.node as `0x${string}`,
                 coinType: asBigInt(msg.coinType),
-                addr: msg.addr,
+                addr: msg.addr as `0x${string}`,
                 nonce: asBigInt(msg.nonce),
                 deadline: asBigInt(msg.deadline),
               }
@@ -111,19 +111,36 @@ export default defineConfig({
                 message: message as any,
                 signature,
               })
+              if (!ok) throw new Error('Invalid signature')
+
+              // Execute L2 write via Worker EOA
+              const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
+              let txHash: string | undefined
+              if (workerPk) {
+                const { privateKeyToAccount } = await import('viem/accounts')
+                const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
+                const { optimismSepolia } = await import('viem/chains')
+                const workerAccount = privateKeyToAccount(workerPk)
+                const l2Address = (process.env.OP_L2_RECORDS_ADDRESS ||
+                  process.env.VITE_L2_RECORDS_ADDRESS ||
+                  '0x0000000000000000000000000000000000000000') as `0x${string}`
+                const rpcUrl = process.env.OP_SEPOLIA_RPC_URL || process.env.L2_RPC_URL || ''
+                const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+                txHash = await writer.setAddr(message.node, message.coinType, message.addr)
+              }
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ ok, action: 'set-addr' }))
+              res.end(JSON.stringify({ ok, action: 'set-addr', txHash }))
               return
             }
 
             if (url === '/register') {
               const msg = payload.message ?? {}
               const message = {
-                parent: msg.parent,
-                label: msg.label,
-                owner: msg.owner,
+                parent: msg.parent as string,
+                label: msg.label as string,
+                owner: msg.owner as `0x${string}`,
                 nonce: asBigInt(msg.nonce),
                 deadline: asBigInt(msg.deadline),
               }
@@ -139,10 +156,30 @@ export default defineConfig({
                 message: message as any,
                 signature,
               })
+              if (!ok) throw new Error('Invalid signature')
+
+              // Execute L2 write via Worker EOA
+              const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
+              let txHash: string | undefined
+              if (workerPk) {
+                const { privateKeyToAccount } = await import('viem/accounts')
+                const { namehash, labelhash } = await import('viem/ens')
+                const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
+                const { optimismSepolia } = await import('viem/chains')
+                const workerAccount = privateKeyToAccount(workerPk)
+                const l2Address = (process.env.OP_L2_RECORDS_ADDRESS ||
+                  process.env.VITE_L2_RECORDS_ADDRESS ||
+                  '0x0000000000000000000000000000000000000000') as `0x${string}`
+                const rpcUrl = process.env.OP_SEPOLIA_RPC_URL || process.env.L2_RPC_URL || ''
+                const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+                const parentNode = namehash(message.parent) as `0x${string}`
+                const labelHash = labelhash(message.label) as `0x${string}`
+                txHash = await writer.setSubnodeOwner(parentNode, labelHash, message.owner)
+              }
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ ok, action: 'register' }))
+              res.end(JSON.stringify({ ok, action: 'register', txHash }))
               return
             }
 
