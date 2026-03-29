@@ -58,7 +58,7 @@ const mockGetAddrByCoinType = vi.fn().mockResolvedValue(TEST_ADDR_BYTES)
 const mockGetText = vi.fn().mockResolvedValue(TEST_TEXT)
 const mockGetContenthash = vi.fn().mockResolvedValue(TEST_CONTENTHASH)
 
-vi.mock('../server/gateway/readers/L2RecordsReader', () => {
+vi.mock('../../server/gateway/readers/L2RecordsReader', () => {
   class L2RecordsReader {
     getAddr = mockGetAddr
     getAddrByCoinType = mockGetAddrByCoinType
@@ -99,7 +99,7 @@ describe('handleResolve', () => {
       args: [TEST_NODE],
     })
 
-    const { handleResolve } = await import('../server/gateway/index')
+    const { handleResolve } = await import('../../server/gateway/index')
     const result = await handleResolve(calldata)
 
     const decoded = decodeFunctionResult({ abi: ADDR_ABI, functionName: 'addr', data: result })
@@ -120,7 +120,7 @@ describe('handleResolve', () => {
       args: [TEST_NODE, BASE_COIN_TYPE],
     })
 
-    const { handleResolve } = await import('../server/gateway/index')
+    const { handleResolve } = await import('../../server/gateway/index')
     const result = await handleResolve(calldata)
 
     expect(result).toMatch(/^0x/)
@@ -134,7 +134,7 @@ describe('handleResolve', () => {
       args: [TEST_NODE, 'com.twitter'],
     })
 
-    const { handleResolve } = await import('../server/gateway/index')
+    const { handleResolve } = await import('../../server/gateway/index')
     const result = await handleResolve(calldata)
 
     const decoded = decodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', data: result })
@@ -149,7 +149,7 @@ describe('handleResolve', () => {
       args: [TEST_NODE],
     })
 
-    const { handleResolve } = await import('../server/gateway/index')
+    const { handleResolve } = await import('../../server/gateway/index')
     const result = await handleResolve(calldata)
 
     const decoded = decodeFunctionResult({
@@ -162,7 +162,7 @@ describe('handleResolve', () => {
   })
 
   it('throws on unsupported selector', async () => {
-    const { handleResolve } = await import('../server/gateway/index')
+    const { handleResolve } = await import('../../server/gateway/index')
     await expect(handleResolve('0xdeadbeef' as Hex)).rejects.toThrow()
   })
 })
@@ -175,7 +175,7 @@ describe('handleResolveSigned (no signer)', () => {
       args: [TEST_NODE],
     })
 
-    const { handleResolveSigned } = await import('../server/gateway/index')
+    const { handleResolveSigned } = await import('../../server/gateway/index')
     const result = await handleResolveSigned(calldata)
 
     expect(result).toHaveProperty('data')

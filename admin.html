@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — CometENS</title>
+  <style>
+    body { font-family: monospace; padding: 40px; max-width: 760px; margin: 0 auto; }
+    h2 { margin-bottom: 4px; }
+    .muted { color: #666; font-size: 13px; margin-top: 0; }
+    .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 20px; margin-top: 20px; }
+    .card h3 { margin: 0 0 14px 0; font-size: 15px; border-bottom: 1px solid #f0f0f0; padding-bottom: 10px; }
+    label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; }
+    input, select { width: 100%; box-sizing: border-box; padding: 8px 10px; font-family: monospace; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; }
+    input:focus, select:focus { outline: none; border-color: #0b79d0; }
+    .row { display: flex; gap: 8px; align-items: flex-start; }
+    .row input { margin-bottom: 0; }
+    .row .key-input { flex: 1; }
+    .row .value-input { flex: 2; }
+    button { padding: 9px 16px; font-family: monospace; font-size: 13px; cursor: pointer; border: none; border-radius: 6px; margin-right: 6px; margin-top: 2px; }
+    .btn-primary { background: #0b79d0; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #0960a8; }
+    .btn-small { background: #f5f5f5; border: 1px solid #ddd; color: #333; font-size: 12px; padding: 6px 12px; }
+    .btn-small:hover { background: #e8e8e8; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .result-box { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+    .result-box.success { background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; }
+    .result-box.error { background: #fdecea; border: 1px solid #e57373; color: #c62828; }
+    .result-box.info { background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; }
+    .result-box.hidden { display: none; }
+    .inline-row { display: flex; gap: 8px; }
+    .inline-row input { margin-bottom: 0; }
+    .wallet-bar { background: #f9f9f9; border: 1px solid #e6e6e6; border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+    .wallet-bar .addr { color: #333; font-size: 12px; }
+    a.back { font-size: 12px; color: #0b79d0; text-decoration: none; display: inline-block; margin-bottom: 24px; }
+    a.back:hover { text-decoration: underline; }
+    .source-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .source-row select { width: auto; margin-bottom: 0; flex: 0 0 auto; }
+    .source-row label { margin-bottom: 0; white-space: nowrap; }
+    .query-btn-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .text-key-input { width: 120px; flex: 0 0 120px; }
+  </style>
+</head>
+<body>
+
+  <a class="back" href="/">← Back to console</a>
+
+  <h2>CometENS Admin</h2>
+  <p class="muted">Query records and manage ENS data under <strong id="rootDomainLabel">...</strong></p>
+
+  <!-- Wallet bar -->
+  <div class="wallet-bar">
+    <span class="addr" id="walletAddr">Not connected</span>
+    <button class="btn-small" id="connectWalletBtn">Connect MetaMask</button>
+  </div>
+
+  <!-- ── Section 1: Query ── -->
+  <div class="card">
+    <h3>Query Records</h3>
+
+    <label for="queryName">ENS name (e.g. alice.aastar.eth)</label>
+    <input id="queryName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <div class="source-row">
+      <label>Source:</label>
+      <select id="querySource">
+        <option value="l2" selected>L2 (OP Sepolia)</option>
+        <option value="l1">L1 (Sepolia / Mainnet)</option>
+      </select>
+      <select id="l1Chain" style="display:none; width:auto; margin-bottom:0;">
+        <option value="sepolia" selected>Sepolia</option>
+        <option value="mainnet">Mainnet</option>
+      </select>
+    </div>
+
+    <div class="query-btn-row">
+      <button class="btn-small" id="queryAddrBtn">Query Addr</button>
+      <button class="btn-small" id="queryTextBtn">Query Text key:</button>
+      <input id="queryTextKey" type="text" placeholder="com.twitter" style="width:140px; margin-bottom:0; padding:6px 8px; font-size:12px;" />
+      <button class="btn-small" id="queryChBtn">Query Contenthash</button>
+    </div>
+
+    <div class="result-box hidden" id="queryResult"></div>
+  </div>
+
+  <!-- ── Section 2: Set Addr ── -->
+  <div class="card">
+    <h3>Set Address Record (EIP-712)</h3>
+
+    <label for="setAddrName">ENS name</label>
+    <input id="setAddrName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="setAddrAddr">Address (0x...)</label>
+    <input id="setAddrAddr" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <label for="setAddrCoinType">Coin type (default 60 = ETH)</label>
+    <input id="setAddrCoinType" type="text" value="60" style="width:120px;" />
+
+    <button class="btn-primary" id="setAddrBtn">Connect &amp; Sign SetAddr</button>
+    <div class="result-box hidden" id="setAddrResult"></div>
+  </div>
+
+  <!-- ── Section 3: Set Text ── -->
+  <div class="card">
+    <h3>Set Text Record (EIP-712)</h3>
+
+    <label for="setTextName">ENS name</label>
+    <input id="setTextName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="setTextKey">Key (e.g. com.twitter)</label>
+    <input id="setTextKey" type="text" placeholder="com.twitter" autocomplete="off" spellcheck="false" />
+
+    <label for="setTextValue">Value (e.g. @alice)</label>
+    <input id="setTextValue" type="text" placeholder="@alice" autocomplete="off" />
+
+    <button class="btn-primary" id="setTextBtn">Connect &amp; Sign SetText</button>
+    <div class="result-box hidden" id="setTextResult"></div>
+  </div>
+
+  <script type="module" src="/src/admin.ts"></script>
+</body>
+</html>

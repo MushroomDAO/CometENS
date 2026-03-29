@@ -30,7 +30,7 @@ import { join } from 'path'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ANVIL_PORT = 18545
-const CONTRACTS_DIR = join(import.meta.dirname, '..', 'contracts')
+const CONTRACTS_DIR = join(import.meta.dirname, '..', '..', 'contracts')
 
 // Anvil well-known test accounts
 const DEPLOYER_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex

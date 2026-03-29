@@ -65,7 +65,7 @@ export default defineConfig({
           try {
             const payload = JSON.parse(body || '{}') as any
             const { verifyTypedData, isAddress, isHex } = await import('viem')
-            const { buildDomain, RegisterTypes, SetAddrTypes } = await import('./server/gateway/manage/schemas')
+            const { buildDomain, RegisterTypes, SetAddrTypes, SetTextTypes } = await import('./server/gateway/manage/schemas')
             const { optimismSepolia, optimism } = await import('viem/chains')
 
             const from = payload.from as string | undefined
@@ -158,6 +158,43 @@ export default defineConfig({
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
               res.end(JSON.stringify({ ok, action: 'register', txHash }))
+              return
+            }
+
+            if (url === '/set-text') {
+              const msg = payload.message ?? {}
+
+              if (!isHex(msg.node)) throw new Error('Invalid node')
+              if (typeof msg.key !== 'string' || !msg.key) throw new Error('Invalid key')
+              if (typeof msg.value !== 'string') throw new Error('Invalid value')
+
+              const message = {
+                node: msg.node as `0x${string}`,
+                key: msg.key as string,
+                value: msg.value as string,
+                nonce: asBigInt(msg.nonce),
+                deadline: asBigInt(msg.deadline),
+              }
+
+              checkDeadline(message.deadline)
+
+              const ok = await verifyTypedData({
+                address: from,
+                domain,
+                primaryType: 'SetText',
+                types: SetTextTypes as any,
+                message: message as any,
+                signature,
+              })
+              if (!ok) throw new Error('Invalid signature')
+
+              const txHash = await withWriter(async (writer) =>
+                writer.setText(message.node, message.key, message.value)
+              )
+
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ ok, action: 'set-text', txHash }))
               return
             }
 

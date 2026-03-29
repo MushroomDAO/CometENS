@@ -30,14 +30,14 @@ import { spawn, type ChildProcess } from 'child_process'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { createServer, type Server } from 'http'
-import { L2RecordsReader } from '../server/gateway/readers/L2RecordsReader'
+import { L2RecordsReader } from '../../server/gateway/readers/L2RecordsReader'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const L1_PORT = 18546
 const L2_PORT = 18547
 const GW_PORT = 18548
-const CONTRACTS_DIR = join(import.meta.dirname, '..', 'contracts')
+const CONTRACTS_DIR = join(import.meta.dirname, '..', '..', 'contracts')
 
 const DEPLOYER_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex
 const SIGNER_PK   = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' as Hex

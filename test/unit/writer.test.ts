@@ -44,7 +44,7 @@ describe('L2RecordsWriter', () => {
   })
 
   it('setSubnodeOwner calls writeContract with correct args and returns txHash', async () => {
-    const { L2RecordsWriter } = await import('../server/gateway/writer/L2RecordsWriter')
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
     const txHash = await writer.setSubnodeOwner(TEST_PARENT, TEST_LABEL, TEST_ADDR)
@@ -61,7 +61,7 @@ describe('L2RecordsWriter', () => {
   })
 
   it('setAddr calls writeContract with correct args', async () => {
-    const { L2RecordsWriter } = await import('../server/gateway/writer/L2RecordsWriter')
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
     const addrBytes = toHex(toBytes(TEST_ADDR)) as Hex
@@ -77,7 +77,7 @@ describe('L2RecordsWriter', () => {
   })
 
   it('setText calls writeContract with correct args', async () => {
-    const { L2RecordsWriter } = await import('../server/gateway/writer/L2RecordsWriter')
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
     const txHash = await writer.setText(TEST_NODE, 'com.twitter', '@alice')
@@ -92,7 +92,7 @@ describe('L2RecordsWriter', () => {
   })
 
   it('setContenthash calls writeContract with correct args', async () => {
-    const { L2RecordsWriter } = await import('../server/gateway/writer/L2RecordsWriter')
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
     const hashBytes = '0xe301017012201234' as Hex
@@ -109,7 +109,7 @@ describe('L2RecordsWriter', () => {
 
   it('propagates writeContract errors', async () => {
     mockWriteContract.mockRejectedValue(new Error('insufficient funds'))
-    const { L2RecordsWriter } = await import('../server/gateway/writer/L2RecordsWriter')
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
     await expect(writer.setAddr(TEST_NODE, 60n, TEST_ADDR)).rejects.toThrow('insufficient funds')

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register Subdomain — CometENS</title>
+  <style>
+    body { font-family: monospace; padding: 40px; max-width: 600px; margin: 0 auto; }
+    h2 { margin-bottom: 4px; }
+    .muted { color: #666; font-size: 13px; margin-top: 0; }
+    .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 20px; margin-top: 20px; }
+    .card h3 { margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; color: #999; letter-spacing: 0.05em; }
+    label { display: block; font-size: 13px; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-family: monospace; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 12px; }
+    input:focus { outline: none; border-color: #0b79d0; }
+    .preview { font-size: 14px; color: #0b79d0; margin-bottom: 12px; min-height: 20px; }
+    button { padding: 10px 18px; font-family: monospace; font-size: 13px; cursor: pointer; border: none; border-radius: 6px; }
+    .btn-primary { background: #0b79d0; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #0960a8; }
+    .btn-secondary { background: #f0f0f0; color: #333; border: 1px solid #ccc; }
+    .btn-secondary:hover { background: #e0e0e0; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .address { font-size: 12px; color: #333; word-break: break-all; margin-top: 8px; }
+    .result { margin-top: 16px; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+    .result.success { background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; }
+    .result.error { background: #fdecea; border: 1px solid #e57373; color: #c62828; }
+    .result.hidden { display: none; }
+    .step-label { font-size: 12px; color: #999; font-weight: bold; margin-bottom: 6px; }
+    a.back { font-size: 12px; color: #0b79d0; text-decoration: none; display: inline-block; margin-bottom: 24px; }
+    a.back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <a class="back" href="/">← Back to console</a>
+
+  <h2>Register your subdomain</h2>
+  <p class="muted">under <strong><span id="rootDomain">...</span></strong></p>
+
+  <div class="card">
+    <div class="step-label">STEP 1 — Choose a label</div>
+    <label for="labelInput">Subdomain label</label>
+    <input id="labelInput" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
+    <div class="preview" id="preview">&nbsp;</div>
+  </div>
+
+  <div class="card">
+    <div class="step-label">STEP 2 — Connect wallet</div>
+    <button class="btn-secondary" id="connectBtn">Connect MetaMask</button>
+    <div class="address" id="connectedAddress"></div>
+  </div>
+
+  <div class="card">
+    <div class="step-label">STEP 3 — Register</div>
+    <button class="btn-primary" id="registerBtn" disabled>Register Subdomain</button>
+    <div class="result hidden" id="result"></div>
+  </div>
+
+  <script type="module" src="/src/register.ts"></script>
+</body>
+</html>
