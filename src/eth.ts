@@ -93,7 +93,7 @@ async function queryAddr() {
     const source = getQuerySource()
     if (source === 'l1') {
       const name = nodeInput.value.trim()
-      if (!name) throw new Error('请输入 ENS name，例如 asset3.eth')
+      if (!name) throw new Error('请输入 ENS name，例如 vitalik.eth 或 ses.fkey.id')
       const l1 = getL1Client()
       const value = await l1.getEnsAddress({ name })
       setResult(`L1 addr: ${value ?? '(null)'}`)
@@ -123,7 +123,7 @@ async function queryText() {
     const source = getQuerySource()
     if (source === 'l1') {
       const name = nodeInput.value.trim()
-      if (!name) throw new Error('请输入 ENS name，例如 asset3.eth')
+      if (!name) throw new Error('请输入 ENS name，例如 vitalik.eth 或 ses.fkey.id')
       const l1 = getL1Client()
       const value = await l1.getEnsText({ name, key: 'com.twitter' })
       setResult(`L1 text(com.twitter): ${value ?? '(null)'}`)
@@ -153,7 +153,7 @@ async function queryCh() {
     const source = getQuerySource()
     if (source === 'l1') {
       const name = nodeInput.value.trim()
-      if (!name) throw new Error('请输入 ENS name，例如 asset3.eth')
+      if (!name) throw new Error('请输入 ENS name，例如 vitalik.eth 或 ses.fkey.id')
       const l1 = getL1Client()
       const resolver = await l1.getEnsResolver({ name })
       if (!resolver) {

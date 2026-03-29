@@ -51,13 +51,17 @@ const TEST_ADDR = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045' as Hex
 const TEST_TEXT = '@alice_web3'
 const TEST_CONTENTHASH = '0xe301017012201234567890abcdef' as Hex
 
+const TEST_ADDR_BYTES = toHex(toBytes(TEST_ADDR), { size: 20 }) as Hex
+
 const mockGetAddr = vi.fn().mockResolvedValue(TEST_ADDR)
+const mockGetAddrByCoinType = vi.fn().mockResolvedValue(TEST_ADDR_BYTES)
 const mockGetText = vi.fn().mockResolvedValue(TEST_TEXT)
 const mockGetContenthash = vi.fn().mockResolvedValue(TEST_CONTENTHASH)
 
 vi.mock('../server/gateway/readers/L2RecordsReader', () => {
   class L2RecordsReader {
     getAddr = mockGetAddr
+    getAddrByCoinType = mockGetAddrByCoinType
     getText = mockGetText
     getContenthash = mockGetContenthash
   }
@@ -83,6 +87,7 @@ describe('handleResolve', () => {
   beforeEach(() => {
     vi.resetModules()
     mockGetAddr.mockResolvedValue(TEST_ADDR)
+    mockGetAddrByCoinType.mockResolvedValue(TEST_ADDR_BYTES)
     mockGetText.mockResolvedValue(TEST_TEXT)
     mockGetContenthash.mockResolvedValue(TEST_CONTENTHASH)
   })
@@ -100,6 +105,26 @@ describe('handleResolve', () => {
     const decoded = decodeFunctionResult({ abi: ADDR_ABI, functionName: 'addr', data: result })
     expect(decoded.toLowerCase()).toBe(TEST_ADDR.toLowerCase())
     expect(mockGetAddr).toHaveBeenCalledWith(TEST_NODE)
+  })
+
+  it('decodes addr(node, coinType) calldata and returns encoded bytes (ENSIP-11 multichain)', async () => {
+    const ADDR_MULTICHAIN_ABI = [{
+      type: 'function', name: 'addr', stateMutability: 'view',
+      inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
+      outputs: [{ name: '', type: 'bytes' }],
+    }] as const
+    const BASE_COIN_TYPE = BigInt(0x80000000) | BigInt(8453) // toCoinType(base.id)
+    const calldata = encodeFunctionData({
+      abi: ADDR_MULTICHAIN_ABI,
+      functionName: 'addr',
+      args: [TEST_NODE, BASE_COIN_TYPE],
+    })
+
+    const { handleResolve } = await import('../server/gateway/index')
+    const result = await handleResolve(calldata)
+
+    expect(result).toMatch(/^0x/)
+    expect(mockGetAddrByCoinType).toHaveBeenCalledWith(TEST_NODE, BASE_COIN_TYPE)
   })
 
   it('decodes text calldata and returns encoded string', async () => {

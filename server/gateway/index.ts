@@ -23,6 +23,14 @@ const RESOLVE_ABI = [
     outputs: [{ name: '', type: 'address' }],
   },
   {
+    // ENSIP-11 multichain: addr(node, coinType) — used by L2/EVM chains (coinType = 0x80000000 | chainId)
+    type: 'function',
+    name: 'addr',
+    stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bytes' }],
+  },
+  {
     type: 'function',
     name: 'text',
     stateMutability: 'view',
@@ -74,6 +82,13 @@ export async function handleResolve(calldata: Hex): Promise<Hex> {
   const { functionName, args } = decodeFunctionData({ abi: RESOLVE_ABI, data: calldata })
 
   if (functionName === 'addr') {
+    if (args.length === 2) {
+      // ENSIP-11: addr(bytes32 node, uint256 coinType) — multichain address as bytes
+      const [node, coinType] = args as [Hex, bigint]
+      const value = await reader.getAddrByCoinType(node, coinType)
+      return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'addr', result: value })
+    }
+    // Legacy: addr(bytes32 node) — ETH address (coinType 60)
     const [node] = args as [Hex]
     const value = await reader.getAddr(node)
     return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'addr', result: value })
