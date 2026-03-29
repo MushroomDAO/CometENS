@@ -49,6 +49,94 @@ export default defineConfig({
 
         // ─── /api/manage ────────────────────────────────────────────────────
 
+        // ─── /api/v1 — upstream machine-to-machine API ──────────────────────
+        //
+        // Authenticated with X-Api-Key header (value = UPSTREAM_API_KEY env var).
+        // Designed for upstream apps (e.g. registration flows) to auto-register
+        // subdomains without user interaction.
+
+        server.middlewares.use('/api/v1', async (req, res) => {
+          const anyReq = req as any
+          const url = String(anyReq.url || '')
+
+          res.setHeader('content-type', 'application/json')
+
+          if (anyReq.method !== 'POST') {
+            res.statusCode = 405
+            res.end(JSON.stringify({ error: 'Method Not Allowed' }))
+            return
+          }
+
+          // ── API key authentication ─────────────────────────────────────────
+          const apiKey = process.env.UPSTREAM_API_KEY
+          if (!apiKey) {
+            res.statusCode = 503
+            res.end(JSON.stringify({ error: 'UPSTREAM_API_KEY not configured on server' }))
+            return
+          }
+          const providedKey = anyReq.headers['x-api-key'] as string | undefined
+          if (!providedKey || providedKey !== apiKey) {
+            res.statusCode = 401
+            res.end(JSON.stringify({ error: 'Unauthorized: invalid or missing X-Api-Key' }))
+            return
+          }
+
+          const body = await readBody(anyReq)
+
+          try {
+            const { isAddress, namehash, labelhash } = await import('viem')
+            const payload = JSON.parse(body || '{}') as {
+              label?: string
+              owner?: string
+              addr?: string   // optional: set ETH addr record simultaneously
+            }
+
+            // ── Input validation ─────────────────────────────────────────────
+            const label = payload.label?.trim().toLowerCase()
+            if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
+              throw new Error('Invalid label: must be 1-63 lowercase alphanumeric or hyphen chars')
+            }
+
+            const owner = payload.owner as `0x${string}` | undefined
+            if (!owner || !isAddress(owner)) {
+              throw new Error('Invalid owner: must be a valid Ethereum address')
+            }
+
+            const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
+            if (!rootDomain) throw new Error('VITE_ROOT_DOMAIN not configured on server')
+
+            if (url === '/register') {
+              const parentNode = namehash(rootDomain) as `0x${string}`
+              const lh = labelhash(label) as `0x${string}`
+              const fullName = `${label}.${rootDomain}`
+              const node = namehash(fullName) as `0x${string}`
+
+              // Register subdomain (setSubnodeOwner on L2)
+              const txHash = await withWriter((writer) =>
+                writer.setSubnodeOwner(parentNode, lh, owner)
+              )
+
+              // Optionally set ETH addr record in the same call sequence
+              const addrTarget = (payload.addr ?? owner) as `0x${string}`
+              if (addrTarget && isAddress(addrTarget)) {
+                const { toHex, toBytes } = await import('viem')
+                const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as `0x${string}`
+                await withWriter((writer) => writer.setAddr(node, 60n, addrBytes))
+              }
+
+              res.statusCode = 200
+              res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))
+              return
+            }
+
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: `Unknown endpoint: /api/v1${url}` }))
+          } catch (e) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: (e as Error)?.message ?? String(e) }))
+          }
+        })
+
         server.middlewares.use('/api/manage', async (req, res) => {
           const anyReq = req as any
           const url = String(anyReq.url || '')
