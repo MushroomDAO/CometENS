@@ -62,8 +62,8 @@
 
 | 合约 | 网络 | 地址 |
 |------|------|------|
-| L2Records | OP Sepolia | _待部署_ |
-| OffchainResolver | Ethereum Sepolia | _待部署_ |
+| L2Records | OP Sepolia (11155420) | `0x9Ed5d10101656b69B5bf50Ef15fd3cc33F55058b` |
+| OffchainResolver | Ethereum Sepolia (11155111) | `0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45` |
 
 ### Mainnet
 

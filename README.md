@@ -38,8 +38,8 @@ See `CLAUDE.md` for full architecture details.
 
 | Contract | Network | Address |
 |----------|---------|---------|
-| L2Records | OP Sepolia | _TBD after deployment_ |
-| OffchainResolver | Ethereum Sepolia | _TBD after deployment_ |
+| L2Records | OP Sepolia (11155420) | `0x9Ed5d10101656b69B5bf50Ef15fd3cc33F55058b` |
+| OffchainResolver | Ethereum Sepolia (11155111) | `0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45` |
 
 ## Environment Variables
 
