@@ -1,5 +1,6 @@
 import { createPublicClient, createWalletClient, custom, http, isHex, namehash, type Address } from 'viem'
 import { mainnet, optimismSepolia, sepolia } from 'viem/chains'
+import { config, isTestnet, l1RpcUrl } from './config'
 
 const L2_RECORDS_ABI = [
   {
@@ -30,25 +31,27 @@ const L2_RECORDS_ABI = [
 
 const l2Client = createPublicClient({
   chain: optimismSepolia,
-  transport: http(import.meta.env?.OP_SEPOLIA_RPC_URL || import.meta.env?.VITE_L2_RPC_URL || ''),
+  transport: http(config.l2RpcUrl),
 })
 
 const l1SepoliaClient = createPublicClient({
   chain: sepolia,
-  transport: http(import.meta.env?.VITE_L1_SEPOLIA_RPC_URL || ''),
+  transport: http(config.l1SepoliaRpcUrl),
 })
 
 const l1MainnetClient = createPublicClient({
   chain: mainnet,
-  transport: http(import.meta.env?.VITE_L1_MAINNET_RPC_URL || ''),
+  transport: http(config.l1MainnetRpcUrl),
 })
 
-const CONTRACT = (
-  import.meta.env?.OP_L2_RECORDS_ADDRESS ||
-  import.meta.env?.VITE_L2_RECORDS_ADDRESS ||
-  '0x0000000000000000000000000000000000000000'
-) as `0x${string}`
+const CONTRACT = config.l2RecordsAddress
 const VERIFYING = (import.meta.env?.VITE_EIP712_VERIFYING_CONTRACT || CONTRACT) as `0x${string}`
+
+// Show root domain context in the page title area
+const rootDomainEl = document.getElementById('rootDomain')
+if (rootDomainEl && config.rootDomain) {
+  rootDomainEl.textContent = config.rootDomain
+}
 
 function byId<T extends HTMLElement = HTMLElement>(id: string) {
   return document.getElementById(id) as T | null

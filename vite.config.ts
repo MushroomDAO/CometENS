@@ -66,7 +66,7 @@ export default defineConfig({
             const payload = JSON.parse(body || '{}') as any
             const { verifyTypedData, isAddress, isHex } = await import('viem')
             const { buildDomain, RegisterTypes, SetAddrTypes } = await import('./server/gateway/manage/schemas')
-            const { optimismSepolia } = await import('viem/chains')
+            const { optimismSepolia, optimism } = await import('viem/chains')
 
             const from = payload.from as string | undefined
             if (!from || !isAddress(from)) throw new Error('Invalid from address')
@@ -81,7 +81,9 @@ export default defineConfig({
             ) as `0x${string}`
             if (!isAddress(verifyingContract)) throw new Error('Invalid verifyingContract')
 
-            const domain = buildDomain(optimismSepolia.id, verifyingContract)
+            const network = process.env.VITE_NETWORK || 'op-sepolia'
+            const chainId = network === 'op-mainnet' ? optimism.id : optimismSepolia.id
+            const domain = buildDomain(chainId, verifyingContract)
 
             if (url === '/set-addr') {
               const msg = payload.message ?? {}
