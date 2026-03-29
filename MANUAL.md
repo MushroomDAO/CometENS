@@ -182,15 +182,29 @@ npm test -- test/integration/
 
 上游应用（如用户注册系统、邮件平台等）可以在用户注册时自动为其创建子域名，**无需用户手动操作**。
 
-### 3.1 认证方式
+### 3.1 认证方式：公钥注册 + 请求签名
 
-所有 `/api/v1` 请求必须在 HTTP Header 中携带 API 密钥：
+每个上游应用拥有自己的 **secp256k1 密钥对**（与以太坊钱包相同格式）。运维人员将应用的公钥地址注册到 `UPSTREAM_ALLOWED_SIGNERS` 白名单中。
 
+发起请求时，上游应用用自己的私钥签名**规范消息**，服务端恢复签名地址并与白名单比对。
+
+**优势对比 API Key：**
+- 无共享密钥——服务端只存公钥
+- 签名绑定具体请求内容，防止重放攻击
+- 撤销权限只需从白名单移除地址，无需通知对方重置密钥
+- 多上游应用独立管理，互不影响
+
+**运维配置：**
+```env
+# 白名单：逗号分隔的上游应用地址
+UPSTREAM_ALLOWED_SIGNERS=0xAppAddress1,0xAppAddress2
 ```
-X-Api-Key: <UPSTREAM_API_KEY>
-```
 
-密钥由运维人员通过 `openssl rand -hex 32` 生成，通过安全渠道（非代码库）传递给上游应用。
+**规范消息格式（防篡改）：**
+```
+CometENS:register:{label}:{owner}:{timestamp}
+```
+其中 `timestamp` 为 Unix 秒，服务端拒绝偏差超过 60 秒的请求。
 
 ### 3.2 注册子域名
 
@@ -203,12 +217,13 @@ X-Api-Key: <UPSTREAM_API_KEY>
 ```http
 POST /api/v1/register
 Content-Type: application/json
-X-Api-Key: d379e33f...
 
 {
   "label": "alice",
   "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-  "addr": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  "addr": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "timestamp": 1711234567,
+  "signature": "0x..."
 }
 ```
 
@@ -217,6 +232,8 @@ X-Api-Key: d379e33f...
 | `label` | string | ✅ | 子域名标签，仅小写字母/数字/连字符，1-63 字符 |
 | `owner` | address | ✅ | 子域名所有者地址 |
 | `addr` | address | 可选 | ETH 地址记录，默认与 owner 相同 |
+| `timestamp` | number | ✅ | Unix 秒，必须在服务端当前时间 ±60s 内 |
+| `signature` | hex | ✅ | 对规范消息的 personal_sign 签名 |
 
 **响应：**
 
@@ -238,26 +255,40 @@ X-Api-Key: d379e33f...
 | HTTP 状态 | 含义 |
 |-----------|------|
 | 200 | 成功 |
-| 400 | 参数错误 |
-| 401 | API 密钥无效或缺失 |
-| 503 | 服务端未配置 UPSTREAM_API_KEY |
+| 400 | 参数错误（label 格式、地址无效等） |
+| 401 | 签名无效、时间戳过期、或地址不在白名单 |
+| 503 | 服务端未配置 UPSTREAM_ALLOWED_SIGNERS |
 
 ### 3.3 代码示例
 
-**Node.js / TypeScript：**
+**第一步：生成上游应用密钥对（一次性）**
 
 ```typescript
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+
+const privateKey = generatePrivateKey()
+const account = privateKeyToAccount(privateKey)
+
+console.log('Private key (保密保存):', privateKey)
+console.log('Address (提供给运维加入白名单):', account.address)
+```
+
+**第二步：在上游应用中签名并调用**
+
+```typescript
+import { privateKeyToAccount } from 'viem/accounts'
+
+const appAccount = privateKeyToAccount(process.env.COMETENS_PRIVATE_KEY as `0x${string}`)
+
 async function registerSubdomain(label: string, ownerAddress: string) {
+  const timestamp = Math.floor(Date.now() / 1000)
+  const message = `CometENS:register:${label}:${ownerAddress}:${timestamp}`
+  const signature = await appAccount.signMessage({ message })
+
   const response = await fetch('https://ens.aastar.io/api/v1/register', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': process.env.COMETENS_API_KEY!,
-    },
-    body: JSON.stringify({
-      label,
-      owner: ownerAddress,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, owner: ownerAddress, timestamp, signature }),
   })
 
   if (!response.ok) {
@@ -266,60 +297,47 @@ async function registerSubdomain(label: string, ownerAddress: string) {
   }
 
   const result = await response.json()
-  console.log(`Registered: ${result.name}`)  // alice.aastar.eth
-  console.log(`TX: ${result.txHash}`)
+  // { ok: true, name: "alice.aastar.eth", node: "0x...", txHash: "0x..." }
   return result
 }
 
-// 用户注册流程示例
+// 用户注册流程示例（异步，不阻塞用户响应）
 async function onUserSignup(user: { username: string; wallet: string }) {
-  // 注册 ENS 子域名（异步，不阻塞用户注册）
-  registerSubdomain(user.username, user.wallet)
+  registerSubdomain(user.username.toLowerCase(), user.wallet)
     .then(r => console.log('ENS registered:', r.name))
     .catch(e => console.error('ENS registration failed (non-critical):', e.message))
 }
 ```
 
-**Python：**
-
-```python
-import requests
-import os
-
-def register_subdomain(label: str, owner_address: str) -> dict:
-    response = requests.post(
-        "https://ens.aastar.io/api/v1/register",
-        headers={
-            "Content-Type": "application/json",
-            "X-Api-Key": os.environ["COMETENS_API_KEY"],
-        },
-        json={"label": label, "owner": owner_address},
-        timeout=60,  # L2 tx can take up to 30s
-    )
-    response.raise_for_status()
-    return response.json()
-```
-
-**cURL：**
+**cURL（测试用）：**
 
 ```bash
-curl -X POST https://ens.aastar.io/api/v1/register \
+# 1. 用 cast 签名（foundry 工具）
+TIMESTAMP=$(date +%s)
+LABEL="alice"
+OWNER="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+MSG="CometENS:register:${LABEL}:${OWNER}:${TIMESTAMP}"
+SIG=$(cast wallet sign --private-key $COMETENS_PRIVATE_KEY "$MSG")
+
+# 2. 调用 API
+curl -X POST http://localhost:4173/api/v1/register \
   -H "Content-Type: application/json" \
-  -H "X-Api-Key: $COMETENS_API_KEY" \
-  -d '{"label": "alice", "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}'
+  -d "{\"label\":\"$LABEL\",\"owner\":\"$OWNER\",\"timestamp\":$TIMESTAMP,\"signature\":\"$SIG\"}"
 ```
 
 ### 3.4 注意事项
 
-1. **注册时间**：`/api/v1/register` 会等待 L2 交易确认后才返回，OP Sepolia 约 5-15 秒，OP Mainnet 约 2 秒。建议上游应用异步调用，不要阻塞用户响应。
+1. **注册时间**：`/api/v1/register` 等待 L2 交易确认后才返回，OP Sepolia 约 5-15 秒，OP Mainnet 约 2 秒。建议异步调用，不阻塞用户响应。
 
-2. **重复注册**：同一 label 重复注册会覆盖 owner（合约不报错），可用于转移所有权。
+2. **时间戳同步**：调用方时钟与服务端偏差必须 ≤ 60 秒。使用 NTP 同步的系统时钟即可，不需要特殊处理。
 
-3. **label 规则**：与 ENS 标准对齐，仅允许 `[a-z0-9-]`，长度 1-63。如果用户使用了大写或特殊字符，上游应自行转换（`.toLowerCase()`）。
+3. **重复注册**：同一 label 重复注册会覆盖 owner（合约不报错），可用于转移所有权。
 
-4. **API 密钥保管**：API 密钥只有单一因素保护，请勿提交到代码仓库，通过环境变量或 Secrets 管理器传递。如需更高安全性，联系我们使用 HMAC 签名方案。
+4. **label 规则**：仅允许 `[a-z0-9-]`，长度 1-63。上游应自行 `.toLowerCase()` 并去除不允许的字符。
 
-5. **查询无需认证**：读取记录直接调用链上合约或通过 ENS 解析，无需 API 密钥。
+5. **私钥管理**：上游应用私钥用于签名请求，保存在环境变量或 Secrets 管理器中。若泄露，通知运维从白名单移除对应地址即可，其他应用不受影响。
+
+6. **查询无需认证**：读取记录直接调用链上合约，无需任何认证。
 
 ---
 

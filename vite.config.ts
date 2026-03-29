@@ -51,9 +51,19 @@ export default defineConfig({
 
         // ─── /api/v1 — upstream machine-to-machine API ──────────────────────
         //
-        // Authenticated with X-Api-Key header (value = UPSTREAM_API_KEY env var).
-        // Designed for upstream apps (e.g. registration flows) to auto-register
-        // subdomains without user interaction.
+        // Authentication: each request must be signed by a registered upstream app.
+        // The server maintains a whitelist of allowed signer addresses
+        // (UPSTREAM_ALLOWED_SIGNERS env var, comma-separated Ethereum addresses).
+        //
+        // Request body must include:
+        //   timestamp  — Unix seconds; rejected if |now - timestamp| > 60s (anti-replay)
+        //   signature  — secp256k1 signature of the canonical message (see below)
+        //
+        // Canonical message format (personal_sign):
+        //   "CometENS:register:{label}:{owner}:{timestamp}"
+        //
+        // Upstream app generates this with:
+        //   wallet.signMessage(`CometENS:register:${label}:${owner}:${timestamp}`)
 
         server.middlewares.use('/api/v1', async (req, res) => {
           const anyReq = req as any
@@ -67,39 +77,63 @@ export default defineConfig({
             return
           }
 
-          // ── API key authentication ─────────────────────────────────────────
-          const apiKey = process.env.UPSTREAM_API_KEY
-          if (!apiKey) {
-            res.statusCode = 503
-            res.end(JSON.stringify({ error: 'UPSTREAM_API_KEY not configured on server' }))
-            return
-          }
-          const providedKey = anyReq.headers['x-api-key'] as string | undefined
-          if (!providedKey || providedKey !== apiKey) {
-            res.statusCode = 401
-            res.end(JSON.stringify({ error: 'Unauthorized: invalid or missing X-Api-Key' }))
-            return
-          }
-
           const body = await readBody(anyReq)
 
           try {
-            const { isAddress, namehash, labelhash } = await import('viem')
+            const { isAddress, namehash, labelhash, recoverMessageAddress } = await import('viem')
             const payload = JSON.parse(body || '{}') as {
               label?: string
               owner?: string
-              addr?: string   // optional: set ETH addr record simultaneously
+              addr?: string
+              timestamp?: number
+              signature?: `0x${string}`
             }
 
-            // ── Input validation ─────────────────────────────────────────────
+            // ── Signature-based authentication ────────────────────────────────
+            const allowedRaw = process.env.UPSTREAM_ALLOWED_SIGNERS ?? ''
+            if (!allowedRaw) {
+              res.statusCode = 503
+              res.end(JSON.stringify({ error: 'UPSTREAM_ALLOWED_SIGNERS not configured on server' }))
+              return
+            }
+            const allowedSigners = allowedRaw.split(',').map((a) => a.trim().toLowerCase())
+
+            const { signature, timestamp } = payload
+            if (!signature || !signature.startsWith('0x')) {
+              res.statusCode = 401
+              res.end(JSON.stringify({ error: 'Missing signature' }))
+              return
+            }
+            if (!timestamp || typeof timestamp !== 'number') {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing or invalid timestamp' }))
+              return
+            }
+
+            // Anti-replay: timestamp must be within ±60 seconds of server time
+            const drift = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
+            if (drift > 60) {
+              res.statusCode = 401
+              res.end(JSON.stringify({ error: `Timestamp drift too large (${drift}s). Must be within 60s of server time.` }))
+              return
+            }
+
             const label = payload.label?.trim().toLowerCase()
             if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
               throw new Error('Invalid label: must be 1-63 lowercase alphanumeric or hyphen chars')
             }
-
             const owner = payload.owner as `0x${string}` | undefined
             if (!owner || !isAddress(owner)) {
               throw new Error('Invalid owner: must be a valid Ethereum address')
+            }
+
+            // Recover signer from canonical message
+            const message = `CometENS:register:${label}:${owner}:${timestamp}`
+            const recovered = await recoverMessageAddress({ message, signature })
+            if (!allowedSigners.includes(recovered.toLowerCase())) {
+              res.statusCode = 401
+              res.end(JSON.stringify({ error: `Signer ${recovered} is not in the allowed list` }))
+              return
             }
 
             const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
