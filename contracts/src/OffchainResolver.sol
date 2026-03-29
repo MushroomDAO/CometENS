@@ -4,7 +4,8 @@ pragma solidity ^0.8.20;
 /// @title OffchainResolver
 /// @notice EIP-3668 CCIP-Read resolver for ENS names.
 ///         When queried, reverts with OffchainLookup pointing to a gateway URL.
-///         The gateway returns signed data; this contract verifies the signature.
+///         The gateway returns signed data; this contract verifies the signature,
+///         binding it to the resolver address, expiry, original calldata, and result.
 contract OffchainResolver {
     address public owner;
     address public signerAddress;
@@ -19,6 +20,7 @@ contract OffchainResolver {
     );
     error Unauthorized();
     error InvalidSigner();
+    error InvalidSignatureLength();
     error SignatureExpired();
     error ZeroAddress();
 
@@ -76,9 +78,11 @@ contract OffchainResolver {
     }
 
     /// @notice Callback after the client receives the gateway response.
-    ///         Verifies the gateway signature then returns the resolved data.
+    ///         Verifies the gateway signature, binding it to this resolver address,
+    ///         expiry, the original calldata, and the result (EIP-3668 §4.1).
     /// @param response ABI-encoded (bytes result, uint64 expires, bytes signature)
-    function resolveWithProof(bytes calldata response, bytes calldata /* extraData */)
+    /// @param extraData ABI-encoded (bytes name, bytes callData) from the OffchainLookup
+    function resolveWithProof(bytes calldata response, bytes calldata extraData)
         external
         view
         returns (bytes memory)
@@ -88,18 +92,24 @@ contract OffchainResolver {
 
         if (block.timestamp > expires) revert SignatureExpired();
 
-        // The gateway signs: keccak256(abi.encodePacked(hex"1900", address(this), expires, keccak256(result)))
+        // Recover original callData to bind the signature to the specific request.
+        (, bytes memory callData) = abi.decode(extraData, (bytes, bytes));
+
+        // EIP-3668 signing scheme:
+        // keccak256(hex"1900" ++ address(this) ++ expires ++ keccak256(callData) ++ keccak256(result))
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 hex"1900",
                 address(this),
                 expires,
+                keccak256(callData),
                 keccak256(result)
             )
         );
         bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
         address recovered = _recover(ethHash, sig);
+        if (recovered == address(0)) revert InvalidSigner();
         if (recovered != signerAddress) revert InvalidSigner();
 
         return result;
@@ -108,7 +118,7 @@ contract OffchainResolver {
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     function _recover(bytes32 hash, bytes memory sig) internal pure returns (address) {
-        require(sig.length == 65, "bad sig length");
+        if (sig.length != 65) revert InvalidSignatureLength();
         bytes32 r;
         bytes32 s;
         uint8 v;

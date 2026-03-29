@@ -14,11 +14,45 @@ contract OffchainResolverTest is Test {
 
     string constant GATEWAY = "https://gateway.example.com/{sender}/{data}.json";
 
+    // Sample callData and extraData matching resolve() output
+    bytes constant CALL_DATA = hex"3b3b57deabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab";
+    bytes constant NAME_BYTES = bytes("alice.test.eth");
+
     function setUp() public {
         contractOwner = address(this);
         alice = makeAddr("alice");
         signerAddr = vm.addr(signerPrivateKey);
         resolver = new OffchainResolver(contractOwner, signerAddr, GATEWAY);
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    /// @dev Builds a valid gateway response matching the EIP-3668 signing scheme.
+    ///      Signs: keccak256(hex"1900" ++ resolver ++ expires ++ keccak256(callData) ++ keccak256(result))
+    function _buildResponse(bytes memory result, uint64 expires, bytes memory callData)
+        internal
+        view
+        returns (bytes memory response)
+    {
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                hex"1900",
+                address(resolver),
+                expires,
+                keccak256(callData),
+                keccak256(result)
+            )
+        );
+        bytes32 ethHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPrivateKey, ethHash);
+        bytes memory sig = abi.encodePacked(r, s, v);
+        response = abi.encode(result, expires, sig);
+    }
+
+    function _extraData() internal pure returns (bytes memory) {
+        return abi.encode(NAME_BYTES, CALL_DATA);
     }
 
     // ─── Constructor ──────────────────────────────────────────────────────────
@@ -57,70 +91,72 @@ contract OffchainResolverTest is Test {
         assertEq(resolver.gatewayUrl(), "https://new-gateway.com/{sender}/{data}.json");
     }
 
-    // ─── resolve() triggers OffchainLookup ────────────────────────────────────
+    // ─── resolve() triggers OffchainLookup ───────────────────────────────────
 
     function test_resolveRevertsWithOffchainLookup() public {
-        bytes memory name = bytes("alice.test.eth");
-        bytes memory data = hex"3b3b57de"; // addr(bytes32)
-
         vm.expectRevert();
-        resolver.resolve(name, data);
+        resolver.resolve(NAME_BYTES, CALL_DATA);
     }
 
     // ─── resolveWithProof ─────────────────────────────────────────────────────
 
-    function _buildResponse(bytes memory result, uint64 expires)
-        internal
-        view
-        returns (bytes memory response)
-    {
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(hex"1900", address(resolver), expires, keccak256(result))
-        );
-        bytes32 ethHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPrivateKey, ethHash);
-        bytes memory sig = abi.encodePacked(r, s, v);
-        response = abi.encode(result, expires, sig);
-    }
-
     function test_resolveWithProofValid() public {
         bytes memory result = abi.encode(alice);
         uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildResponse(result, expires);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA);
 
-        bytes memory returned = resolver.resolveWithProof(response, "");
+        bytes memory returned = resolver.resolveWithProof(response, _extraData());
         assertEq(abi.decode(returned, (address)), alice);
     }
 
     function test_revertExpiredSignature() public {
         bytes memory result = abi.encode(alice);
         uint64 expires = uint64(block.timestamp - 1);
-        bytes memory response = _buildResponse(result, expires);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA);
 
         vm.expectRevert(OffchainResolver.SignatureExpired.selector);
-        resolver.resolveWithProof(response, "");
+        resolver.resolveWithProof(response, _extraData());
     }
 
     function test_revertWrongSigner() public {
         bytes memory result = abi.encode(alice);
         uint64 expires = uint64(block.timestamp + 3600);
 
-        // Sign with a different key
         bytes32 messageHash = keccak256(
-            abi.encodePacked(hex"1900", address(resolver), expires, keccak256(result))
+            abi.encodePacked(
+                hex"1900", address(resolver), expires,
+                keccak256(CALL_DATA), keccak256(result)
+            )
         );
-        bytes32 ethHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
-        uint256 wrongKey = 0xBAD;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongKey, ethHash);
+        bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, ethHash);
         bytes memory sig = abi.encodePacked(r, s, v);
         bytes memory response = abi.encode(result, expires, sig);
 
         vm.expectRevert(OffchainResolver.InvalidSigner.selector);
-        resolver.resolveWithProof(response, "");
+        resolver.resolveWithProof(response, _extraData());
+    }
+
+    function test_revertInvalidSignatureLength() public {
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        bytes memory badSig = hex"1234"; // too short
+        bytes memory response = abi.encode(result, expires, badSig);
+
+        vm.expectRevert(OffchainResolver.InvalidSignatureLength.selector);
+        resolver.resolveWithProof(response, _extraData());
+    }
+
+    function test_revertSignatureDoesNotBindToCalldata() public {
+        // Sign for different callData — should fail because calldata binding check fails
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        bytes memory differentCallData = hex"deadbeef";
+        bytes memory response = _buildResponse(result, expires, differentCallData);
+
+        // resolveWithProof uses CALL_DATA from extraData, not differentCallData → sig mismatch
+        vm.expectRevert(OffchainResolver.InvalidSigner.selector);
+        resolver.resolveWithProof(response, _extraData());
     }
 
     // ─── supportsInterface ────────────────────────────────────────────────────

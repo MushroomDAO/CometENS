@@ -143,7 +143,7 @@ describe('handleResolve', () => {
 })
 
 describe('handleResolveSigned (no signer)', () => {
-  it('returns data without signature when no private key configured', async () => {
+  it('returns abi-encoded {data} with empty sig when no private key configured', async () => {
     const calldata = encodeFunctionData({
       abi: ADDR_ABI,
       functionName: 'addr',
@@ -154,7 +154,8 @@ describe('handleResolveSigned (no signer)', () => {
     const result = await handleResolveSigned(calldata)
 
     expect(result).toHaveProperty('data')
-    expect(result.signature).toBeUndefined()
     expect(result.data.startsWith('0x')).toBe(true)
+    // data should be abi.encode(result, expires, sig) — longer than just the result
+    expect(result.data.length).toBeGreaterThan(66)
   })
 })

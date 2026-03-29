@@ -2,9 +2,28 @@
 
 ## [Unreleased]
 
-### Milestone A — 可信签名 MVP（进行中）
+### Milestone A — 可信签名 MVP（代码完成，待链上部署）
 
-#### 已完成
+#### 安全修复（Security Review Pass）
+
+- **[SECURITY] OffchainResolver：签名绑定请求 calldata**（防重放攻击）
+  - 签名方案从 `keccak256(hex"1900" ++ resolver ++ expires ++ keccak256(result))` 升级为
+    `keccak256(hex"1900" ++ resolver ++ expires ++ keccak256(callData) ++ keccak256(result))`（EIP-3668 §4.1）
+  - 新增 `test_revertSignatureDoesNotBindToCalldata` 测试验证防重放
+- **[SECURITY] OffchainResolver：`_recover` 使用 custom error**
+  - 新增 `InvalidSignatureLength` 错误，替换 `require` 字符串
+  - 新增 `ecrecover` 返回 `address(0)` 的显式检查
+- **[SECURITY] Gateway：签名方案对齐 EIP-3668**
+  - `handleResolveSigned` 现在接受 `resolverAddress`，绑定 calldata 并返回正确的 `abi.encode(result, expires, sig)` 格式
+- **[SECURITY] vite.config.ts：请求体大小限制（10 KB）**
+- **[SECURITY] vite.config.ts：输入字段校验**（`isAddress`、`isHex`、字符串非空检查）
+
+#### 代码简化（Simplify Pass）
+
+- `server/gateway/index.ts`：提取 `RESOLVE_ABI` 常量，消除重复 ABI 定义
+- `vite.config.ts`：提取 `readBody`、`asBigInt`、`checkDeadline`、`withWriter` 工厂函数，消除 Worker EOA 实例化重复
+
+#### 已完成（含初始里程碑 A）
 
 - **测试框架**：集成 vitest + @vitest/coverage-v8，新增 `test` / `test:watch` / `test:coverage` 脚本
 - **L2Records.sol**：部署在 L2（Optimism）的 ENS 记录合约，支持 `addr`/`text`/`contenthash` 读写及 `setSubnodeOwner` 子域名分配
@@ -25,7 +44,7 @@
 | gateway.test.ts | vitest | 5/5 |
 | schemas.test.ts | vitest | 6/6 |
 | writer.test.ts | vitest | 5/5 |
-| **合计** | | **45/45** |
+| **合计** | | **56/56** |
 
 #### 待完成（需配置真实 env）
 

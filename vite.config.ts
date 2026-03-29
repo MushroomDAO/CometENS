@@ -1,11 +1,15 @@
 import { defineConfig } from 'vite'
 
+const MAX_BODY_BYTES = 10 * 1024 // 10 KB
+
 export default defineConfig({
   envPrefix: ['VITE_', 'OP_'],
   plugins: [
     {
       name: 'ccip-dev-gateway',
       configureServer(server) {
+        // ─── /api/ccip ──────────────────────────────────────────────────────
+
         server.middlewares.use('/api/ccip', async (req, res) => {
           const anyReq = req as any
 
@@ -16,22 +20,22 @@ export default defineConfig({
             return
           }
 
-          const body = await new Promise<string>((resolve, reject) => {
-            let data = ''
-            anyReq.on('data', (chunk: any) => {
-              data += String(chunk)
-            })
-            anyReq.on('end', () => resolve(data))
-            anyReq.on('error', reject)
-          })
+          const body = await readBody(anyReq)
 
           try {
-            const payload = JSON.parse(body || '{}') as { data?: `0x${string}`; calldata?: `0x${string}` }
-            const calldata = payload.calldata || payload.data
+            const payload = JSON.parse(body || '{}') as {
+              data?: `0x${string}`
+              calldata?: `0x${string}`
+              sender?: `0x${string}`
+            }
+            const calldata = payload.calldata ?? payload.data
             if (!calldata || !calldata.startsWith('0x')) throw new Error('Missing calldata')
 
+            // sender = L1 OffchainResolver address (from viem CCIP-Read request)
+            const resolverAddress = payload.sender ?? ('0x0000000000000000000000000000000000000000' as `0x${string}`)
+
             const { handleResolveSigned } = await import('./server/gateway/index')
-            const result = await handleResolveSigned(calldata)
+            const result = await handleResolveSigned(calldata, resolverAddress)
 
             res.statusCode = 200
             res.setHeader('content-type', 'application/json')
@@ -42,6 +46,8 @@ export default defineConfig({
             res.end(JSON.stringify({ error: (e as Error)?.message ?? String(e) }))
           }
         })
+
+        // ─── /api/manage ────────────────────────────────────────────────────
 
         server.middlewares.use('/api/manage', async (req, res) => {
           const anyReq = req as any
@@ -54,44 +60,35 @@ export default defineConfig({
             return
           }
 
-          const body = await new Promise<string>((resolve, reject) => {
-            let data = ''
-            anyReq.on('data', (chunk: any) => {
-              data += String(chunk)
-            })
-            anyReq.on('end', () => resolve(data))
-            anyReq.on('error', reject)
-          })
-
-          const asBigInt = (value: unknown) => {
-            if (typeof value === 'bigint') return value
-            if (typeof value === 'number') return BigInt(value)
-            if (typeof value === 'string') return BigInt(value)
-            throw new Error('Invalid bigint field')
-          }
+          const body = await readBody(anyReq)
 
           try {
             const payload = JSON.parse(body || '{}') as any
-            const { verifyTypedData, isAddress } = await import('viem')
+            const { verifyTypedData, isAddress, isHex } = await import('viem')
             const { buildDomain, RegisterTypes, SetAddrTypes } = await import('./server/gateway/manage/schemas')
             const { optimismSepolia } = await import('viem/chains')
 
             const from = payload.from as string | undefined
-            if (!from || !isAddress(from)) throw new Error('Invalid from')
+            if (!from || !isAddress(from)) throw new Error('Invalid from address')
+
             const signature = payload.signature as `0x${string}` | undefined
-            if (!signature || !signature.startsWith('0x')) throw new Error('Missing signature')
+            if (!signature || !isHex(signature)) throw new Error('Missing or invalid signature')
 
-            const chainId = optimismSepolia.id
-            const verifyingContract = (payload.domain?.verifyingContract ||
-              payload.domain?.verifying ||
-              payload.verifyingContract ||
-              payload.contract ||
-              '0x0000000000000000000000000000000000000000') as `0x${string}`
+            const verifyingContract = (
+              payload.domain?.verifyingContract ??
+              payload.verifyingContract ??
+              '0x0000000000000000000000000000000000000000'
+            ) as `0x${string}`
+            if (!isAddress(verifyingContract)) throw new Error('Invalid verifyingContract')
 
-            const domain = buildDomain(chainId, verifyingContract)
+            const domain = buildDomain(optimismSepolia.id, verifyingContract)
 
             if (url === '/set-addr') {
               const msg = payload.message ?? {}
+
+              if (!isHex(msg.node)) throw new Error('Invalid node')
+              if (!isAddress(msg.addr)) throw new Error('Invalid addr')
+
               const message = {
                 node: msg.node as `0x${string}`,
                 coinType: asBigInt(msg.coinType),
@@ -100,8 +97,7 @@ export default defineConfig({
                 deadline: asBigInt(msg.deadline),
               }
 
-              const now = BigInt(Math.floor(Date.now() / 1000))
-              if (message.deadline < now) throw new Error('Expired')
+              checkDeadline(message.deadline)
 
               const ok = await verifyTypedData({
                 address: from,
@@ -113,21 +109,9 @@ export default defineConfig({
               })
               if (!ok) throw new Error('Invalid signature')
 
-              // Execute L2 write via Worker EOA
-              const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
-              let txHash: string | undefined
-              if (workerPk) {
-                const { privateKeyToAccount } = await import('viem/accounts')
-                const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
-                const { optimismSepolia } = await import('viem/chains')
-                const workerAccount = privateKeyToAccount(workerPk)
-                const l2Address = (process.env.OP_L2_RECORDS_ADDRESS ||
-                  process.env.VITE_L2_RECORDS_ADDRESS ||
-                  '0x0000000000000000000000000000000000000000') as `0x${string}`
-                const rpcUrl = process.env.OP_SEPOLIA_RPC_URL || process.env.L2_RPC_URL || ''
-                const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
-                txHash = await writer.setAddr(message.node, message.coinType, message.addr)
-              }
+              const txHash = await withWriter(async (writer) =>
+                writer.setAddr(message.node, message.coinType, message.addr)
+              )
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
@@ -137,6 +121,11 @@ export default defineConfig({
 
             if (url === '/register') {
               const msg = payload.message ?? {}
+
+              if (typeof msg.parent !== 'string' || !msg.parent) throw new Error('Invalid parent')
+              if (typeof msg.label !== 'string' || !msg.label) throw new Error('Invalid label')
+              if (!isAddress(msg.owner)) throw new Error('Invalid owner')
+
               const message = {
                 parent: msg.parent as string,
                 label: msg.label as string,
@@ -145,8 +134,7 @@ export default defineConfig({
                 deadline: asBigInt(msg.deadline),
               }
 
-              const now = BigInt(Math.floor(Date.now() / 1000))
-              if (message.deadline < now) throw new Error('Expired')
+              checkDeadline(message.deadline)
 
               const ok = await verifyTypedData({
                 address: from,
@@ -158,24 +146,12 @@ export default defineConfig({
               })
               if (!ok) throw new Error('Invalid signature')
 
-              // Execute L2 write via Worker EOA
-              const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
-              let txHash: string | undefined
-              if (workerPk) {
-                const { privateKeyToAccount } = await import('viem/accounts')
+              const txHash = await withWriter(async (writer) => {
                 const { namehash, labelhash } = await import('viem/ens')
-                const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
-                const { optimismSepolia } = await import('viem/chains')
-                const workerAccount = privateKeyToAccount(workerPk)
-                const l2Address = (process.env.OP_L2_RECORDS_ADDRESS ||
-                  process.env.VITE_L2_RECORDS_ADDRESS ||
-                  '0x0000000000000000000000000000000000000000') as `0x${string}`
-                const rpcUrl = process.env.OP_SEPOLIA_RPC_URL || process.env.L2_RPC_URL || ''
-                const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
                 const parentNode = namehash(message.parent) as `0x${string}`
                 const labelHash = labelhash(message.label) as `0x${string}`
-                txHash = await writer.setSubnodeOwner(parentNode, labelHash, message.owner)
-              }
+                return writer.setSubnodeOwner(parentNode, labelHash, message.owner)
+              })
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
@@ -200,3 +176,56 @@ export default defineConfig({
     strictPort: true,
   },
 })
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function readBody(req: any): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('Request body too large'))
+        return
+      }
+      data += chunk.toString()
+    })
+    req.on('end', () => resolve(data))
+    req.on('error', reject)
+  })
+}
+
+function asBigInt(value: unknown): bigint {
+  if (typeof value === 'bigint') return value
+  if (typeof value === 'number') return BigInt(value)
+  if (typeof value === 'string') return BigInt(value)
+  throw new Error('Invalid bigint field')
+}
+
+function checkDeadline(deadline: bigint): void {
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  if (deadline < now) throw new Error('Expired')
+}
+
+async function withWriter<T>(
+  fn: (writer: import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter) => Promise<T>
+): Promise<T | undefined> {
+  const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
+  if (!workerPk) return undefined
+
+  const { privateKeyToAccount } = await import('viem/accounts')
+  const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
+  const { optimismSepolia } = await import('viem/chains')
+
+  const workerAccount = privateKeyToAccount(workerPk)
+  const l2Address = (
+    process.env.OP_L2_RECORDS_ADDRESS ??
+    process.env.VITE_L2_RECORDS_ADDRESS ??
+    '0x0000000000000000000000000000000000000000'
+  ) as `0x${string}`
+  const rpcUrl = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+
+  const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+  return fn(writer)
+}
