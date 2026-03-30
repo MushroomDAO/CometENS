@@ -1,3 +1,12 @@
 [submodule "vendor/unruggable-gateways"]
 	path = vendor/unruggable-gateways
 	url = git@github.com:unruggable-labs/unruggable-gateways-ens-resolution-demos.git
+[submodule "eval/CometENS-old"]
+	path = eval/CometENS-old
+	url = https://github.com/AAStarCommunity/CometENS-old
+[submodule "eval/CometENS"]
+	path = eval/CometENS
+	url = https://github.com/AAStarCommunity/CometENS
+[submodule "eval/ENS-offchain-resolver"]
+	path = eval/ENS-offchain-resolver
+	url = https://github.com/AAStarCommunity/ENS-offchain-resolver
