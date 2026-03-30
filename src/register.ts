@@ -1,7 +1,18 @@
-import { createWalletClient, custom } from 'viem'
+import { createWalletClient, createPublicClient, http, custom } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
+import { namehash } from 'viem/ens'
 import { config } from './config'
 import { RegisterTypes, buildDomain } from '../server/gateway/manage/schemas'
+
+// Minimal ABI for L2Records addr(bytes32) read
+const L2_ADDR_ABI = [
+  {
+    type: 'function', name: 'addr',
+    stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }],
+    outputs: [{ type: 'address' }],
+  },
+] as const
 
 // ─── DOM helpers ──────────────────────────────────────────────────────────────
 
@@ -187,6 +198,7 @@ async function register(): Promise<void> {
     const fullName = `${label}.${config.rootDomain}`
     const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
     setResult(`Registered: ${fullName}${txInfo}`, 'success')
+    showVerifyCard(fullName, connectedAddress!)
   } catch (e) {
     setResult((e as Error)?.message ?? String(e), 'error')
   } finally {
@@ -194,6 +206,90 @@ async function register(): Promise<void> {
       registerBtn.disabled = !connectedAddress
       registerBtn.textContent = 'Register Subdomain'
     }
+  }
+}
+
+// ─── Verify ───────────────────────────────────────────────────────────────────
+
+function showVerifyCard(fullName: string, owner: `0x${string}`) {
+  const card = byId('verifyCard')
+  const nameEl = byId('verifyName')
+  const linksEl = byId('verifyLinks')
+  if (!card || !nameEl || !linksEl) return
+
+  nameEl.textContent = fullName
+  card.classList.remove('hidden')
+
+  // Build external links
+  const node = namehash(fullName)
+  const l2Contract = config.l2RecordsAddress
+  const isTestnet = config.network === 'op-sepolia'
+
+  const etherscanBase = isTestnet
+    ? 'https://sepolia-optimism.etherscan.io'
+    : 'https://optimistic.etherscan.io'
+  const ensApp = isTestnet
+    ? `https://app.ens.domains/${fullName}?chain=sepolia`
+    : `https://app.ens.domains/${fullName}`
+
+  linksEl.innerHTML = [
+    `<a href="${etherscanBase}/address/${l2Contract}#readContract" target="_blank">L2Records on Etherscan</a>`,
+    `<a href="${ensApp}" target="_blank">ENS App</a>`,
+    `<a href="/eth.html" target="_blank">L2 Query Tool</a>`,
+    `<a href="${etherscanBase}/tx/${(byId('result')?.textContent ?? '').match(/0x[a-f0-9]{64}/i)?.[0] ?? ''}" target="_blank">View Tx</a>`,
+  ].join('')
+
+  // Wire verify button — passes owner so we can compare
+  const btn = byId<HTMLButtonElement>('verifyBtn')
+  if (btn) {
+    btn.onclick = () => verifyResolution(fullName, owner)
+  }
+}
+
+async function verifyResolution(fullName: string, expectedOwner: `0x${string}`) {
+  const resultEl = byId('verifyResult')
+  const btn = byId<HTMLButtonElement>('verifyBtn')
+  if (!resultEl) return
+
+  resultEl.className = 'verify-result pending'
+  resultEl.classList.remove('hidden')
+  resultEl.textContent = 'Querying L2Records…'
+  if (btn) btn.disabled = true
+
+  try {
+    const l2Chain = config.network === 'op-mainnet' ? optimism : optimismSepolia
+    const client = createPublicClient({ chain: l2Chain, transport: http(config.l2RpcUrl) })
+
+    const node = namehash(fullName) as `0x${string}`
+    const resolved = await client.readContract({
+      address: config.l2RecordsAddress,
+      abi: L2_ADDR_ABI,
+      functionName: 'addr',
+      args: [node],
+    })
+
+    const match = resolved.toLowerCase() === expectedOwner.toLowerCase()
+    resultEl.className = `verify-result ${match ? 'ok' : 'fail'}`
+    if (match) {
+      resultEl.innerHTML =
+        `✓ Resolved successfully<br>` +
+        `<strong>${fullName}</strong><br>` +
+        `→ <code>${resolved}</code>`
+    } else if (resolved === '0x0000000000000000000000000000000000000000') {
+      resultEl.innerHTML =
+        `⚠ Not found yet — the L2 transaction may still be confirming.<br>` +
+        `Wait ~10 seconds and try again.`
+    } else {
+      resultEl.innerHTML =
+        `⚠ Resolved to a different address:<br>` +
+        `<code>${resolved}</code><br>` +
+        `Expected: <code>${expectedOwner}</code>`
+    }
+  } catch (e) {
+    resultEl.className = 'verify-result fail'
+    resultEl.textContent = `Error: ${(e as Error).message}`
+  } finally {
+    if (btn) btn.disabled = false
   }
 }
 

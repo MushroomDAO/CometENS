@@ -36,6 +36,14 @@
     .btn-switch { padding: 4px 10px; font-size: 11px; background: #fff3e0; color: #e65100; border: 1px solid #ffb74d; border-radius: 4px; cursor: pointer; font-family: monospace; }
     .btn-switch:hover { background: #ffe0b2; }
     .hidden { display: none !important; }
+    .verify-name { font-size: 15px; font-weight: bold; color: #0b79d0; margin-bottom: 12px; }
+    .verify-result { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 12.5px; line-height: 1.7; }
+    .verify-result.ok { background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; }
+    .verify-result.fail { background: #fdecea; border: 1px solid #e57373; color: #c62828; }
+    .verify-result.pending { background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; }
+    .verify-links { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .verify-links a { font-size: 12px; color: #0b79d0; text-decoration: none; padding: 4px 10px; border: 1px solid #0b79d0; border-radius: 4px; }
+    .verify-links a:hover { background: #e3f2fd; }
 
     /* ── FAQ ── */
     .faq-section { margin-top: 40px; border-top: 1px solid #e6e6e6; padding-top: 24px; }
@@ -88,6 +96,14 @@
     <div class="step-label">STEP 3 — Register</div>
     <button class="btn-primary" id="registerBtn" disabled>Register Subdomain</button>
     <div class="result hidden" id="result"></div>
+  </div>
+
+  <div class="card hidden" id="verifyCard">
+    <div class="step-label">STEP 4 — Verify</div>
+    <div class="verify-name" id="verifyName"></div>
+    <button class="btn-secondary" id="verifyBtn">Check Resolution on L2</button>
+    <div class="verify-result hidden" id="verifyResult"></div>
+    <div class="verify-links" id="verifyLinks"></div>
   </div>
 
   <!-- ── FAQ ── -->
