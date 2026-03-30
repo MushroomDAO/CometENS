@@ -154,7 +154,7 @@ export default defineConfig(({ mode }) => {
 
               // Register subdomain (setSubnodeOwner on L2)
               const txHash = await withWriter((writer) =>
-                writer.setSubnodeOwner(parentNode, lh, owner)
+                writer.setSubnodeOwner(parentNode, lh, owner, label)
               )
 
               // Optionally set ETH addr record in the same call sequence
@@ -281,7 +281,7 @@ export default defineConfig(({ mode }) => {
                 const { namehash, labelhash } = await import('viem/ens')
                 const parentNode = namehash(message.parent) as `0x${string}`
                 const labelHash = labelhash(message.label) as `0x${string}`
-                return writer.setSubnodeOwner(parentNode, labelHash, message.owner)
+                return writer.setSubnodeOwner(parentNode, labelHash, message.owner, message.label)
               })
 
               res.statusCode = 200
