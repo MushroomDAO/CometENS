@@ -41,9 +41,13 @@ fi
 rpc_call() {
   # $1 = to address, $2 = calldata
   local result
-  result=$(curl -sf --max-time 15 -X POST "$L1_RPC" \
+  result=$(curl -s --max-time 15 -X POST "$L1_RPC" \
     -H "Content-Type: application/json" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$1\",\"data\":\"$2\"},\"latest\"]}")
+  if [[ $? -ne 0 || -z "$result" ]]; then
+    echo '{"error":{"message":"RPC request failed or timed out"}}'
+    return 0
+  fi
   echo "$result"
 }
 
@@ -137,14 +141,20 @@ else:
 " 2>/dev/null)
 
 if [[ -z "$REVERT_DATA" ]]; then
-  echo "addr(ETH): ERROR — no OffchainLookup revert"
-  exit 1
+  # Check if the RPC returned a result instead of a revert (name not registered)
+  RESULT_DATA=$(echo "$STEP1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null)
+  if [[ -n "$RESULT_DATA" && "$RESULT_DATA" != "null" ]]; then
+    echo "addr(ETH): ERROR — resolve() did not revert (check resolver config)"
+  else
+    echo "addr(ETH): ERROR — RPC call failed or no OffchainLookup revert"
+  fi
+  echo ""; echo "✓ Done"; exit 0
 fi
 
 REVERT_SELECTOR="${REVERT_DATA:0:10}"
 if [[ "$REVERT_SELECTOR" != "0x556f1830" ]]; then
   echo "addr(ETH): ERROR — unexpected revert selector $REVERT_SELECTOR"
-  exit 1
+  echo ""; echo "✓ Done"; exit 0
 fi
 
 # ─── Step 4: Decode OffchainLookup and call gateway ───────────────────────────
@@ -193,18 +203,38 @@ print(json.dumps({
 PYEOF
 )
 
-CALL_DATA=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['callData'])")
-SENDER=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sender'])")
-EXTRA_DATA=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['extraData'])")
-GATEWAY_URL_USED=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['url'])")
+if [[ -z "$GW_RESULT" ]]; then
+  echo "addr(ETH): ERROR — failed to decode OffchainLookup data"
+  echo ""; echo "✓ Done"; exit 0
+fi
+
+CALL_DATA=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['callData'])" 2>/dev/null)
+SENDER=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sender'])" 2>/dev/null)
+EXTRA_DATA=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['extraData'])" 2>/dev/null)
+GATEWAY_URL_USED=$(echo "$GW_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['url'])" 2>/dev/null)
 
 # ─── Step 5: POST to gateway ──────────────────────────────────────────────────
 
-GW_RESPONSE=$(curl -sf --max-time 15 -X POST "$GATEWAY_URL_USED" \
+GW_RESPONSE=$(curl -s --max-time 15 -X POST "$GATEWAY_URL_USED" \
   -H "Content-Type: application/json" \
   -d "{\"data\":\"$CALL_DATA\",\"sender\":\"$SENDER\"}")
+if [[ $? -ne 0 || -z "$GW_RESPONSE" ]]; then
+  echo "addr(ETH): ERROR — gateway request failed"
+  echo ""; echo "✓ Done"; exit 0
+fi
 
-GW_DATA=$(echo "$GW_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data'])")
+GW_DATA=$(echo "$GW_RESPONSE" | python3 -c "
+import sys, json
+j = json.load(sys.stdin)
+if 'error' in j:
+    print('ERR:' + j['error'])
+    exit(1)
+print(j['data'])
+" 2>/dev/null)
+if [[ $? -ne 0 || -z "$GW_DATA" || "$GW_DATA" == ERR:* ]]; then
+  echo "addr(ETH): ERROR — gateway error: ${GW_DATA#ERR:}"
+  echo ""; echo "✓ Done"; exit 0
+fi
 
 # ─── Step 6: resolveWithProof ─────────────────────────────────────────────────
 

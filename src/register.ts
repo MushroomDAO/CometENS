@@ -18,6 +18,18 @@ const L2_READ_ABI = [
     inputs: [{ name: 'node', type: 'bytes32' }],
     outputs: [{ type: 'address' }],
   },
+  {
+    type: 'function', name: 'primaryNode',
+    stateMutability: 'view',
+    inputs: [{ name: 'addr_', type: 'address' }],
+    outputs: [{ type: 'bytes32' }],
+  },
+  {
+    type: 'function', name: 'labelOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }],
+    outputs: [{ type: 'string' }],
+  },
 ] as const
 
 function getL2Client() {
@@ -166,12 +178,40 @@ function getRegistrationFor(address: string): RegistrationRecord | undefined {
 }
 
 async function checkExistingRegistration(address: string) {
+  // Primary: query L2Records on-chain — works without server, always current
+  try {
+    const client = getL2Client()
+    const ZERO_NODE = '0x0000000000000000000000000000000000000000000000000000000000000000'
+    const node = await client.readContract({
+      address: config.l2RecordsAddress,
+      abi: L2_READ_ABI,
+      functionName: 'primaryNode',
+      args: [address as `0x${string}`],
+    })
+    if (node && node !== ZERO_NODE) {
+      const label = await client.readContract({
+        address: config.l2RecordsAddress,
+        abi: L2_READ_ABI,
+        functionName: 'labelOf',
+        args: [node],
+      })
+      if (label) {
+        const fullName = `${label}.${config.rootDomain}`
+        saveRegistration(address, label, fullName)
+        showExistingBanner({ address, label, fullName })
+        return
+      }
+    }
+  } catch {
+    // Chain unreachable — fall through to server cache
+  }
+
+  // Fallback: server cache (for dev server mode)
   try {
     const res = await fetch(`/api/manage/lookup?address=${encodeURIComponent(address)}`)
     if (res.ok) {
       const json = await res.json() as { found: boolean; label?: string; fullName?: string }
       if (json.found && json.label && json.fullName) {
-        // Server is authoritative — save to localStorage and show banner
         saveRegistration(address, json.label, json.fullName)
         showExistingBanner({ address, label: json.label, fullName: json.fullName })
         return
@@ -180,7 +220,8 @@ async function checkExistingRegistration(address: string) {
   } catch {
     // server unreachable — fall through to localStorage cache
   }
-  // Fallback: use cached localStorage entry from a previous session
+
+  // Last resort: localStorage from a previous session
   const cached = getRegistrationFor(address)
   if (cached) showExistingBanner(cached)
 }
@@ -337,15 +378,16 @@ function showVerifyCard(fullName: string, owner: `0x${string}`) {
     ? 'https://sepolia-optimism.etherscan.io'
     : 'https://optimistic.etherscan.io'
   const ensApp = isTestnet
-    ? `https://app.ens.domains/${fullName}?chain=sepolia`
+    ? `https://sepolia.app.ens.domains/${fullName}`
     : `https://app.ens.domains/${fullName}`
 
-  linksEl.innerHTML = [
+  const txHash = (byId('result')?.textContent ?? '').match(/0x[a-f0-9]{64}/i)?.[0] ?? ''
+  const links = [
+    `<a href="${ensApp}" target="_blank" style="background:#0b79d0;color:#fff;border-color:#0b79d0">View on ENS App</a>`,
     `<a href="${etherscanBase}/address/${l2Contract}#readContract" target="_blank">L2Records on Etherscan</a>`,
-    `<a href="${ensApp}" target="_blank">ENS App</a>`,
-    `<a href="${etherscanBase}/address/${l2Contract}" target="_blank">L2Records on Etherscan</a>`,
-    `<a href="${etherscanBase}/tx/${(byId('result')?.textContent ?? '').match(/0x[a-f0-9]{64}/i)?.[0] ?? ''}" target="_blank">View Tx</a>`,
-  ].join('')
+  ]
+  if (txHash) links.push(`<a href="${etherscanBase}/tx/${txHash}" target="_blank">View Tx</a>`)
+  linksEl.innerHTML = links.join('')
 
   // Wire verify button — passes owner so we can compare
   const btn = byId<HTMLButtonElement>('verifyBtn')
