@@ -5,6 +5,7 @@ pragma solidity ^0.8.20;
 /// @notice Stores ENS subdomain records on L2 (Optimism).
 ///         Manages addr, text, and contenthash records per namehash node,
 ///         and tracks subdomain ownership via setSubnodeOwner.
+///         Stores label text on-chain (Durin-style) enabling reverse lookup.
 contract L2Records {
     address public owner;
 
@@ -16,11 +17,16 @@ contract L2Records {
     mapping(bytes32 => bytes) private _contenthashes;
     // node => owner address
     mapping(bytes32 => address) private _owners;
+    // node => DNS-encoded leaf name (e.g. "\x05alice\x00")
+    mapping(bytes32 => bytes) private _names;
+    // address => primary node (first subdomain registered by this address under any parent)
+    mapping(address => bytes32) private _primaryNode;
 
     event AddrSet(bytes32 indexed node, uint256 coinType, bytes addr);
     event TextSet(bytes32 indexed node, string indexed key, string value);
     event ContenthashSet(bytes32 indexed node, bytes contenthash);
     event SubnodeOwnerSet(bytes32 indexed parentNode, bytes32 indexed labelhash, bytes32 indexed node, address subnodeOwner);
+    event NameRegistered(bytes32 indexed node, bytes32 indexed parentNode, string label, address owner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     error Unauthorized();
@@ -48,14 +54,44 @@ contract L2Records {
     // ─── Subdomain ownership ──────────────────────────────────────────────────
 
     /// @notice Assigns ownership of a subdomain node. Node = keccak256(abi.encodePacked(parentNode, labelhash)).
-    function setSubnodeOwner(bytes32 parentNode, bytes32 labelhash, address newOwner) external onlyOwner {
+    ///         Also stores the label in DNS wire format and sets primaryNode for first-time registrants.
+    function setSubnodeOwner(bytes32 parentNode, bytes32 labelhash, address newOwner, string calldata label) external onlyOwner {
         bytes32 node = keccak256(abi.encodePacked(parentNode, labelhash));
         _owners[node] = newOwner;
+        _names[node] = _encodeDnsName(label);
+        if (_primaryNode[newOwner] == bytes32(0)) {
+            _primaryNode[newOwner] = node;
+        }
         emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);
+        emit NameRegistered(node, parentNode, label, newOwner);
     }
 
     function subnodeOwner(bytes32 node) external view returns (address) {
         return _owners[node];
+    }
+
+    // ─── Label/name storage ───────────────────────────────────────────────────
+
+    /// @notice Returns the stored DNS-encoded name for a node
+    function nameOf(bytes32 node) external view returns (bytes memory) {
+        return _names[node];
+    }
+
+    /// @notice Returns the label string for a node (decoded from stored DNS name)
+    function labelOf(bytes32 node) external view returns (string memory) {
+        bytes memory encoded = _names[node];
+        if (encoded.length < 2) return "";
+        uint8 len = uint8(encoded[0]);
+        bytes memory label = new bytes(len);
+        for (uint i = 0; i < len; i++) {
+            label[i] = encoded[i + 1];
+        }
+        return string(label);
+    }
+
+    /// @notice Returns the primary node for an address (first registered subdomain)
+    function primaryNode(address addr_) external view returns (bytes32) {
+        return _primaryNode[addr_];
     }
 
     // ─── Write records ────────────────────────────────────────────────────────
@@ -99,5 +135,19 @@ contract L2Records {
 
     function contenthash(bytes32 node) external view returns (bytes memory) {
         return _contenthashes[node];
+    }
+
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /// @dev Encodes a label in DNS wire format: <len><label bytes><0x00>
+    function _encodeDnsName(string calldata label) private pure returns (bytes memory) {
+        bytes memory labelBytes = bytes(label);
+        bytes memory encoded = new bytes(labelBytes.length + 2);
+        encoded[0] = bytes1(uint8(labelBytes.length));
+        for (uint i = 0; i < labelBytes.length; i++) {
+            encoded[i + 1] = labelBytes[i];
+        }
+        encoded[labelBytes.length + 1] = 0x00;
+        return encoded;
     }
 }
