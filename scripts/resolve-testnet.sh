@@ -8,7 +8,7 @@
 #   bash scripts/resolve-testnet.sh alice.aastar.eth
 #   bash scripts/resolve-testnet.sh          # defaults to alice.aastar.eth
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -225,13 +225,16 @@ fi
 
 GW_DATA=$(echo "$GW_RESPONSE" | python3 -c "
 import sys, json
-j = json.load(sys.stdin)
-if 'error' in j:
-    print('ERR:' + j['error'])
-    exit(1)
-print(j['data'])
+try:
+    j = json.load(sys.stdin)
+    if 'error' in j:
+        print('ERR:' + str(j['error']))
+    else:
+        print(j['data'])
+except Exception as e:
+    print('ERR:' + str(e))
 " 2>/dev/null)
-if [[ $? -ne 0 || -z "$GW_DATA" || "$GW_DATA" == ERR:* ]]; then
+if [[ -z "$GW_DATA" || "$GW_DATA" == ERR:* ]]; then
   echo "addr(ETH): ERROR — gateway error: ${GW_DATA#ERR:}"
   echo ""; echo "✓ Done"; exit 0
 fi
