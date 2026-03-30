@@ -198,7 +198,7 @@ describe('E2E: CCIP-Read resolution flow', () => {
     // Deploy OffchainResolver on L1 (gateway URL points to our local server)
     resolverAddr = await deployContract(
       'OffchainResolver',
-      [deployer.address, signer.address, `http://127.0.0.1:${GW_PORT}`],
+      [deployer.address, [signer.address], `http://127.0.0.1:${GW_PORT}`],
       L1_PORT,
       l1Chain,
     )
