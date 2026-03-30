@@ -9,8 +9,10 @@ contract OffchainResolverTest is Test {
     address public contractOwner;
     address public alice;
 
-    uint256 signerPrivateKey = 0xA11CE;
-    address signerAddr;
+    uint256 signer1PrivateKey = 0xA11CE;
+    uint256 signer2PrivateKey = 0xB0B;
+    address signer1Addr;
+    address signer2Addr;
 
     string constant GATEWAY = "https://gateway.example.com/{sender}/{data}.json";
 
@@ -21,15 +23,19 @@ contract OffchainResolverTest is Test {
     function setUp() public {
         contractOwner = address(this);
         alice = makeAddr("alice");
-        signerAddr = vm.addr(signerPrivateKey);
-        resolver = new OffchainResolver(contractOwner, signerAddr, GATEWAY);
+        signer1Addr = vm.addr(signer1PrivateKey);
+        signer2Addr = vm.addr(signer2PrivateKey);
+
+        address[] memory initialSigners = new address[](2);
+        initialSigners[0] = signer1Addr;
+        initialSigners[1] = signer2Addr;
+        resolver = new OffchainResolver(contractOwner, initialSigners, GATEWAY);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
-    /// @dev Builds a valid gateway response matching the EIP-3668 signing scheme.
-    ///      Signs: keccak256(hex"1900" ++ resolver ++ expires ++ keccak256(callData) ++ keccak256(result))
-    function _buildResponse(bytes memory result, uint64 expires, bytes memory callData)
+    /// @dev Builds a valid gateway response using the given private key.
+    function _buildResponse(bytes memory result, uint64 expires, bytes memory callData, uint256 privateKey)
         internal
         view
         returns (bytes memory response)
@@ -46,9 +52,18 @@ contract OffchainResolverTest is Test {
         bytes32 ethHash = keccak256(
             abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
         );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPrivateKey, ethHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, ethHash);
         bytes memory sig = abi.encodePacked(r, s, v);
         response = abi.encode(result, expires, sig);
+    }
+
+    /// @dev Convenience: build response signed by signer1 (default).
+    function _buildResponse(bytes memory result, uint64 expires, bytes memory callData)
+        internal
+        view
+        returns (bytes memory response)
+    {
+        return _buildResponse(result, expires, callData, signer1PrivateKey);
     }
 
     function _extraData() internal pure returns (bytes memory) {
@@ -57,33 +72,76 @@ contract OffchainResolverTest is Test {
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    function test_ownerAndSignerSet() public view {
+    function test_ownerAndSignersSet() public view {
         assertEq(resolver.owner(), contractOwner);
-        assertEq(resolver.signerAddress(), signerAddr);
+        assertTrue(resolver.signers(signer1Addr), "signer1 should be active");
+        assertTrue(resolver.signers(signer2Addr), "signer2 should be active");
         assertEq(resolver.gatewayUrl(), GATEWAY);
     }
 
     function test_revertZeroOwner() public {
+        address[] memory s = new address[](1);
+        s[0] = signer1Addr;
         vm.expectRevert(OffchainResolver.ZeroAddress.selector);
-        new OffchainResolver(address(0), signerAddr, GATEWAY);
+        new OffchainResolver(address(0), s, GATEWAY);
     }
 
     function test_revertZeroSigner() public {
+        address[] memory s = new address[](1);
+        s[0] = address(0);
         vm.expectRevert(OffchainResolver.ZeroAddress.selector);
-        new OffchainResolver(contractOwner, address(0), GATEWAY);
+        new OffchainResolver(contractOwner, s, GATEWAY);
     }
 
-    // ─── Admin ────────────────────────────────────────────────────────────────
-
-    function test_setSigner() public {
-        resolver.setSigner(alice);
-        assertEq(resolver.signerAddress(), alice);
+    function test_emptySignerArrayAllowed() public {
+        address[] memory s = new address[](0);
+        OffchainResolver r = new OffchainResolver(contractOwner, s, GATEWAY);
+        assertEq(r.owner(), contractOwner);
     }
 
-    function test_revertSetSignerNotOwner() public {
+    // ─── addSigner / removeSigner ─────────────────────────────────────────────
+
+    function test_addSigner() public {
+        address newSigner = makeAddr("newSigner");
+        assertFalse(resolver.signers(newSigner));
+        resolver.addSigner(newSigner);
+        assertTrue(resolver.signers(newSigner));
+    }
+
+    function test_addSignerEmitsEvent() public {
+        address newSigner = makeAddr("newSigner");
+        vm.expectEmit(true, false, false, false);
+        emit OffchainResolver.SignerAdded(newSigner);
+        resolver.addSigner(newSigner);
+    }
+
+    function test_revertAddSignerNotOwner() public {
         vm.prank(alice);
         vm.expectRevert(OffchainResolver.Unauthorized.selector);
-        resolver.setSigner(alice);
+        resolver.addSigner(alice);
+    }
+
+    function test_revertAddSignerZeroAddress() public {
+        vm.expectRevert(OffchainResolver.ZeroAddress.selector);
+        resolver.addSigner(address(0));
+    }
+
+    function test_removeSigner() public {
+        assertTrue(resolver.signers(signer1Addr));
+        resolver.removeSigner(signer1Addr);
+        assertFalse(resolver.signers(signer1Addr));
+    }
+
+    function test_removeSignerEmitsEvent() public {
+        vm.expectEmit(true, false, false, false);
+        emit OffchainResolver.SignerRemoved(signer1Addr);
+        resolver.removeSigner(signer1Addr);
+    }
+
+    function test_revertRemoveSignerNotOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(OffchainResolver.Unauthorized.selector);
+        resolver.removeSigner(signer1Addr);
     }
 
     function test_setGatewayUrl() public {
@@ -98,12 +156,56 @@ contract OffchainResolverTest is Test {
         resolver.resolve(NAME_BYTES, CALL_DATA);
     }
 
-    // ─── resolveWithProof ─────────────────────────────────────────────────────
+    // ─── resolveWithProof — multi-signer ─────────────────────────────────────
 
-    function test_resolveWithProofValid() public {
+    function test_resolveWithProofSigner1() public {
         bytes memory result = abi.encode(alice);
         uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildResponse(result, expires, CALL_DATA);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA, signer1PrivateKey);
+
+        bytes memory returned = resolver.resolveWithProof(response, _extraData());
+        assertEq(abi.decode(returned, (address)), alice);
+    }
+
+    function test_resolveWithProofSigner2() public {
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA, signer2PrivateKey);
+
+        bytes memory returned = resolver.resolveWithProof(response, _extraData());
+        assertEq(abi.decode(returned, (address)), alice);
+    }
+
+    function test_revertInvalidSignerNotInMapping() public {
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        // 0xBAD is not in the signers mapping
+        bytes memory response = _buildResponse(result, expires, CALL_DATA, 0xBAD);
+
+        vm.expectRevert(OffchainResolver.InvalidSigner.selector);
+        resolver.resolveWithProof(response, _extraData());
+    }
+
+    function test_revertAfterSignerRemoved() public {
+        // Remove signer1 — their signatures should now be rejected
+        resolver.removeSigner(signer1Addr);
+
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA, signer1PrivateKey);
+
+        vm.expectRevert(OffchainResolver.InvalidSigner.selector);
+        resolver.resolveWithProof(response, _extraData());
+    }
+
+    function test_resolveWithProofAfterSignerAdded() public {
+        uint256 newKey = 0xC0FFEE;
+        address newSignerAddr = vm.addr(newKey);
+        resolver.addSigner(newSignerAddr);
+
+        bytes memory result = abi.encode(alice);
+        uint64 expires = uint64(block.timestamp + 3600);
+        bytes memory response = _buildResponse(result, expires, CALL_DATA, newKey);
 
         bytes memory returned = resolver.resolveWithProof(response, _extraData());
         assertEq(abi.decode(returned, (address)), alice);
@@ -115,25 +217,6 @@ contract OffchainResolverTest is Test {
         bytes memory response = _buildResponse(result, expires, CALL_DATA);
 
         vm.expectRevert(OffchainResolver.SignatureExpired.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    function test_revertWrongSigner() public {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                hex"1900", address(resolver), expires,
-                keccak256(CALL_DATA), keccak256(result)
-            )
-        );
-        bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, ethHash);
-        bytes memory sig = abi.encodePacked(r, s, v);
-        bytes memory response = abi.encode(result, expires, sig);
-
-        vm.expectRevert(OffchainResolver.InvalidSigner.selector);
         resolver.resolveWithProof(response, _extraData());
     }
 
@@ -167,5 +250,15 @@ contract OffchainResolverTest is Test {
 
     function test_supportsExtendedResolver() public view {
         assertTrue(resolver.supportsInterface(0x9061b923));
+    }
+
+    function test_supportsIERC7996() public view {
+        assertTrue(resolver.supportsInterface(0x582de3e7));
+    }
+
+    function test_supportsFeatureReturnsFalse() public view {
+        assertFalse(resolver.supportsFeature(0x12345678));
+        assertFalse(resolver.supportsFeature(0x00000000));
+        assertFalse(resolver.supportsFeature(0xffffffff));
     }
 }

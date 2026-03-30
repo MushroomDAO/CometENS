@@ -10,14 +10,17 @@ contract DeployOffchainResolver is Script {
         address signerAddr = vm.envAddress("SIGNER_ADDRESS");
         string memory gatewayUrl = vm.envString("GATEWAY_URL");
 
+        address[] memory initialSigners = new address[](1);
+        initialSigners[0] = signerAddr;
+
         vm.startBroadcast();
 
-        OffchainResolver resolver = new OffchainResolver(deployer, signerAddr, gatewayUrl);
+        OffchainResolver resolver = new OffchainResolver(deployer, initialSigners, gatewayUrl);
 
         vm.stopBroadcast();
         console.log("OffchainResolver deployed at:", address(resolver));
         console.log("Owner:", resolver.owner());
-        console.log("Signer:", resolver.signerAddress());
+        console.log("IsSigner:", resolver.signers(signerAddr));
         console.log("Gateway:", resolver.gatewayUrl());
     }
 }

@@ -8,7 +8,7 @@ pragma solidity ^0.8.20;
 ///         binding it to the resolver address, expiry, original calldata, and result.
 contract OffchainResolver {
     address public owner;
-    address public signerAddress;
+    mapping(address => bool) public signers;
     string public gatewayUrl;
 
     error OffchainLookup(
@@ -24,7 +24,8 @@ contract OffchainResolver {
     error SignatureExpired();
     error ZeroAddress();
 
-    event SignerUpdated(address indexed previous, address indexed next);
+    event SignerAdded(address indexed signer);
+    event SignerRemoved(address indexed signer);
     event GatewayUrlUpdated(string previous, string next);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -33,13 +34,19 @@ contract OffchainResolver {
         _;
     }
 
-    constructor(address _owner, address _signer, string memory _gatewayUrl) {
-        if (_owner == address(0) || _signer == address(0)) revert ZeroAddress();
+    /// @param _owner      Contract owner address
+    /// @param _signers    Initial set of authorized gateway signers
+    /// @param _gatewayUrl CCIP-Read gateway URL template
+    constructor(address _owner, address[] memory _signers, string memory _gatewayUrl) {
+        if (_owner == address(0)) revert ZeroAddress();
         owner = _owner;
-        signerAddress = _signer;
         gatewayUrl = _gatewayUrl;
         emit OwnershipTransferred(address(0), _owner);
-        emit SignerUpdated(address(0), _signer);
+        for (uint256 i = 0; i < _signers.length; i++) {
+            if (_signers[i] == address(0)) revert ZeroAddress();
+            signers[_signers[i]] = true;
+            emit SignerAdded(_signers[i]);
+        }
     }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
@@ -50,10 +57,15 @@ contract OffchainResolver {
         owner = newOwner;
     }
 
-    function setSigner(address newSigner) external onlyOwner {
-        if (newSigner == address(0)) revert ZeroAddress();
-        emit SignerUpdated(signerAddress, newSigner);
-        signerAddress = newSigner;
+    function addSigner(address signer) external onlyOwner {
+        if (signer == address(0)) revert ZeroAddress();
+        signers[signer] = true;
+        emit SignerAdded(signer);
+    }
+
+    function removeSigner(address signer) external onlyOwner {
+        signers[signer] = false;
+        emit SignerRemoved(signer);
     }
 
     function setGatewayUrl(string calldata newUrl) external onlyOwner {
@@ -110,7 +122,7 @@ contract OffchainResolver {
 
         address recovered = _recover(ethHash, sig);
         if (recovered == address(0)) revert InvalidSigner();
-        if (recovered != signerAddress) revert InvalidSigner();
+        if (!signers[recovered]) revert InvalidSigner();
 
         return result;
     }
@@ -134,6 +146,14 @@ contract OffchainResolver {
     /// @notice EIP-165 supportsInterface
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return interfaceId == 0x01ffc9a7 // EIP-165
-            || interfaceId == 0x9061b923; // IExtendedResolver
+            || interfaceId == 0x9061b923 // IExtendedResolver
+            || interfaceId == 0x582de3e7; // IERC7996
+    }
+
+    /// @notice IERC7996 feature detection stub.
+    ///         Returns false for all feature IDs for now; presence of this function
+    ///         signals IERC7996 support to the UniversalResolver.
+    function supportsFeature(bytes4 /*featureId*/) external pure returns (bool) {
+        return false;
     }
 }

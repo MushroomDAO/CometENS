@@ -1,3 +1,6 @@
 [submodule "vendor/unruggable-gateways"]
 	path = vendor/unruggable-gateways
 	url = git@github.com:unruggable-labs/unruggable-gateways-ens-resolution-demos.git
+[submodule "eval/durin"]
+	path = eval/durin
+	url = https://github.com/namestonehq/durin
