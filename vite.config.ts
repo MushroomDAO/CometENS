@@ -216,7 +216,7 @@ export default defineConfig(({ mode }) => {
               const { createPublicClient, http: viemHttp } = await import('viem')
               const { optimismSepolia: opSep } = await import('viem/chains')
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
-              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? ''
+              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
               const SUBNODE_ABI = [{ type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }] as const
               const node = nh(`${label}.${parent}`) as `0x${string}`
               const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
@@ -353,7 +353,7 @@ export default defineConfig(({ mode }) => {
               const { optimismSepolia: opSep } = await import('viem/chains')
 
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
-              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? ''
+              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
               const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
 
               const SUBNODE_ABI = [

@@ -14,10 +14,8 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  keccak256,
   toBytes,
   toHex,
-  encodePacked,
   namehash,
   type Hex,
   type Address,
@@ -149,13 +147,9 @@ function startApiServer(l2RecordsAddr: Address, allowedSigners: Address[]): Serv
       const fullName = `${label}.${ROOT_DOMAIN}`
       const node = namehash(fullName) as Hex
 
-      const txHash = await withWriter(w => w.setSubnodeOwner(parentNode, lh, owner))
-
       const addrTarget = (payload.addr ?? owner) as Address
-      if (isAddress(addrTarget)) {
-        const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as Hex
-        await withWriter(w => w.setAddr(node, 60n, addrBytes))
-      }
+      const addrBytes = toHex(toBytes(isAddress(addrTarget) ? addrTarget : owner), { size: 20 }) as Hex
+      const txHash = await withWriter(w => w.registerSubnode(parentNode, lh, owner, label, addrBytes))
 
       res.writeHead(200)
       res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))

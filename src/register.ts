@@ -200,11 +200,7 @@ function showExistingBanner(rec: RegistrationRecord) {
   if (!banner) {
     banner = document.createElement('div')
     banner.id = 'existingBanner'
-    banner.style.cssText = [
-      'margin-top:16px', 'padding:12px 16px', 'border-radius:6px',
-      'background:#e3f2fd', 'border:1px solid #90caf9', 'color:#1565c0',
-      'font-size:13px', 'line-height:1.6',
-    ].join(';')
+    banner.className = 'existing-banner'
     const card = byId('verifyCard')?.parentElement ?? document.body
     // insert before the register card
     const registerCard = byId('registerBtn')?.closest('.card')
@@ -215,10 +211,10 @@ function showExistingBanner(rec: RegistrationRecord) {
     }
   }
   banner.innerHTML =
-    `ℹ️ This wallet already has a subdomain: ` +
+    `This wallet already has a subdomain: ` +
     `<strong>${rec.fullName}</strong> — ` +
-    `<a href="/eth.html" style="color:#0b79d0">manage records</a> · ` +
-    `<a href="#" id="forceRegisterLink" style="color:#0b79d0">register another</a>`
+    `<a href="/eth.html">manage records</a> · ` +
+    `<a href="#" id="forceRegisterLink">register another</a>`
 
   byId('forceRegisterLink')?.addEventListener('click', (e) => {
     e.preventDefault()
