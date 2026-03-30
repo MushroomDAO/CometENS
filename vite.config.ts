@@ -106,92 +106,39 @@ export default defineConfig(({ mode }) => {
             return
           }
 
-          const body = await readBody(anyReq)
+          const allowedRaw = process.env.UPSTREAM_ALLOWED_SIGNERS ?? ''
+          if (!allowedRaw) {
+            res.statusCode = 503
+            res.end(JSON.stringify({ error: 'UPSTREAM_ALLOWED_SIGNERS not configured on server' }))
+            return
+          }
 
-          try {
-            const { isAddress, namehash, labelhash, recoverMessageAddress } = await import('viem')
-            const payload = JSON.parse(body || '{}') as {
-              label?: string
-              owner?: string
-              addr?: string
-              timestamp?: number
-              signature?: `0x${string}`
-            }
+          const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
+          if (!rootDomain) {
+            res.statusCode = 503
+            res.end(JSON.stringify({ error: 'VITE_ROOT_DOMAIN not configured on server' }))
+            return
+          }
 
-            // ── Signature-based authentication ────────────────────────────────
-            const allowedRaw = process.env.UPSTREAM_ALLOWED_SIGNERS ?? ''
-            if (!allowedRaw) {
-              res.statusCode = 503
-              res.end(JSON.stringify({ error: 'UPSTREAM_ALLOWED_SIGNERS not configured on server' }))
-              return
-            }
-            const allowedSigners = allowedRaw.split(',').map((a) => a.trim().toLowerCase())
-
-            const { signature, timestamp } = payload
-            if (!signature || !signature.startsWith('0x')) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: 'Missing signature' }))
-              return
-            }
-            if (!timestamp || typeof timestamp !== 'number') {
-              res.statusCode = 400
-              res.end(JSON.stringify({ error: 'Missing or invalid timestamp' }))
-              return
-            }
-
-            // Anti-replay: timestamp must be within ±60 seconds of server time
-            const drift = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
-            if (drift > 60) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: `Timestamp drift too large (${drift}s). Must be within 60s of server time.` }))
-              return
-            }
-
-            const label = payload.label?.trim().toLowerCase()
-            if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
-              throw new Error('Invalid label: must be 1-63 lowercase alphanumeric or hyphen chars')
-            }
-            const owner = payload.owner as `0x${string}` | undefined
-            if (!owner || !isAddress(owner)) {
-              throw new Error('Invalid owner: must be a valid Ethereum address')
-            }
-
-            // Recover signer from canonical message
-            const message = `CometENS:register:${label}:${owner}:${timestamp}`
-            const recovered = await recoverMessageAddress({ message, signature })
-            if (!allowedSigners.includes(recovered.toLowerCase())) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: `Signer ${recovered} is not in the allowed list` }))
-              return
-            }
-
-            const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
-            if (!rootDomain) throw new Error('VITE_ROOT_DOMAIN not configured on server')
-
-            if (url === '/register') {
-              const parentNode = namehash(rootDomain) as `0x${string}`
-              const lh = labelhash(label) as `0x${string}`
-              const fullName = `${label}.${rootDomain}`
-              const node = namehash(fullName) as `0x${string}`
-
-              // Single transaction: register subdomain + set ETH addr record atomically
-              const addrTarget = (payload.addr ?? owner) as `0x${string}`
-              const { toHex, toBytes } = await import('viem')
-              const addrBytes = toHex(toBytes(isAddress(addrTarget) ? addrTarget : owner), { size: 20 }) as `0x${string}`
-              const txHash = await withWriter((writer) =>
-                writer.registerSubnode(parentNode, lh, owner, label, addrBytes)
-              )
-
-              res.statusCode = 200
-              res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))
-              return
-            }
-
+          if (url !== '/register') {
             res.statusCode = 404
             res.end(JSON.stringify({ error: `Unknown endpoint: /api/v1${url}` }))
-          } catch (e) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: (e as Error)?.message ?? String(e) }))
+            return
+          }
+
+          const body = await readBody(anyReq)
+          const payload = JSON.parse(body || '{}')
+          const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
+
+          try {
+            const { handleV1Register } = await import('./server/gateway/v1/register')
+            const writer = await buildWriter()
+            const result = await handleV1Register(payload, allowedSigners, rootDomain, writer)
+            res.statusCode = 200
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.statusCode = e?.status ?? 400
+            res.end(JSON.stringify({ error: e?.message ?? String(e) }))
           }
         })
 
@@ -518,9 +465,7 @@ function checkDeadline(deadline: bigint): void {
   if (deadline < now) throw new Error('Expired')
 }
 
-async function withWriter<T>(
-  fn: (writer: import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter) => Promise<T>
-): Promise<T | undefined> {
+async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter | undefined> {
   const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
   if (!workerPk) return undefined
 
@@ -536,6 +481,13 @@ async function withWriter<T>(
   ) as `0x${string}`
   const rpcUrl = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
 
-  const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+  return new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+}
+
+async function withWriter<T>(
+  fn: (writer: import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter) => Promise<T>
+): Promise<T | undefined> {
+  const writer = await buildWriter()
+  if (!writer) return undefined
   return fn(writer)
 }
