@@ -71,8 +71,10 @@ export class L2RecordsWriter {
   ) {
     this.account = account
     this.contractAddress = contractAddress
-    this.wallet = createWalletClient({ account, chain, transport: http(rpcUrl) })
-    this.publicClient = createPublicClient({ chain, transport: http(rpcUrl) })
+    // OP Sepolia RPC can be slow — use 60 s timeout with 3 retries
+    const transport = http(rpcUrl, { timeout: 60_000, retryCount: 3, retryDelay: 1_000 })
+    this.wallet = createWalletClient({ account, chain, transport })
+    this.publicClient = createPublicClient({ chain, transport })
   }
 
   async registerSubnode(parentNode: Hex, labelhash: Hex, newOwner: `0x${string}`, label: string, addrBytes: Hex): Promise<Hex> {
@@ -84,7 +86,7 @@ export class L2RecordsWriter {
       account: this.account,
       chain: this.wallet.chain!,
     })
-    await this.publicClient.waitForTransactionReceipt({ hash })
+    await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
     return hash
   }
 
@@ -97,7 +99,7 @@ export class L2RecordsWriter {
       account: this.account,
       chain: this.wallet.chain!,
     })
-    await this.publicClient.waitForTransactionReceipt({ hash })
+    await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
     return hash
   }
 
@@ -110,7 +112,7 @@ export class L2RecordsWriter {
       account: this.account,
       chain: this.wallet.chain!,
     })
-    await this.publicClient.waitForTransactionReceipt({ hash })
+    await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
     return hash
   }
 
@@ -123,7 +125,7 @@ export class L2RecordsWriter {
       account: this.account,
       chain: this.wallet.chain!,
     })
-    await this.publicClient.waitForTransactionReceipt({ hash: txHash })
+    await this.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 })
     return txHash
   }
 }
