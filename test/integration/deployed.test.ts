@@ -104,7 +104,7 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
       account: deployer, chain: optimismSepolia,
     })
     console.log('registerSubnode tx:', txHash)
-    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash })
+    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
     expect(receipt.status).toBe('success')
 
     const nodeOwner = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'subnodeOwner', args: [node] })
@@ -124,7 +124,7 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
       args: [node, 'com.twitter', '@cometens_test'],
       account: deployer, chain: optimismSepolia,
     })
-    await opPub.waitForTransactionReceipt({ hash: txHash })
+    await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
 
     const value = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'text', args: [node, 'com.twitter'] })
     expect(value).toBe('@cometens_test')
@@ -250,7 +250,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
       account: deployer, chain: optimismSepolia,
     })
     console.log('L2 setAddr tx:', txHash)
-    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash })
+    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
     expect(receipt.status).toBe('success')
 
     const stored = await opPub.readContract({

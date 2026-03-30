@@ -43,23 +43,6 @@ describe('L2RecordsWriter', () => {
     mockWaitForTransactionReceipt.mockResolvedValue({ status: 'success' })
   })
 
-  it('setSubnodeOwner calls writeContract with correct args and returns txHash', async () => {
-    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
-    const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
-
-    const txHash = await writer.setSubnodeOwner(TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice')
-
-    expect(txHash).toBe(MOCK_TX_HASH)
-    expect(mockWriteContract).toHaveBeenCalledWith(
-      expect.objectContaining({
-        address: CONTRACT_ADDRESS,
-        functionName: 'setSubnodeOwner',
-        args: [TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice'],
-      })
-    )
-    expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith({ hash: MOCK_TX_HASH })
-  })
-
   it('registerSubnode calls writeContract with owner + label + addrBytes and returns txHash', async () => {
     const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)

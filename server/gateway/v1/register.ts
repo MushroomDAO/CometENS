@@ -8,8 +8,6 @@ import {
   recoverMessageAddress,
   namehash,
   labelhash,
-  toHex,
-  toBytes,
   type Address,
   type Hex,
 } from 'viem'
@@ -81,7 +79,7 @@ export async function handleV1Register(
   const node = namehash(fullName) as Hex
 
   const addrTarget = (payload.addr && isAddress(payload.addr) ? payload.addr : owner) as Address
-  const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as Hex
+  const addrBytes = addrTarget as Hex
 
   const txHash = await writer?.registerSubnode(parentNode, lh, owner, label, addrBytes)
 

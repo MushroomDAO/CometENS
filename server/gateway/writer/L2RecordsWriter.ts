@@ -12,18 +12,6 @@ import {
 const L2_RECORDS_WRITE_ABI = [
   {
     type: 'function',
-    name: 'setSubnodeOwner',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'labelhash', type: 'bytes32' },
-      { name: 'newOwner', type: 'address' },
-      { name: 'label', type: 'string' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
     name: 'registerSubnode',
     stateMutability: 'nonpayable',
     inputs: [
@@ -85,19 +73,6 @@ export class L2RecordsWriter {
     this.contractAddress = contractAddress
     this.wallet = createWalletClient({ account, chain, transport: http(rpcUrl) })
     this.publicClient = createPublicClient({ chain, transport: http(rpcUrl) })
-  }
-
-  async setSubnodeOwner(parentNode: Hex, labelhash: Hex, newOwner: `0x${string}`, label: string): Promise<Hex> {
-    const hash = await this.wallet.writeContract({
-      address: this.contractAddress,
-      abi: L2_RECORDS_WRITE_ABI,
-      functionName: 'setSubnodeOwner',
-      args: [parentNode, labelhash, newOwner, label],
-      account: this.account,
-      chain: this.wallet.chain!,
-    })
-    await this.publicClient.waitForTransactionReceipt({ hash })
-    return hash
   }
 
   async registerSubnode(parentNode: Hex, labelhash: Hex, newOwner: `0x${string}`, label: string, addrBytes: Hex): Promise<Hex> {

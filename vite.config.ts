@@ -24,6 +24,23 @@ function saveToRegistry(address: string, label: string) {
   try { writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2)) } catch {}
 }
 
+// ─── ABI constants (shared across request handlers) ──────────────────────────
+
+const SUBNODE_ABI = [
+  { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+] as const
+
+const SUBNODE_EVENT_ABI = [{
+  type: 'event', name: 'SubnodeOwnerSet',
+  inputs: [
+    { name: 'parentNode', type: 'bytes32', indexed: true },
+    { name: 'labelhash',  type: 'bytes32', indexed: true },
+    { name: 'node',       type: 'bytes32', indexed: true },
+    { name: 'subnodeOwner', type: 'address', indexed: false },
+  ],
+}] as const
+
 export default defineConfig(({ mode }) => {
   // Load ALL env vars (empty prefix = no filter) into process.env so server
   // middleware can read WORKER_EOA_PRIVATE_KEY, PRIVATE_KEY_SUPPLIER, etc.
@@ -164,7 +181,6 @@ export default defineConfig(({ mode }) => {
               const { optimismSepolia: opSep } = await import('viem/chains')
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
               const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
-              const SUBNODE_ABI = [{ type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }] as const
               const node = nh(`${label}.${parent}`) as `0x${string}`
               const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
               const owner = await pubClient.readContract({ address: l2Addr, abi: SUBNODE_ABI, functionName: 'subnodeOwner', args: [node] })
@@ -302,20 +318,6 @@ export default defineConfig(({ mode }) => {
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
               const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
               const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
-
-              const SUBNODE_ABI = [
-                { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
-                  inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
-              ] as const
-              const SUBNODE_EVENT_ABI = [{
-                type: 'event', name: 'SubnodeOwnerSet',
-                inputs: [
-                  { name: 'parentNode', type: 'bytes32', indexed: true },
-                  { name: 'labelhash',  type: 'bytes32', indexed: true },
-                  { name: 'node',       type: 'bytes32', indexed: true },
-                  { name: 'subnodeOwner', type: 'address', indexed: false },
-                ],
-              }] as const
 
               const parentNode = nh(message.parent) as `0x${string}`
               const labelHash  = lh(message.label)  as `0x${string}`
