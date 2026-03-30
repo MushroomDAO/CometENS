@@ -1,6 +1,28 @@
 import { defineConfig, loadEnv } from 'vite'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { join } from 'path'
 
 const MAX_BODY_BYTES = 10 * 1024 // 10 KB
+
+// ─── Registration registry (address → label, persisted to .registrations.json) ─
+
+const REGISTRY_FILE = join(process.cwd(), '.registrations.json')
+
+const registrationRegistry: Map<string, string> = (() => {
+  try {
+    if (existsSync(REGISTRY_FILE)) {
+      const data = JSON.parse(readFileSync(REGISTRY_FILE, 'utf8')) as Record<string, string>
+      return new Map(Object.entries(data))
+    }
+  } catch {}
+  return new Map()
+})()
+
+function saveToRegistry(address: string, label: string) {
+  registrationRegistry.set(address.toLowerCase(), label.toLowerCase())
+  const obj = Object.fromEntries(registrationRegistry)
+  try { writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2)) } catch {}
+}
 
 export default defineConfig(({ mode }) => {
   // Load ALL env vars (empty prefix = no filter) into process.env so server
@@ -152,18 +174,13 @@ export default defineConfig(({ mode }) => {
               const fullName = `${label}.${rootDomain}`
               const node = namehash(fullName) as `0x${string}`
 
-              // Register subdomain (setSubnodeOwner on L2)
-              const txHash = await withWriter((writer) =>
-                writer.setSubnodeOwner(parentNode, lh, owner, label)
-              )
-
-              // Optionally set ETH addr record in the same call sequence
+              // Single transaction: register subdomain + set ETH addr record atomically
               const addrTarget = (payload.addr ?? owner) as `0x${string}`
-              if (addrTarget && isAddress(addrTarget)) {
-                const { toHex, toBytes } = await import('viem')
-                const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as `0x${string}`
-                await withWriter((writer) => writer.setAddr(node, 60n, addrBytes))
-              }
+              const { toHex, toBytes } = await import('viem')
+              const addrBytes = toHex(toBytes(isAddress(addrTarget) ? addrTarget : owner), { size: 20 }) as `0x${string}`
+              const txHash = await withWriter((writer) =>
+                writer.registerSubnode(parentNode, lh, owner, label, addrBytes)
+              )
 
               res.statusCode = 200
               res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))
@@ -182,9 +199,62 @@ export default defineConfig(({ mode }) => {
           const anyReq = req as any
           const url = String(anyReq.url || '')
 
+          res.setHeader('content-type', 'application/json')
+
+          // ── GET /api/manage/check-label?label=alice&parent=aastar.eth ────
+          if (anyReq.method === 'GET' && url.startsWith('/check-label')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const label = qs.get('label')?.trim().toLowerCase()
+            const parent = qs.get('parent')?.trim()
+            if (!label || !parent) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing label or parent param' }))
+              return
+            }
+            try {
+              const { namehash: nh } = await import('viem/ens')
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const { optimismSepolia: opSep } = await import('viem/chains')
+              const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? ''
+              const SUBNODE_ABI = [{ type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }] as const
+              const node = nh(`${label}.${parent}`) as `0x${string}`
+              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const owner = await pubClient.readContract({ address: l2Addr, abi: SUBNODE_ABI, functionName: 'subnodeOwner', args: [node] })
+              const taken = owner !== '0x0000000000000000000000000000000000000000'
+              res.statusCode = 200
+              res.end(JSON.stringify({ available: !taken, owner: taken ? owner : null }))
+            } catch (e) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: (e as Error).message }))
+            }
+            return
+          }
+
+          // ── GET /api/manage/lookup?address=0x... ───────────────────────────
+          if (anyReq.method === 'GET' && url.startsWith('/lookup')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const address = qs.get('address')?.toLowerCase()
+            if (!address) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing address param' }))
+              return
+            }
+            const label = registrationRegistry.get(address)
+            if (!label) {
+              res.statusCode = 404
+              res.end(JSON.stringify({ found: false }))
+              return
+            }
+            const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
+            const fullName = `${label}.${rootDomain}`
+            res.statusCode = 200
+            res.end(JSON.stringify({ found: true, label, fullName }))
+            return
+          }
+
           if (anyReq.method !== 'POST') {
             res.statusCode = 405
-            res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ error: 'Method Not Allowed' }))
             return
           }
@@ -277,12 +347,83 @@ export default defineConfig(({ mode }) => {
               })
               if (!ok) throw new Error('Invalid signature')
 
-              const txHash = await withWriter(async (writer) => {
-                const { namehash, labelhash } = await import('viem/ens')
-                const parentNode = namehash(message.parent) as `0x${string}`
-                const labelHash = labelhash(message.label) as `0x${string}`
-                return writer.setSubnodeOwner(parentNode, labelHash, message.owner, message.label)
+              // ── Duplicate checks (before executing) ───────────────────────
+              const { namehash: nh, labelhash: lh } = await import('viem/ens')
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const { optimismSepolia: opSep } = await import('viem/chains')
+
+              const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? ''
+              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+
+              const SUBNODE_ABI = [
+                { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
+                  inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+              ] as const
+              const SUBNODE_EVENT_ABI = [{
+                type: 'event', name: 'SubnodeOwnerSet',
+                inputs: [
+                  { name: 'parentNode', type: 'bytes32', indexed: true },
+                  { name: 'labelhash',  type: 'bytes32', indexed: true },
+                  { name: 'node',       type: 'bytes32', indexed: true },
+                  { name: 'subnodeOwner', type: 'address', indexed: false },
+                ],
+              }] as const
+
+              const parentNode = nh(message.parent) as `0x${string}`
+              const labelHash  = lh(message.label)  as `0x${string}`
+              const node       = nh(`${message.label}.${message.parent}`) as `0x${string}`
+
+              // Check 1: label already taken
+              const existingOwner = await pubClient.readContract({
+                address: l2Addr, abi: SUBNODE_ABI, functionName: 'subnodeOwner', args: [node],
               })
+              if (existingOwner !== '0x0000000000000000000000000000000000000000') {
+                res.statusCode = 409
+                res.setHeader('content-type', 'application/json')
+                res.end(JSON.stringify({
+                  error: `Label "${message.label}" is already registered under ${message.parent}`,
+                  code: 'LABEL_TAKEN',
+                }))
+                return
+              }
+
+              // Check 2: wallet already has a registration under this root
+              const logs = await pubClient.getLogs({
+                address: l2Addr,
+                event: SUBNODE_EVENT_ABI[0],
+                args: { parentNode },
+                fromBlock: 0n,
+                toBlock: 'latest',
+              })
+              const alreadyRegistered = logs.some(
+                (log) => (log.args.subnodeOwner as string)?.toLowerCase() === from.toLowerCase()
+              )
+              if (alreadyRegistered) {
+                // Find which name the wallet already owns
+                const ownedLog = logs.find(
+                  (log) => (log.args.subnodeOwner as string)?.toLowerCase() === from.toLowerCase()
+                )
+                const ownedNode = ownedLog?.args.node as `0x${string}` | undefined
+                res.statusCode = 409
+                res.setHeader('content-type', 'application/json')
+                res.end(JSON.stringify({
+                  error: `This wallet has already registered a subdomain under ${message.parent}`,
+                  code: 'ALREADY_REGISTERED',
+                  node: ownedNode,
+                }))
+                return
+              }
+
+              // Single transaction: register subdomain + set ETH addr record atomically
+              const { toHex, toBytes } = await import('viem')
+              const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as `0x${string}`
+              const txHash = await withWriter((writer) =>
+                writer.registerSubnode(parentNode, labelHash, message.owner, message.label, addrBytes)
+              )
+
+              // Persist owner → label mapping so lookup can return the human-readable name
+              saveToRegistry(message.owner, message.label)
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')

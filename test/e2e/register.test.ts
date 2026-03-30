@@ -96,7 +96,10 @@ describe('E2E: subdomain registration on local Anvil', () => {
 
   const L2_RECORDS_ABI = [
     { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-    { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }], outputs: [] },
+    { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }, { name: 'label', type: 'string' }], outputs: [] },
+    { type: 'function', name: 'registerSubnode', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }, { name: 'label', type: 'string' }, { name: 'addrBytes', type: 'bytes' }], outputs: [] },
+    { type: 'function', name: 'labelOf', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'string' }] },
+    { type: 'function', name: 'primaryNode', stateMutability: 'view', inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
     { type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
     { type: 'function', name: 'setAddr', stateMutability: 'nonpayable', inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }, { name: 'addrBytes', type: 'bytes' }], outputs: [] },
     { type: 'function', name: 'addr', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
@@ -132,7 +135,7 @@ describe('E2E: subdomain registration on local Anvil', () => {
 
     const txHash = await walletClient.writeContract({
       address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-      args: [parentNode, labelhash, alice.address],
+      args: [parentNode, labelhash, alice.address, 'alice'],
       account: deployer, chain: anvilChain,
     })
     await publicClient.waitForTransactionReceipt({ hash: txHash })
@@ -143,21 +146,16 @@ describe('E2E: subdomain registration on local Anvil', () => {
     expect(owner.toLowerCase()).toBe(alice.address.toLowerCase())
   })
 
-  it('sets and reads ETH addr record (coinType 60)', async () => {
+  it('registerSubnode atomically sets owner + ETH addr in one tx', async () => {
     const ROOT = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
-    const { labelhash, node } = namehashParts(ROOT, 'alice')
-    const addrBytes = toHex(toBytes(alice.address), { size: 20 }) as Hex
-
-    // Register first
-    await walletClient.writeContract({
-      address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-      args: [ROOT, labelhash, alice.address],
-      account: deployer, chain: anvilChain,
-    })
+    // Use a fresh address (Anvil account #2) so primaryNode is unset
+    const daveOwner = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' as Address
+    const { labelhash, node } = namehashParts(ROOT, 'dave')
+    const addrBytes = toHex(toBytes(daveOwner), { size: 20 }) as Hex
 
     const txHash = await walletClient.writeContract({
-      address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setAddr',
-      args: [node, 60n, addrBytes],
+      address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'registerSubnode',
+      args: [ROOT, labelhash, daveOwner, 'dave', addrBytes],
       account: deployer, chain: anvilChain,
     })
     await publicClient.waitForTransactionReceipt({ hash: txHash })
@@ -165,7 +163,17 @@ describe('E2E: subdomain registration on local Anvil', () => {
     const resolved = await publicClient.readContract({
       address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'addr', args: [node],
     })
-    expect(resolved.toLowerCase()).toBe(alice.address.toLowerCase())
+    expect(resolved.toLowerCase()).toBe(daveOwner.toLowerCase())
+
+    const label = await publicClient.readContract({
+      address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'labelOf', args: [node],
+    })
+    expect(label).toBe('dave')
+
+    const primary = await publicClient.readContract({
+      address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'primaryNode', args: [daveOwner],
+    })
+    expect(primary).toBe(node)
   })
 
   it('sets and reads text record', async () => {
@@ -174,7 +182,7 @@ describe('E2E: subdomain registration on local Anvil', () => {
 
     await walletClient.writeContract({
       address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-      args: [ROOT, labelhash, alice.address],
+      args: [ROOT, labelhash, alice.address, 'bob'],
       account: deployer, chain: anvilChain,
     })
 
@@ -198,7 +206,7 @@ describe('E2E: subdomain registration on local Anvil', () => {
 
     await walletClient.writeContract({
       address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-      args: [ROOT, labelhash, alice.address],
+      args: [ROOT, labelhash, alice.address, 'carol'],
       account: deployer, chain: anvilChain,
     })
 
@@ -226,7 +234,7 @@ describe('E2E: subdomain registration on local Anvil', () => {
     await expect(
       aliceWallet.writeContract({
         address: contractAddress, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-        args: [ROOT, labelhash, alice.address],
+        args: [ROOT, labelhash, alice.address, 'hacker'],
         account: alice, chain: anvilChain,
       })
     ).rejects.toThrow()

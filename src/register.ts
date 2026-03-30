@@ -4,15 +4,36 @@ import { namehash } from 'viem/ens'
 import { config } from './config'
 import { RegisterTypes, buildDomain } from '../server/gateway/manage/schemas'
 
-// Minimal ABI for L2Records addr(bytes32) read
-const L2_ADDR_ABI = [
+// Minimal ABI for L2Records reads
+const L2_READ_ABI = [
   {
     type: 'function', name: 'addr',
     stateMutability: 'view',
     inputs: [{ name: 'node', type: 'bytes32' }],
     outputs: [{ type: 'address' }],
   },
+  {
+    type: 'function', name: 'subnodeOwner',
+    stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }],
+    outputs: [{ type: 'address' }],
+  },
 ] as const
+
+const SUBNODE_EVENT_ABI = [{
+  type: 'event' as const, name: 'SubnodeOwnerSet',
+  inputs: [
+    { name: 'parentNode',   type: 'bytes32' as const, indexed: true },
+    { name: 'labelhash',    type: 'bytes32' as const, indexed: true },
+    { name: 'node',         type: 'bytes32' as const, indexed: true },
+    { name: 'subnodeOwner', type: 'address' as const, indexed: false },
+  ],
+}]
+
+function getL2Client() {
+  const chain = config.network === 'op-mainnet' ? optimism : optimismSepolia
+  return createPublicClient({ chain, transport: http(config.l2RpcUrl) })
+}
 
 // ─── DOM helpers ──────────────────────────────────────────────────────────────
 
@@ -122,6 +143,89 @@ async function connectWallet(): Promise<`0x${string}`> {
   return address
 }
 
+// ─── Existing registration banner ────────────────────────────────────────────
+
+const STORAGE_KEY = 'cometens_registrations'
+
+interface RegistrationRecord {
+  address: string
+  label: string
+  fullName: string
+}
+
+function saveRegistration(address: string, label: string, fullName: string) {
+  const records: RegistrationRecord[] = getRegistrations()
+  // overwrite if same address already in list
+  const idx = records.findIndex(r => r.address.toLowerCase() === address.toLowerCase())
+  const rec = { address: address.toLowerCase(), label, fullName }
+  if (idx >= 0) records[idx] = rec
+  else records.push(rec)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
+}
+
+function getRegistrations(): RegistrationRecord[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+  } catch {
+    return []
+  }
+}
+
+function getRegistrationFor(address: string): RegistrationRecord | undefined {
+  return getRegistrations().find(r => r.address.toLowerCase() === address.toLowerCase())
+}
+
+async function checkExistingRegistration(address: string) {
+  try {
+    const res = await fetch(`/api/manage/lookup?address=${encodeURIComponent(address)}`)
+    if (res.ok) {
+      const json = await res.json() as { found: boolean; label?: string; fullName?: string }
+      if (json.found && json.label && json.fullName) {
+        // Server is authoritative — save to localStorage and show banner
+        saveRegistration(address, json.label, json.fullName)
+        showExistingBanner({ address, label: json.label, fullName: json.fullName })
+        return
+      }
+    }
+  } catch {
+    // server unreachable — fall through to localStorage cache
+  }
+  // Fallback: use cached localStorage entry from a previous session
+  const cached = getRegistrationFor(address)
+  if (cached) showExistingBanner(cached)
+}
+
+function showExistingBanner(rec: RegistrationRecord) {
+  let banner = byId('existingBanner')
+  if (!banner) {
+    banner = document.createElement('div')
+    banner.id = 'existingBanner'
+    banner.style.cssText = [
+      'margin-top:16px', 'padding:12px 16px', 'border-radius:6px',
+      'background:#e3f2fd', 'border:1px solid #90caf9', 'color:#1565c0',
+      'font-size:13px', 'line-height:1.6',
+    ].join(';')
+    const card = byId('verifyCard')?.parentElement ?? document.body
+    // insert before the register card
+    const registerCard = byId('registerBtn')?.closest('.card')
+    if (registerCard) {
+      registerCard.parentElement?.insertBefore(banner, registerCard)
+    } else {
+      card.appendChild(banner)
+    }
+  }
+  banner.innerHTML =
+    `ℹ️ This wallet already has a subdomain: ` +
+    `<strong>${rec.fullName}</strong> — ` +
+    `<a href="/eth.html" style="color:#0b79d0">manage records</a> · ` +
+    `<a href="#" id="forceRegisterLink" style="color:#0b79d0">register another</a>`
+
+  byId('forceRegisterLink')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    banner!.remove()
+  })
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 async function register(): Promise<void> {
@@ -141,10 +245,23 @@ async function register(): Promise<void> {
   const registerBtn = byId<HTMLButtonElement>('registerBtn')
   if (registerBtn) {
     registerBtn.disabled = true
-    registerBtn.textContent = 'Signing…'
+    registerBtn.textContent = 'Checking…'
   }
 
   try {
+    // Pre-flight: check availability before asking MetaMask to sign
+    const checkRes = await fetch(
+      `/api/manage/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(config.rootDomain)}`
+    )
+    if (checkRes.ok) {
+      const checkJson = await checkRes.json() as { available: boolean; owner?: string }
+      if (!checkJson.available) {
+        throw new Error(`"${label}.${config.rootDomain}" is already registered to ${checkJson.owner ?? 'another address'}.`)
+      }
+    }
+
+    if (registerBtn) registerBtn.textContent = 'Signing…'
+
     const ethereum = getEthereum()
     const chain = getChain()
     const wallet = createWalletClient({ chain, transport: custom(ethereum) })
@@ -192,11 +309,17 @@ async function register(): Promise<void> {
     const json = await response.json()
 
     if (!response.ok) {
+      if (json.code === 'ALREADY_REGISTERED' && connectedAddress) {
+        const existing = getRegistrationFor(connectedAddress)
+        const name = existing?.fullName ?? `a subdomain under ${config.rootDomain}`
+        throw new Error(`This wallet already has ${name}. Use the manage page to update records.`)
+      }
       throw new Error(json.error ?? `Server error ${response.status}`)
     }
 
     const fullName = `${label}.${config.rootDomain}`
     const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
+    saveRegistration(connectedAddress!, label, fullName)
     setResult(`Registered: ${fullName}${txInfo}`, 'success')
     showVerifyCard(fullName, connectedAddress!)
   } catch (e) {
@@ -263,7 +386,7 @@ async function verifyResolution(fullName: string, expectedOwner: `0x${string}`) 
     const node = namehash(fullName) as `0x${string}`
     const resolved = await client.readContract({
       address: config.l2RecordsAddress,
-      abi: L2_ADDR_ABI,
+      abi: L2_READ_ABI,
       functionName: 'addr',
       args: [node],
     })
@@ -355,6 +478,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const registerBtn = byId<HTMLButtonElement>('registerBtn')
       if (registerBtn) registerBtn.disabled = false
+      // Query server for existing registration; fall back to localStorage cache
+      checkExistingRegistration(connectedAddress!)
       // Refresh chain display after connect
       const id = await readChainId()
       updateChainDisplay(id)

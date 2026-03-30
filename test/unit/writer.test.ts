@@ -47,14 +47,31 @@ describe('L2RecordsWriter', () => {
     const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
     const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
 
-    const txHash = await writer.setSubnodeOwner(TEST_PARENT, TEST_LABEL, TEST_ADDR)
+    const txHash = await writer.setSubnodeOwner(TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice')
 
     expect(txHash).toBe(MOCK_TX_HASH)
     expect(mockWriteContract).toHaveBeenCalledWith(
       expect.objectContaining({
         address: CONTRACT_ADDRESS,
         functionName: 'setSubnodeOwner',
-        args: [TEST_PARENT, TEST_LABEL, TEST_ADDR],
+        args: [TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice'],
+      })
+    )
+    expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith({ hash: MOCK_TX_HASH })
+  })
+
+  it('registerSubnode calls writeContract with owner + label + addrBytes and returns txHash', async () => {
+    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
+    const writer = new L2RecordsWriter(account, optimismSepolia, 'http://localhost:8545', CONTRACT_ADDRESS)
+
+    const addrBytes = toHex(toBytes(TEST_ADDR), { size: 20 }) as Hex
+    const txHash = await writer.registerSubnode(TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice', addrBytes)
+
+    expect(txHash).toBe(MOCK_TX_HASH)
+    expect(mockWriteContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        functionName: 'registerSubnode',
+        args: [TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice', addrBytes],
       })
     )
     expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith({ hash: MOCK_TX_HASH })

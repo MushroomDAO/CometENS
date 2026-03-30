@@ -66,6 +66,26 @@ contract L2Records {
         emit NameRegistered(node, parentNode, label, newOwner);
     }
 
+    /// @notice Atomically registers a subdomain and sets its ETH address record in one transaction.
+    function registerSubnode(
+        bytes32 parentNode,
+        bytes32 labelhash,
+        address newOwner,
+        string calldata label,
+        bytes calldata addrBytes
+    ) external onlyOwner {
+        bytes32 node = keccak256(abi.encodePacked(parentNode, labelhash));
+        _owners[node] = newOwner;
+        _names[node] = _encodeDnsName(label);
+        if (_primaryNode[newOwner] == bytes32(0)) {
+            _primaryNode[newOwner] = node;
+        }
+        _addrs[node][60] = addrBytes;
+        emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);
+        emit NameRegistered(node, parentNode, label, newOwner);
+        emit AddrSet(node, 60, addrBytes);
+    }
+
     function subnodeOwner(bytes32 node) external view returns (address) {
         return _owners[node];
     }

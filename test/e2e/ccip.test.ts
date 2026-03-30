@@ -60,7 +60,7 @@ const OFFCHAIN_RESOLVER_ABI = [
 const L2_RECORDS_ABI = [
   { type: 'function', name: 'addr', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'setAddr', stateMutability: 'nonpayable', inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }, { name: 'addrBytes', type: 'bytes' }], outputs: [] },
-  { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }, { name: 'label', type: 'string' }], outputs: [] },
 ] as const
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ describe('E2E: CCIP-Read resolution flow', () => {
     const parentOfAliceTest = namehash('test.eth')
     let tx = await l2Wallet.writeContract({
       address: l2RecordsAddr, abi: L2_RECORDS_ABI, functionName: 'setSubnodeOwner',
-      args: [parentOfAliceTest, labelhash, ALICE_ADDR],
+      args: [parentOfAliceTest, labelhash, ALICE_ADDR, 'alice'],
       account: deployer, chain: l2Chain,
     })
     await l2Pub.waitForTransactionReceipt({ hash: tx })
