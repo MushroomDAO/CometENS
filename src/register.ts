@@ -37,8 +37,72 @@ function getChain() {
   return config.network === 'op-mainnet' ? optimism : optimismSepolia
 }
 
+// ─── Chain display ────────────────────────────────────────────────────────────
+
+const CHAIN_NAMES: Record<number, string> = {
+  1: 'Ethereum Mainnet',
+  10: 'Optimism',
+  11155111: 'Ethereum Sepolia',
+  11155420: 'OP Sepolia',
+  31337: 'Anvil (local)',
+}
+
+function updateChainDisplay(chainId: number) {
+  const required = getChain()
+  const isOk = chainId === required.id
+  const nameEl = byId('chainName')
+  const idEl = byId('chainId')
+  const switchBtn = byId<HTMLButtonElement>('switchChainBtn')
+
+  if (nameEl) {
+    nameEl.textContent = CHAIN_NAMES[chainId] ?? `Unknown chain`
+    nameEl.className = `chain-name ${isOk ? 'ok' : 'wrong'}`
+  }
+  if (idEl) idEl.textContent = `(chainId: ${chainId})`
+  if (switchBtn) switchBtn.classList.toggle('hidden', isOk)
+}
+
+async function readChainId(): Promise<number> {
+  const eth = getEthereum()
+  const hex: string = await eth.request({ method: 'eth_chainId' })
+  return parseInt(hex, 16)
+}
+
+async function switchToRequiredChain(): Promise<void> {
+  const eth = getEthereum()
+  const required = getChain()
+  const hexId = `0x${required.id.toString(16)}`
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexId }] })
+  } catch (err: any) {
+    // 4902 = chain not added yet — add it
+    if (err.code === 4902) {
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: hexId,
+          chainName: 'OP Sepolia',
+          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+          rpcUrls: ['https://sepolia.optimism.io'],
+          blockExplorerUrls: ['https://sepolia-optimism.etherscan.io'],
+        }],
+      })
+    } else {
+      throw err
+    }
+  }
+}
+
 async function connectWallet(): Promise<`0x${string}`> {
   const ethereum = getEthereum()
+
+  // Ensure correct chain before creating wallet client
+  const currentChainId = await readChainId()
+  const required = getChain()
+  if (currentChainId !== required.id) {
+    await switchToRequiredChain()
+  }
+
   const wallet = createWalletClient({
     chain: getChain(),
     transport: custom(ethereum),
@@ -142,6 +206,36 @@ document.addEventListener('DOMContentLoaded', () => {
     rootDomainEl.textContent = config.rootDomain || '(root domain not configured)'
   }
 
+  // Show chain immediately if MetaMask is already present
+  const eth = (window as any).ethereum
+  if (eth) {
+    readChainId().then(updateChainDisplay).catch(() => {})
+
+    // Update chain display whenever user switches networks in MetaMask
+    eth.on('chainChanged', (hexChainId: string) => {
+      const id = parseInt(hexChainId, 16)
+      updateChainDisplay(id)
+      // Reset connect state so user re-connects on correct chain
+      connectedAddress = null
+      const addrEl = byId('connectedAddress')
+      if (addrEl) addrEl.textContent = ''
+      const connectBtn = byId<HTMLButtonElement>('connectBtn')
+      if (connectBtn) { connectBtn.textContent = 'Connect MetaMask'; connectBtn.disabled = false }
+      const registerBtn = byId<HTMLButtonElement>('registerBtn')
+      if (registerBtn) registerBtn.disabled = true
+    })
+  }
+
+  // Switch chain button
+  const switchChainBtn = byId<HTMLButtonElement>('switchChainBtn')
+  switchChainBtn?.addEventListener('click', async () => {
+    try {
+      await switchToRequiredChain()
+    } catch (e) {
+      setResult((e as Error)?.message ?? String(e), 'error')
+    }
+  })
+
   // Live preview
   const labelInput = byId<HTMLInputElement>('labelInput')
   const previewEl = byId('preview')
@@ -165,6 +259,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const registerBtn = byId<HTMLButtonElement>('registerBtn')
       if (registerBtn) registerBtn.disabled = false
+      // Refresh chain display after connect
+      const id = await readChainId()
+      updateChainDisplay(id)
     } catch (e) {
       setResult((e as Error)?.message ?? String(e), 'error')
     }

@@ -1,8 +1,15 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 
 const MAX_BODY_BYTES = 10 * 1024 // 10 KB
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Load ALL env vars (empty prefix = no filter) into process.env so server
+  // middleware can read WORKER_EOA_PRIVATE_KEY, PRIVATE_KEY_SUPPLIER, etc.
+  // loadEnv with '' prefix loads everything; Object.assign merges into process.env.
+  const env = loadEnv(mode, process.cwd(), '')
+  Object.assign(process.env, env)
+
+  return {
   envPrefix: ['VITE_', 'OP_'],
   plugins: [
     {
@@ -336,6 +343,7 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
   },
+  }
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
