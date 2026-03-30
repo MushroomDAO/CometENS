@@ -205,6 +205,27 @@ export default defineConfig(({ mode }) => {
               res.end(JSON.stringify({ found: false }))
               return
             }
+            // Verify the cached entry still exists on-chain (guards against stale cache after redeployment)
+            try {
+              const { createPublicClient, http: viemHttp, isAddress } = await import('viem')
+              const { optimismSepolia: opSep } = await import('viem/chains')
+              if (isAddress(address)) {
+                const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+                const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+                const pub = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+                const existingNode = await pub.readContract({
+                  address: l2Addr, abi: L2_READ_ABI, functionName: 'primaryNode', args: [address as `0x${string}`],
+                })
+                if (existingNode === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                  // Stale cache entry (e.g. after contract redeployment) — purge and report not found
+                  registrationRegistry.delete(address)
+                  try { writeFileSync(REGISTRY_FILE, JSON.stringify(Object.fromEntries(registrationRegistry), null, 2)) } catch {}
+                  res.statusCode = 404
+                  res.end(JSON.stringify({ found: false }))
+                  return
+                }
+              }
+            } catch { /* chain unreachable — fall through to return cached value */ }
             const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
             const fullName = `${label}.${rootDomain}`
             res.statusCode = 200

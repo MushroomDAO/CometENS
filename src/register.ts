@@ -20,16 +20,6 @@ const L2_READ_ABI = [
   },
 ] as const
 
-const SUBNODE_EVENT_ABI = [{
-  type: 'event' as const, name: 'SubnodeOwnerSet',
-  inputs: [
-    { name: 'parentNode',   type: 'bytes32' as const, indexed: true },
-    { name: 'labelhash',    type: 'bytes32' as const, indexed: true },
-    { name: 'node',         type: 'bytes32' as const, indexed: true },
-    { name: 'subnodeOwner', type: 'address' as const, indexed: false },
-  ],
-}]
-
 function getL2Client() {
   const chain = config.network === 'op-mainnet' ? optimism : optimismSepolia
   return createPublicClient({ chain, transport: http(config.l2RpcUrl) })
@@ -213,7 +203,6 @@ function showExistingBanner(rec: RegistrationRecord) {
   banner.innerHTML =
     `This wallet already has a subdomain: ` +
     `<strong>${rec.fullName}</strong> — ` +
-    `<a href="/eth.html">manage records</a> · ` +
     `<a href="#" id="forceRegisterLink">register another</a>`
 
   byId('forceRegisterLink')?.addEventListener('click', (e) => {
@@ -354,7 +343,7 @@ function showVerifyCard(fullName: string, owner: `0x${string}`) {
   linksEl.innerHTML = [
     `<a href="${etherscanBase}/address/${l2Contract}#readContract" target="_blank">L2Records on Etherscan</a>`,
     `<a href="${ensApp}" target="_blank">ENS App</a>`,
-    `<a href="/eth.html" target="_blank">L2 Query Tool</a>`,
+    `<a href="${etherscanBase}/address/${l2Contract}" target="_blank">L2Records on Etherscan</a>`,
     `<a href="${etherscanBase}/tx/${(byId('result')?.textContent ?? '').match(/0x[a-f0-9]{64}/i)?.[0] ?? ''}" target="_blank">View Tx</a>`,
   ].join('')
 
