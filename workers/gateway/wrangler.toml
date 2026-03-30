@@ -1,0 +1,15 @@
+name = "cometens-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+L2_RECORDS_ADDRESS = "0xf8df7ffd1cefd1226bf0f302120cafd8f6119115"
+# OP_SEPOLIA_RPC_URL and PRIVATE_KEY_SUPPLIER must be set as secrets:
+#   wrangler secret put OP_SEPOLIA_RPC_URL
+#   wrangler secret put PRIVATE_KEY_SUPPLIER
+
+# Uncomment and set after assigning a custom domain in the CF dashboard:
+# [[routes]]
+# pattern = "gateway.yourdomain.com/*"
+# custom_domain = true
