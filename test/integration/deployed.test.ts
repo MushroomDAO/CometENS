@@ -55,7 +55,7 @@ const L2_ABI = [
 ] as const
 
 const RESOLVER_ABI = [
-  { type: 'function', name: 'signerAddress', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'gatewayUrl', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'resolveWithProof', stateMutability: 'view', inputs: [{ name: 'response', type: 'bytes' }, { name: 'extraData', type: 'bytes' }], outputs: [{ type: 'bytes' }] },
 ] as const
@@ -139,12 +139,12 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
   })
 
-  it('reads signer and gateway URL from deployed resolver', async () => {
-    const signer = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'signerAddress', args: [] })
+  it('reads owner and gateway URL from deployed resolver', async () => {
+    const owner = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'owner', args: [] })
     const gateway = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'gatewayUrl', args: [] })
-    console.log('Resolver signer:', signer)
+    console.log('Resolver owner:', owner)
     console.log('Resolver gateway:', gateway)
-    expect(signer).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect(owner).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(gateway).toMatch(/^https?:\/\//)
   }, 30_000)
 

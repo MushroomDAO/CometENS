@@ -21,25 +21,21 @@ const registrationRegistry: Map<string, string> = (() => {
 function saveToRegistry(address: string, label: string) {
   registrationRegistry.set(address.toLowerCase(), label.toLowerCase())
   const obj = Object.fromEntries(registrationRegistry)
-  try { writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2)) } catch {}
+  try {
+    writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2))
+  } catch (e) {
+    console.error('[registry] Failed to persist .registrations.json:', e)
+  }
 }
 
 // ─── ABI constants (shared across request handlers) ──────────────────────────
 
-const SUBNODE_ABI = [
+const L2_READ_ABI = [
   { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
     inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'primaryNode', stateMutability: 'view',
+    inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
 ] as const
-
-const SUBNODE_EVENT_ABI = [{
-  type: 'event', name: 'SubnodeOwnerSet',
-  inputs: [
-    { name: 'parentNode', type: 'bytes32', indexed: true },
-    { name: 'labelhash',  type: 'bytes32', indexed: true },
-    { name: 'node',       type: 'bytes32', indexed: true },
-    { name: 'subnodeOwner', type: 'address', indexed: false },
-  ],
-}] as const
 
 export default defineConfig(({ mode }) => {
   // Load ALL env vars (empty prefix = no filter) into process.env so server
@@ -183,7 +179,7 @@ export default defineConfig(({ mode }) => {
               const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
               const node = nh(`${label}.${parent}`) as `0x${string}`
               const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
-              const owner = await pubClient.readContract({ address: l2Addr, abi: SUBNODE_ABI, functionName: 'subnodeOwner', args: [node] })
+              const owner = await pubClient.readContract({ address: l2Addr, abi: L2_READ_ABI, functionName: 'subnodeOwner', args: [node] })
               const taken = owner !== '0x0000000000000000000000000000000000000000'
               res.statusCode = 200
               res.end(JSON.stringify({ available: !taken, owner: taken ? owner : null }))
@@ -325,7 +321,7 @@ export default defineConfig(({ mode }) => {
 
               // Check 1: label already taken
               const existingOwner = await pubClient.readContract({
-                address: l2Addr, abi: SUBNODE_ABI, functionName: 'subnodeOwner', args: [node],
+                address: l2Addr, abi: L2_READ_ABI, functionName: 'subnodeOwner', args: [node],
               })
               if (existingOwner !== '0x0000000000000000000000000000000000000000') {
                 res.statusCode = 409
@@ -337,29 +333,17 @@ export default defineConfig(({ mode }) => {
                 return
               }
 
-              // Check 2: wallet already has a registration under this root
-              const logs = await pubClient.getLogs({
-                address: l2Addr,
-                event: SUBNODE_EVENT_ABI[0],
-                args: { parentNode },
-                fromBlock: 0n,
-                toBlock: 'latest',
+              // Check 2: wallet already has a registration (primaryNode is set on first registration)
+              const existingPrimaryNode = await pubClient.readContract({
+                address: l2Addr, abi: L2_READ_ABI, functionName: 'primaryNode', args: [from as `0x${string}`],
               })
-              const alreadyRegistered = logs.some(
-                (log) => (log.args.subnodeOwner as string)?.toLowerCase() === from.toLowerCase()
-              )
-              if (alreadyRegistered) {
-                // Find which name the wallet already owns
-                const ownedLog = logs.find(
-                  (log) => (log.args.subnodeOwner as string)?.toLowerCase() === from.toLowerCase()
-                )
-                const ownedNode = ownedLog?.args.node as `0x${string}` | undefined
+              if (existingPrimaryNode !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
                 res.statusCode = 409
                 res.setHeader('content-type', 'application/json')
                 res.end(JSON.stringify({
                   error: `This wallet has already registered a subdomain under ${message.parent}`,
                   code: 'ALREADY_REGISTERED',
-                  node: ownedNode,
+                  node: existingPrimaryNode,
                 }))
                 return
               }

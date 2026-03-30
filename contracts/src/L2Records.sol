@@ -56,14 +56,7 @@ contract L2Records {
     /// @notice Assigns ownership of a subdomain node. Node = keccak256(abi.encodePacked(parentNode, labelhash)).
     ///         Also stores the label in DNS wire format and sets primaryNode for first-time registrants.
     function setSubnodeOwner(bytes32 parentNode, bytes32 labelhash, address newOwner, string calldata label) external onlyOwner {
-        bytes32 node = keccak256(abi.encodePacked(parentNode, labelhash));
-        _owners[node] = newOwner;
-        _names[node] = _encodeDnsName(label);
-        if (_primaryNode[newOwner] == bytes32(0)) {
-            _primaryNode[newOwner] = node;
-        }
-        emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);
-        emit NameRegistered(node, parentNode, label, newOwner);
+        _registerNode(parentNode, labelhash, newOwner, label);
     }
 
     /// @notice Atomically registers a subdomain and sets its ETH address record in one transaction.
@@ -74,15 +67,8 @@ contract L2Records {
         string calldata label,
         bytes calldata addrBytes
     ) external onlyOwner {
-        bytes32 node = keccak256(abi.encodePacked(parentNode, labelhash));
-        _owners[node] = newOwner;
-        _names[node] = _encodeDnsName(label);
-        if (_primaryNode[newOwner] == bytes32(0)) {
-            _primaryNode[newOwner] = node;
-        }
+        bytes32 node = _registerNode(parentNode, labelhash, newOwner, label);
         _addrs[node][60] = addrBytes;
-        emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);
-        emit NameRegistered(node, parentNode, label, newOwner);
         emit AddrSet(node, 60, addrBytes);
     }
 
@@ -158,6 +144,21 @@ contract L2Records {
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /// @dev Core registration logic shared by setSubnodeOwner and registerSubnode.
+    function _registerNode(
+        bytes32 parentNode,
+        bytes32 labelhash,
+        address newOwner,
+        string calldata label
+    ) private returns (bytes32 node) {
+        node = keccak256(abi.encodePacked(parentNode, labelhash));
+        _owners[node] = newOwner;
+        _names[node] = _encodeDnsName(label);
+        if (_primaryNode[newOwner] == bytes32(0)) _primaryNode[newOwner] = node;
+        emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);
+        emit NameRegistered(node, parentNode, label, newOwner);
+    }
 
     /// @dev Encodes a label in DNS wire format: <len><label bytes><0x00>
     function _encodeDnsName(string calldata label) private pure returns (bytes memory) {

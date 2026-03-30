@@ -79,6 +79,7 @@ export async function handleV1Register(
   const node = namehash(fullName) as Hex
 
   const addrTarget = (payload.addr && isAddress(payload.addr) ? payload.addr : owner) as Address
+  // Address is a validated 20-byte hex string; viem encodes it correctly for `bytes calldata`.
   const addrBytes = addrTarget as Hex
 
   const txHash = await writer?.registerSubnode(parentNode, lh, owner, label, addrBytes)
