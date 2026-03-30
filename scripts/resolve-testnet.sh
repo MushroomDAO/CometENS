@@ -39,16 +39,19 @@ fi
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 rpc_call() {
-  # $1 = to address, $2 = calldata
-  local result
-  result=$(curl -s --max-time 15 -X POST "$L1_RPC" \
-    -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$1\",\"data\":\"$2\"},\"latest\"]}")
-  if [[ $? -ne 0 || -z "$result" ]]; then
-    echo '{"error":{"message":"RPC request failed or timed out"}}'
-    return 0
-  fi
-  echo "$result"
+  # $1 = to address, $2 = calldata — retries up to 3 times on failure
+  local result attempt
+  for attempt in 1 2 3; do
+    result=$(curl -s --max-time 30 -X POST "$L1_RPC" \
+      -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$1\",\"data\":\"$2\"},\"latest\"]}")
+    if [[ -n "$result" ]]; then
+      echo "$result"
+      return 0
+    fi
+    [[ $attempt -lt 3 ]] && sleep 2
+  done
+  echo '{"error":{"message":"RPC request failed after 3 attempts"}}'
 }
 
 # ─── Step 0: Read gateway URL from chain ──────────────────────────────────────
@@ -131,23 +134,19 @@ RESOLVE_CALLDATA=$(encode_resolve "$DNS_NAME" "$ADDR_CALLDATA")
 STEP1=$(rpc_call "$RESOLVER" "$RESOLVE_CALLDATA")
 
 # Check for OffchainLookup error (selector 0x556f1830)
+# Handle multiple Alchemy/RPC formats: error.data as string, or nested object
 REVERT_DATA=$(echo "$STEP1" | python3 -c "
 import sys, json
 j = json.load(sys.stdin)
-if 'error' in j and 'data' in j['error']:
-    print(j['error']['data'])
-else:
-    print('')
+d = j.get('error', {}).get('data', '')
+if isinstance(d, dict):
+    d = d.get('data', '')
+print(d if isinstance(d, str) else '')
 " 2>/dev/null)
 
 if [[ -z "$REVERT_DATA" ]]; then
-  # Check if the RPC returned a result instead of a revert (name not registered)
-  RESULT_DATA=$(echo "$STEP1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null)
-  if [[ -n "$RESULT_DATA" && "$RESULT_DATA" != "null" ]]; then
-    echo "addr(ETH): ERROR — resolve() did not revert (check resolver config)"
-  else
-    echo "addr(ETH): ERROR — RPC call failed or no OffchainLookup revert"
-  fi
+  echo "addr(ETH): ERROR — no OffchainLookup revert"
+  echo "  RPC raw: $(echo "$STEP1" | head -c 300)"
   echo ""; echo "✓ Done"; exit 0
 fi
 
