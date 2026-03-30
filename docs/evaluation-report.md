@@ -1,351 +1,381 @@
-# CometENS 历史仓库评估报告
+# CometENS 历史仓库评估报告（修订版 v2）
 
-> 评估日期：2026-03-30
-> 评估范围：`eval/CometENS-old`、`eval/CometENS`、`eval/ENS-offchain-resolver`
-> 评估目的：提取有价值内容后删除三个历史仓库
-
----
-
-## 一、仓库概览
-
-| 仓库 | 分支 | 定位 | 状态 |
-|------|------|------|------|
-| `CometENS-old` | main | 早期 PostgreSQL 版网关 + React 前端 | 已被明确废弃（README 中标注 deprecated） |
-| `CometENS` | main + aastar-dev | 引入 unruggable-gateways 的多链版本 | aastar-dev 是当前项目前身 |
-| `ENS-offchain-resolver` | main + mongo | ENS 官方参考实现（Chainlink CCIP-Read） | 是当前 OffchainResolver 合约的设计基础 |
+> 评估日期：2026-03-30（v2 修订）
+> 评估范围：
+> - `eval/CometENS-old`（AAStarCommunity 废弃版）
+> - `eval/CometENS`（AAStarCommunity aastar-dev）
+> - `eval/ENS-offchain-resolver`（ENS 官方参考实现）
+> - `eval/ens-contracts`（ensdomains/ens-contracts，最新版）
+> - `eval/ens-docs`（ensdomains/docs，最新版）
+> - `eval/ensjs`（ensdomains/ensjs，最新版）
+> 评估目的：提取有价值内容 + 深度核实签名格式与多签名问题
 
 ---
 
-## 二、技术栈对比与借鉴点
+## 一、重点核查：两个被标记问题的重新评估
 
-### 2.1 签名格式：重要差异 ⚠️
+### 问题 1：签名格式是否与标准不兼容？
 
-**当前项目的签名（`server/gateway/index.ts`）：**
+**结论：❌ 原报告误判 — 当前实现正确，无需修改**
+
+**完整链路追踪：**
+
+**网关签名（`server/gateway/index.ts`）：**
 ```typescript
-// EIP-191 + Ethereum Message Prefix（双重包装）
-const ethHash = keccak256(concat([
-  toBytes('\x19Ethereum Signed Message:\n32'),
-  messageHash,
-]))
+const messageHash = keccak256(encodePacked(
+  ['bytes2', 'address', 'uint64', 'bytes32', 'bytes32'],
+  ['0x1900', resolverAddress, expires, keccak256(calldata), keccak256(result)]
+))
+const sig = await signer.signMessage({ message: { raw: messageHash } })
+// signMessage({ raw: X }) = personal_sign(X) = sign(keccak256("\x19Ethereum Signed Message:\n32" || X))
 ```
 
-**ENS 官方参考实现的签名（标准 EIP-3668）：**
-```typescript
-// 纯 EIP-191，无 Ethereum Message 前缀
-const messageHash = solidityKeccak256(
-  ['bytes', 'address', 'uint64', 'bytes32', 'bytes32'],
-  ['0x1900', resolverAddress, validUntil, keccak256(requestData), keccak256(result)]
-)
-const sig = signer.signDigest(messageHash)  // 原始 ECDSA，非 personal_sign
-```
-
-**影响**：当前签名格式与 ENS 标准不兼容。viem 的 `publicClient.getEnsAddress()` 通过 Universal Resolver 调用，会做 `resolveWithProof`，如果合约里验签逻辑与网关签名方式不对齐，线上解析会失败。
-
-**建议**：对齐到标准 EIP-3668 签名（移除 Ethereum message prefix），与 Universal Resolver 生态完全兼容。
-
----
-
-### 2.2 多签名者支持（Multi-signer）
-
-**ENS 官方实现：**
+**合约验证（`contracts/src/OffchainResolver.sol`）：**
 ```solidity
-mapping(address => bool) public signers;  // 白名单式多签名者
+bytes32 messageHash = keccak256(abi.encodePacked(
+    hex"1900", address(this), expires,
+    keccak256(callData), keccak256(result)
+));
+bytes32 ethHash = keccak256(abi.encodePacked(
+    "\x19Ethereum Signed Message:\n32", messageHash
+));
+address recovered = _recover(ethHash, sig);
+```
+
+**两者使用完全相同的哈希过程。** 网关和合约都在 EIP-3668 的基础消息上叠加了 Ethereum personal_sign 前缀，`ecrecover` 一定成功。
+
+**ENS 参考实现的差异**（ENS-offchain-resolver）：
+- 参考实现用 `signer.signDigest(hash)` — 原始 ECDSA，无 Ethereum 前缀
+- 我们用 `signMessage({ raw: hash })` — 有 Ethereum 前缀
+- 两者各自内部一致，**但彼此签名不可互换**
+
+**对 CometENS 的影响**：
+- 我们控制自己的网关 + 自己的 OffchainResolver 合约
+- 两者始终是配对的，没有任何第三方合约会尝试验证我们的签名
+- 兼容性问题不存在
+
+**与新版 Universal Resolver 的兼容性（AbstractUniversalResolver.sol）：**
+新版 UniversalResolver **不做任何签名验证**，它只是把网关响应转发给我们的 `resolveWithProof` 回调：
+```solidity
+// ccipBatchCallback 中：
+(ok, v) = p.sender.staticcall(
+    abi.encodeWithSelector(p.callbackFunction, v, p.extraData)
+    // = resolveWithProof(gatewayResponse, extraData)
+);
+```
+签名验证由我们自己的 `resolveWithProof` 完成，与 Universal Resolver 无关。
+
+**✅ 当前签名格式完全正确，与 ENS v2 架构兼容，无需更改。**
+
+---
+
+### 问题 2：OffchainResolver 只支持单签名者是否是问题？
+
+**结论：⚠️ 是真实限制，但比原报告所述的影响要小**
+
+**现状：**
+```solidity
+address public signerAddress;  // 单一签名者
+
+function setSigner(address newSigner) external onlyOwner {
+    signerAddress = newSigner;  // 即时切换，有短暂空档
+}
+```
+
+**ENS 参考实现（ENS-offchain-resolver）：**
+```solidity
+mapping(address => bool) public signers;  // 多签名者白名单
 
 constructor(string memory url, address[] memory _signers) {
-    for(uint i = 0; i < _signers.length; i++) {
-        signers[_signers[i]] = true;
+    for (uint i = 0; i < _signers.length; i++) signers[_signers[i]] = true;
+}
+```
+
+**实际影响分析：**
+
+| 场景 | 单签名者（当前） | 多签名者（参考） |
+|------|--------------|--------------|
+| 密钥轮换 | `setSigner(new)` 即时切换，旧签名立即失效 | 先 addSigner(new)，等所有旧 TTL 过期，再 removeSigner(old) — 零停机 |
+| 密钥泄露 | `setSigner(new)` 1 笔 tx 即可响应 | 同，无优势 |
+| 多网关部署（高可用） | 多个网关必须共享同一密钥 | 每个网关有独立密钥 |
+| 热/冷密钥分离 | 不支持 | 支持 |
+| 紧急恢复 | 单点故障（owner 密钥 + signer 密钥都需要） | 更灵活 |
+
+**结论：**
+- 对 Sepolia 测试网 MVP：单签名者完全够用
+- 对生产主网：建议升级为多签名者，原因是**零停机密钥轮换**和**多网关部署安全性**
+- 改动成本极低（约 20 行 Solidity），建议在主网部署前完成
+
+**升级方案：**
+```solidity
+// OffchainResolver.sol 改动
+mapping(address => bool) public signers;
+
+event SignerAdded(address indexed signer);
+event SignerRemoved(address indexed signer);
+
+constructor(address _owner, address _initialSigner, string memory _gatewayUrl) {
+    owner = _owner;
+    signers[_initialSigner] = true;
+    emit SignerAdded(_initialSigner);
+    gatewayUrl = _gatewayUrl;
+}
+
+function addSigner(address signer) external onlyOwner {
+    signers[signer] = true;
+    emit SignerAdded(signer);
+}
+
+function removeSigner(address signer) external onlyOwner {
+    signers[signer] = false;
+    emit SignerRemoved(signer);
+}
+
+// resolveWithProof 中改验证逻辑
+if (!signers[recovered]) revert InvalidSigner();
+```
+
+---
+
+## 二、新 ENS v2 架构深度分析
+
+### 2.1 新 UniversalResolver 架构（AbstractUniversalResolver.sol）
+
+ENS v2 完全重构了 UniversalResolver，采用**批量网关 (Batch Gateway)** 架构：
+
+```
+旧架构（v1）：
+Client → UniversalResolver.resolve()
+  → OffchainLookup (resolver URL)
+  → Client 调用我们的 gateway
+  → Client 调用 resolver.resolveWithProof()
+
+新架构（v2）：
+Client → UniversalResolver.resolveWithGateways()
+  → ccipBatch() → OffchainLookup (ENS Batch Gateway URL)
+  → ensjs 拦截批量请求 → 并行调用各个子 resolver 的 gateway
+  → 批量响应返回给 ccipBatchCallback
+  → ccipBatchCallback 调用各 resolver 的 resolveWithProof()
+```
+
+**对 CometENS 的影响**：
+
+1. **完全兼容** — 我们的 OffchainResolver 实现了 `IExtendedResolver` (0x9061b923)，UniversalResolver 正确检测并路由到 batch gateway 路径
+2. **resolveWithProof 仍被调用** — 在 ccipBatchCallback 中，通过 staticcall 调用我们的回调
+3. **无需任何代码修改** — 现有合约和网关完全适配新 UniversalResolver
+
+**代码证据（AbstractUniversalResolver.sol）：**
+```solidity
+_checkResolver(info):  // 检测 IExtendedResolver，若有则走 extended 路径
+ccipBatch(...)         // 将我们的 OffchainLookup 打包为批量请求
+ccipBatchCallback():
+  (ok, v) = p.sender.staticcall(
+      abi.encodeWithSelector(p.callbackFunction, v, p.extraData)
+  );  // = resolveWithProof(response, extraData)
+```
+
+### 2.2 IERC7996 "直接解析" 优化（可选）
+
+新 UniversalResolver 支持两条路径：
+
+| 路径 | 条件 | 特点 |
+|------|------|------|
+| **批量网关路径**（当前） | 默认（我们现在走这条） | 通过 ENS 批量网关中转，稍有延迟 |
+| **直接解析路径** | 实现 IERC7996 + supportsFeature() | 直接调用 resolver，更快 |
+
+```solidity
+// 直接路径入口（AbstractUniversalResolver._callResolver）：
+if (ERC165Checker.supportsERC165InterfaceUnchecked(info.resolver, type(IERC7996).interfaceId)) {
+    ccipRead(address(info.resolver), ...);  // 直接调
+} else {
+    ccipRead(address(this), ccipBatch(...));  // 批量网关中转
+}
+```
+
+实现直接路径：
+```solidity
+// 在 OffchainResolver 中添加
+interface IERC7996 {
+    function supportsFeature(bytes4 featureId) external view returns (bool);
+}
+
+contract OffchainResolver is IERC7996, ... {
+    function supportsFeature(bytes4) external pure returns (bool) { return false; }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7   // EIP-165
+            || interfaceId == 0x9061b923  // IExtendedResolver
+            || interfaceId == 0x582de3e7; // IERC7996 ← 新增
     }
 }
 ```
 
-**当前项目：**
+**建议**：实现直接路径可减少一次网络往返（不经过批量网关），但收益对 Sepolia 测试网不明显。主网部署时可考虑。
+
+### 2.3 ENSIP-21 批量网关协议
+
+新 UniversalResolver 使用的批量网关接口（IBatchGateway）：
 ```solidity
-address public signerAddress;  // 单一签名者
-```
-
-**影响**：单签名者意味着：
-1. 密钥无法轮换（换一个就要重新部署合约）
-2. 无法灾难恢复（密钥泄露只能重新部署）
-3. 无法热/冷密钥分离
-
-**建议**：在 OffchainResolver 升级时加入 `mapping(address => bool) signers`，成本很低，安全性大幅提升。
-
----
-
-### 2.3 Cloudflare Workers 网关部署模式
-
-**ENS 官方参考实现提供了两套部署方案：**
-```
-packages/gateway/        → Node.js 版（本地开发 / 自托管）
-packages/gateway-worker/ → Cloudflare Workers 版（生产）
-```
-
-Workers 版的核心差异：
-```typescript
-// 使用 @ensdomains/ccip-read-cf-worker
-// 数据来自 Cloudflare KV Store（而非数据库或链）
-const db = JSONDatabase.fromKVStore(OFFCHAIN_STORE_DEV, TTL)
-
-// 模块导出格式
-module.exports = {
-  fetch: (request, env, context) => router.handle(request)
+interface IBatchGateway {
+    struct Request { address sender; string[] urls; bytes data; }
+    function query(Request[] memory requests)
+        external view returns (bool[] memory failures, bytes[] memory responses);
 }
 ```
 
-**当前项目**：网关作为 Vite dev server 中间件运行，生产部署方式未定。
+ensjs 实现了这个接口（`ccipBatchRequest.ts`）——它**不调用外部批量网关**，而是直接并行调用每个 resolver 的独立 gateway URL。这意味着：
+- 我们的 `/api/ccip` 端点会被 ensjs 直接调用
+- `sender` 字段 = 我们的 OffchainResolver 地址（正确用于签名绑定）
 
-**建议**：`vite.config.ts` 中的 API 中间件提取为独立的 Cloudflare Worker，实现全球分布、边缘低延迟、Serverless，无需运维服务器。Workers 版适配成本较低（主要是 KV 存储适配，对当前项目来说是 L2 读取逻辑）。
+### 2.4 ENS v2 合规度自检
 
----
-
-### 2.4 多链 Provider 架构（来自 CometENS aastar-dev）
-
-**`providers.ts` 支持 40+ 条链：**
-```typescript
-export const RPC_INFO = new Map<Chain, RPCInfo>([
-  [CHAINS.OP, { publicHTTP: 'https://mainnet.optimism.io', ... }],
-  [CHAINS.BASE, { publicHTTP: 'https://mainnet.base.org', ... }],
-  [CHAINS.ARB1, { publicHTTP: 'https://arb1.arbitrum.io/rpc', ... }],
-  // + Sepolia, Base Sepolia, Arbitrum Nova, Linea, Mode, Blast, ...
-])
-
-// 智能降级：Alchemy → Infura → Ankr → dRPC → public
-function providerOrder(chain?: Chain): string[] { ... }
-```
-
-**当前项目**：RPC URL 硬编码在 `.env.local`，单链（OP Sepolia）。
-
-**价值**：当未来支持 Mode、Base、Blast 等 OP-stack L2 时，直接用这套 Provider 配置而非重新硬编码。
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| viem >= 2.35.0 | ✅ | ENS v2 客户端必需，已满足 |
+| IExtendedResolver (0x9061b923) | ✅ | supportsInterface 已返回 true |
+| EIP-165 (0x01ffc9a7) | ✅ | 已支持 |
+| OffchainLookup 格式正确 | ✅ | sender/urls/callData/callback/extraData 全部正确 |
+| resolveWithProof 回调 | ✅ | 与 ccipBatchCallback 的 staticcall 完全对应 |
+| 签名格式（内部一致性） | ✅ | 网关和合约使用相同哈希方案 |
+| CCIP-Read calldata 绑定 | ✅ | 签名包含 keccak256(calldata) 防篡改 |
+| 过期时间绑定 | ✅ | 签名包含 expires，合约检查 `block.timestamp > expires` |
+| 解析器地址绑定 | ✅ | 签名包含 address(this)，防跨解析器重放 |
+| DNS 名称格式 | ✅ | resolve(bytes name, bytes data) 接受 DNS-encoded name |
+| IERC7996 直接路径 | ❌ | 可选优化，建议主网部署前实现 |
+| 多签名者支持 | ❌ | 功能可用但零停机轮换受限 |
 
 ---
 
-### 2.5 OPResolver 状态证明（来自 CometENS 合约）
+## 三、现有代码与 ENS 官方标准的对比
 
+### 3.1 AddrResolver 接口合规
+
+**ENS 官方（AddrResolver.sol + IAddressResolver.sol）：**
 ```solidity
-// 不依赖签名，直接用 Bedrock 状态根验证 L2 数据
-contract OPResolver is IERC165, IExtendedResolver, GatewayFetchTarget {
-    IGatewayVerifier immutable _verifier;  // unruggable 验证合约
-
-    // GatewayFetcher DSL：按链上 Merkle 树构造多步证明
-    GatewayRequest memory req = GatewayFetcher.newCommand()
-        .setTarget(STORAGE_CONTRACT_ADDRESS)
-        .setSlot(slot).follow()
-        .read().setOutput(0);
-}
+function addr(bytes32 node) public view virtual returns (address payable)  // ENSIP-1 (coinType 60)
+function addr(bytes32 node, uint256 coinType) public view virtual returns (bytes memory)  // ENSIP-9/11
 ```
 
-**这就是路线图里里程碑 C 的实现参考**：无需信任网关密钥，用 L1 上的状态根验证 L2 存储。
-
-**当前项目**：签名模式（里程碑 A），OPResolver 是里程碑 C 的升级路径。
-
----
-
-### 2.6 可插拔 Database 接口（ENS-offchain-resolver 架构）
-
-```typescript
-interface Database {
-  addr(name: string, coinType: number): PromiseOrResult<{addr: string; ttl: number}>;
-  text(name: string, key: string): PromiseOrResult<{value: string; ttl: number}>;
-  contenthash(name: string): PromiseOrResult<{contenthash: string; ttl: number}>;
-}
-```
-
-实现包括：JSON、MongoDB、Cloudflare KV，均可无缝替换。
-
-**当前项目**：L2RecordsReader 直接读链，不抽象为 Database 接口，未来扩展时需改动更多层。
-
-**建议**：如果将来要支持多数据源（链上 + 缓存 + 回退），可引入这个接口模式。
-
----
-
-### 2.7 Wildcard 解析（通配符子域名）
-
-**ENS 官方 findName() 算法：**
-```typescript
-private findName(name: string): ZoneData | null {
-  if (this.data[name]) return this.data[name];         // 精确匹配
-  const labels = name.split('.');
-  for (let i = 1; i < labels.length + 1; i++) {
-    const wildcard = ['*', ...labels.slice(i)].join('.');
-    if (this.data[wildcard]) return this.data[wildcard]; // *.aastar.eth
-  }
-  return null;
-}
-```
-
-**当前项目**：L2Records 上的节点是精确存储的，但 OffchainResolver 的 CCIP-Read 路径有通配符空间（`resolve(bytes name, bytes calldata)` 的 IExtendedResolver 语义本身支持通配符）。如果 l2Records 上存的是 `*.aastar.eth` 的记录，通配符解析不需要额外工作，只需 gateway 层传递正确的 name 字符串。
-
----
-
-## 三、历史仓库中有我们未实现的功能吗？
-
-### 3.1 已在当前项目实现的功能（✅）
-
-| 功能 | 来源 | 当前状态 |
-|------|------|----------|
-| L2Records 合约（含所有权 + 多链 + 事件） | CometENS + 大量改进 | ✅ 已部署 OP Sepolia |
-| CCIP-Read 网关 | ENS-offchain-resolver（重写） | ✅ 运行中 |
-| EIP-712 用户注册 + 管理 | 自研 | ✅ register.html / admin.html |
-| 上游应用 API（签名鉴权） | 自研（历史仓库均无） | ✅ /api/v1/register |
-| text record 写入 | CometENS-old 有前端展示 | ✅ /api/manage/set-text |
-| SetText / SetContenthash EIP-712 类型 | CometENS 无 | ✅ manage/schemas.ts |
-| 多链地址（ENSIP-11 coinType） | 三个仓库均有雏形 | ✅ addr(node, coinType) |
-
-### 3.2 历史仓库有、当前项目缺少的功能（⚠️）
-
-| 功能 | 来源仓库 | 优先级 | 说明 |
-|------|----------|--------|------|
-| **OffchainResolver 多签名者支持** | ENS-offchain-resolver | 🔴 高 | 单签名者限制密钥轮换和灾难恢复 |
-| **签名格式标准化**（移除 Ethereum prefix） | ENS-offchain-resolver | 🔴 高 | 影响与标准 Universal Resolver 的兼容性 |
-| **Contenthash 完整读链路** | ENS-offchain-resolver | 🟡 中 | Gateway 能否正确 serve IPFS hash？需验证 |
-| **通配符子域名解析** | ENS-offchain-resolver | 🟡 中 | `*.aastar.eth` 的 fallback 解析 |
-| **Content hash / IPFS 前端设置** | CometENS-old | 🟡 中 | admin.html 缺少 setContenthash 操作 |
-| **TTL 可配置** | ENS-offchain-resolver | 🟢 低 | 当前 TTL 硬编码，无法按域名差异化 |
-| **Cloudflare Worker 网关** | ENS-offchain-resolver | 🟢 低 | 生产部署更优解，但非阻塞 |
-| **多链 Provider 配置** | CometENS（aastar-dev） | 🟢 低 | 扩展到其他 OP-stack L2 时需要 |
-| **MongoDB / 可插拔数据源** | ENS-offchain-resolver（mongo 分支） | 🟢 低 | 对纯链上场景意义不大 |
-
----
-
-## 四、其他有价值的内容
-
-### 4.1 测试模式（来自 ENS-offchain-resolver）
-
-```typescript
-// 完整 CCIP-Read 单测模式：直接调用 server.call()
-async function makeCall(fragment: string, name: string, ...args: any[]) {
-  const innerData = Resolver.encodeFunctionData(fragment, [node, ...args]);
-  const outerData = IResolverService.encodeFunctionData('resolve', [dnsName(name), innerData]);
-  const { status, body } = await server.call({ to: TEST_ADDRESS, data: outerData });
-  // + 签名验证
-  expect(recoverAddress(messageHash, expandSignature(sigData))).toBe(signingAddress);
-}
-
-// 合约测试：验证 resolveWithProof 的合法/非法签名
-it('resolves an address given a valid signature', async () => { ... });
-it('reverts given an invalid signature', async () => { ... });
-it('reverts given an expired signature', async () => { ... });
-```
-
-**当前项目测试缺口**：没有对 `resolveWithProof` 合约函数的集成测试（验证签名→合约验签→返回结果这条完整链路）。
-
-### 4.2 DNS 名称处理工具
-
-```typescript
-// ENS-offchain-resolver 的 decodeDnsName（DNS wire format → string）
-function decodeDnsName(dnsname: Buffer) {
-  const labels = [];
-  let idx = 0;
-  while (true) {
-    const len = dnsname.readUInt8(idx);
-    if (len === 0) break;
-    labels.push(dnsname.slice(idx + 1, idx + len + 1).toString('utf8'));
-    idx += len + 1;
-  }
-  return labels.join('.');
-}
-```
-
-当前网关在解码 `resolve(bytes name, ...)` 中的 DNS 编码名称时需要这个函数，确认当前实现是否正确处理了 DNS wire format。
-
-### 4.3 CometENS-old 的前端功能集（9 项操作）
-
-React + Wagmi 版本实现了完整的 ENS 管理界面：
-1. `resolveENSName()` — 解析地址
-2. `registerSubdomain()` — 注册子域
-3. `setSubdomainResolution()` — 设置解析地址
-4. `resolveSubdomainOnLayer2()` — 直接查 L2
-5. `setTextRecord()` — 设置文本记录
-6. `setContentHash()` — 设置 IPFS 内容哈希
-7. `setAvatar()` — 设置头像
-8. `setContractName()` — 合约命名
-9. `setMultichainAddress()` — 多链地址（SLIP-44）
-
-**当前 admin.html 对比**：有查询、setAddr、setText，但缺少 setContenthash 和 Avatar 专项操作入口。
-
-### 4.4 架构决策验证
-
-历史仓库的演变轨迹印证了当前项目的架构选择是正确的：
-
-```
-CometENS-old（PostgreSQL 中心化数据库）
-    ↓ 废弃，原因：链下存储不可信、DB 同步麻烦
-CometENS（L2Records + CCIP-Read + 可信签名）
-    ↓ 当前 MVP 路线
-ens-tool（精炼版，加入 EIP-712、上游 API、完整测试）
-    ↓ 下一步：多签名者、Cloudflare Workers、状态证明
-```
-
----
-
-## 五、优先行动建议
-
-### 立即修复（影响生产正确性）
-
-**① 签名格式标准化**
-```typescript
-// 当前（需修改）：
-const sig = await account.signMessage({ message: { raw: messageHash } })
-
-// 应改为（标准 EIP-3668）：
-const sig = account.sign({ hash: messageHash })  // 原始 signDigest，无 Ethereum prefix
-```
-同时更新 `OffchainResolver.sol` 的 `makeSignatureHash()` 去掉 `\x19Ethereum Signed Message` 包装。
-
-**② 给 OffchainResolver 加多签名者支持**
+**我们的 L2Records.sol：**
 ```solidity
-// OffchainResolver.sol 改动（约 15 行）
-mapping(address => bool) public signers;
-event SignerAdded(address indexed signer);
-event SignerRemoved(address indexed signer);
-function addSigner(address signer) external onlyOwner { signers[signer] = true; }
-function removeSigner(address signer) external onlyOwner { signers[signer] = false; }
-// 验签时改为：require(signers[recovered], "Unauthorized signer")
+function addr(bytes32 node) external view returns (address)            // ✅
+function addr(bytes32 node, uint256 coinType) external view returns (bytes memory)  // ✅
 ```
 
-### 短期补充（完善功能）
+**✅ 完全符合 ENSIP-1 和 ENSIP-9/11。**
 
-**③ 补全 Contenthash 链路**
-- Gateway `server/gateway/index.ts` 确认支持 `contenthash(bytes32)` 的解码和返回
-- admin.html 增加 setContenthash 操作入口（EIP-712 类型已存在于 schemas.ts）
+### 3.2 TextResolver 接口合规
 
-**④ 补全 resolveWithProof 集成测试**
-参考 ENS-offchain-resolver 的 `server.test.ts` 模式，增加：
-- 合法签名的 resolveWithProof 成功用例
-- 过期签名被 revert 的用例
-- 签名被篡改被 revert 的用例
+**ENS 官方（TextResolver.sol）：**
+```solidity
+function text(bytes32 node, string calldata key) public view virtual returns (string memory)
+```
 
-### 中期规划
+**我们的 L2Records.sol：**
+```solidity
+function text(bytes32 node, string calldata key) external view returns (string memory)  // ✅
+```
 
-**⑤ Cloudflare Workers 网关**
-将 `vite.config.ts` 中的三类中间件提取为独立 Worker（CCIP-Read、manage、v1），参考 `packages/gateway-worker/src/` 结构。
+**✅ 完全符合。**
 
-**⑥ 多链 Provider 配置**
-当扩展到 Base、Mode、Blast 等 OP-stack L2 时，参考 `providers.ts` 的 Provider 配置模式。
+### 3.3 ContenthashResolver 接口合规
+
+**ENS 官方（ContentHashResolver.sol）：**
+```solidity
+function contenthash(bytes32 node) public view virtual returns (bytes memory)
+```
+
+**我们的 L2Records.sol：**
+```solidity
+function contenthash(bytes32 node) external view returns (bytes memory)  // ✅
+```
+
+**✅ 完全符合。**
+
+### 3.4 网关签名方案对比（EIP-3668 §4.1）
+
+**EIP-3668 规范：**
+```
+sig = sign(keccak256(hex"1900" ++ request.to ++ expires ++ keccak256(callData) ++ keccak256(result)))
+```
+
+规范中 "sign" 未指定是否加 Ethereum 前缀，各实现可自由选择，**只要 resolver 合约和 gateway 一致**。
+
+| 实现 | 网关 | 合约 | 兼容性 |
+|------|------|------|--------|
+| ENS 参考实现 | `signDigest(hash)` (无前缀) | `ecrecover(hash, sig)` | 内部一致 ✅ |
+| **CometENS（我们）** | `signMessage({raw: hash})` (有前缀) | `ecrecover(ethHash, sig)` | 内部一致 ✅ |
+| 跨实现兼容 | — | — | ❌ 不需要，各管各的 |
+
+### 3.5 新发现：Durin — ENS 官方推荐的 L2 子域名工具
+
+ENS 官方文档在 "L2 Subnames" 章节**明确推荐 Durin**：
+> "[Durin](https://durin.dev/) is an opinionated approach to issuing ENS subnames on L2. It takes care of the L1 Resolver and offchain gateway parts of the CCIP Read stack for you."
+
+Durin 的定位与 CometENS 完全重叠，是 ENS 官方背书的解决方案。建议：
+- 关注 Durin 的演进，避免重复造轮子
+- CometENS 的差异化在于**与 AAStar 生态的集成** + **上游应用 API**
 
 ---
 
-## 六、总结
+## 四、历史仓库有价值内容总结（更新）
 
-### 三个仓库的核心价值
+### 仍然有效的建议
 
-| 仓库 | 核心价值 | 可直接复用的内容 |
-|------|----------|-----------------|
-| **CometENS-old** | 证明了"数据库方案"的局限，验证了迁移到链上的正确性 | 前端功能列表参考（setContenthash/avatar 缺口） |
-| **CometENS** | 多链 Provider 架构 + OPResolver 状态证明（里程碑C原型） | `providers.ts` 40+ 链配置；`OPResolver.sol` 作为里程碑C实现参考 |
-| **ENS-offchain-resolver** | 官方 EIP-3668 参考实现，暴露两个重要问题（签名格式 + 多签名者） | 签名格式标准、多签名者合约模式、Cloudflare Workers 部署模式、测试套件模式 |
+| 内容 | 来源 | 优先级 | 说明 |
+|------|------|--------|------|
+| OffchainResolver 升级为多签名者 | ENS-offchain-resolver | 🟡 中 | 生产上线前做，成本低（20行） |
+| IERC7996 直接解析路径 | ens-contracts | 🟢 低 | 主网可选优化 |
+| Cloudflare Workers 网关部署 | ENS-offchain-resolver | 🟢 低 | 生产部署更优解 |
+| multi-chain Provider 配置 | CometENS (aastar-dev) | 🟢 低 | 扩展到其他 OP-stack L2 时参考 |
+| OPResolver 状态证明 | CometENS (aastar-dev) | 🟢 低 | 里程碑 C 的实现参考 |
+| Contenthash 前端入口 | CometENS-old | 🟢 低 | admin.html 可补充 setContenthash |
+| resolveWithProof 集成测试 | ENS-offchain-resolver | 🟢 低 | 补充合法/过期/篡改签名测试用例 |
 
-### 当前项目的优势（不需要改变的部分）
+### 已撤销的错误建议
 
-- ✅ L2Records 合约（所有权 + 多链 + 事件 — 远超历史版本）
-- ✅ 上游应用 secp256k1 签名 API（三个历史仓库均无此功能）
-- ✅ EIP-712 用户注册流程（安全且用户体验好）
-- ✅ 配置驱动架构（VITE_NETWORK / VITE_ROOT_DOMAIN 等）
-- ✅ 测试覆盖（unit + e2e + integration，历史仓库均较薄弱）
+- ~~签名格式修改（移除 Ethereum prefix）~~ — **不需要**，当前实现正确
+- ~~立即修复签名兼容性~~ — **误判**，无需修复
 
-### 最重要的两个修复
+---
 
-1. **签名格式** — 不改可能导致与 ENS Universal Resolver 不兼容
-2. **多签名者** — 不改会在密钥轮换时需要重新部署合约
+## 五、对当前实现的最终评估
 
-这两项改动代码量都不大，但对生产稳定性影响最大。
+### 与 ENS v2 的兼容性
+
+**当前 CometENS 与 ENS v2 的兼容性：高**
+
+- ✅ 使用 viem >= 2.35.0（ENS v2 客户端库要求）
+- ✅ OffchainResolver 实现 IExtendedResolver（0x9061b923），被新 UniversalResolver 正确识别
+- ✅ resolveWithProof 回调与 ccipBatchCallback 完全适配
+- ✅ 签名绑定了解析器地址 + 过期时间 + calldata + result（完整防重放）
+- ✅ L2Records 的 addr/text/contenthash 接口符合 ENS resolver profile 规范
+- ✅ ENSIP-11 多链地址（coinType = 0x80000000 | chainId）已支持
+
+### 当前实现的优势
+
+1. **自研 CCIP-Read 实现优于直接用 @chainlink/ccip-read-server**：无外部依赖，逻辑完全可控
+2. **L2Records 合约超越历史版本**：加入所有权（onlyOwner）、多链 coinType、事件（可索引）
+3. **上游应用 API 是独创功能**：所有历史仓库和 ENS 官方均无此功能
+4. **签名方案内部自洽**：网关和合约一致，实际运行正确
+
+### 唯一需要在主网前修复的问题
+
+**OffchainResolver 多签名者支持**（约 20 行改动）：
+- 不影响测试网运行
+- 主网上线前必须完成
+- 原因：生产环境需要零停机密钥轮换能力
+
+---
+
+## 六、附录：新 ENS 技术栈快照
+
+| 组件 | 当前状态 | 我们的对应实现 |
+|------|----------|--------------|
+| UniversalResolver（新） | `CCIPBatcher` + 批量网关 | 兼容，无需改动 |
+| 批量网关协议 | ENSIP-21 (IBatchGateway) | ensjs 客户端侧处理，无需服务端改动 |
+| 直接解析路径 | IERC7996 (0x582de3e7) | 可选实现，建议主网前添加 |
+| PublicResolver 授权 | operator 映射 + delegate 映射 | 我们用 onlyOwner + Worker EOA，满足 MVP |
+| Name Wrapper (ERC-1155) | L2 官方合约 | 里程碑 B 升级目标 |
+| 状态证明 (OPFault) | unruggable-gateways / OPResolver | 里程碑 C 升级目标 |
+| viem 客户端 | >= 2.35.0 | ✅ 已满足 |
