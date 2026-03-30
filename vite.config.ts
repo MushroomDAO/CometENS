@@ -201,7 +201,7 @@ export default defineConfig(({ mode }) => {
             }
             const label = registrationRegistry.get(address)
             if (!label) {
-              res.statusCode = 404
+              res.statusCode = 200
               res.end(JSON.stringify({ found: false }))
               return
             }
@@ -220,7 +220,7 @@ export default defineConfig(({ mode }) => {
                   // Stale cache entry (e.g. after contract redeployment) — purge and report not found
                   registrationRegistry.delete(address)
                   try { writeFileSync(REGISTRY_FILE, JSON.stringify(Object.fromEntries(registrationRegistry), null, 2)) } catch {}
-                  res.statusCode = 404
+                  res.statusCode = 200
                   res.end(JSON.stringify({ found: false }))
                   return
                 }
