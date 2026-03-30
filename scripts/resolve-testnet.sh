@@ -47,20 +47,9 @@ rpc_call() {
   echo "$result"
 }
 
-decode_string() {
-  # Decode ABI-encoded string from hex
-  # $1 = hex string (with or without 0x)
-  local hex="${1#0x}"
-  # offset at bytes 0-31, length at bytes 32-63, data from bytes 64
-  local len_hex="${hex:64:64}"
-  local len=$((16#${len_hex}))
-  local data_hex="${hex:128:$((len * 2))}"
-  printf '%b' "$(echo "$data_hex" | sed 's/../\\x&/g')" 2>/dev/null || echo "(decode error)"
-}
-
 # ─── Step 0: Read gateway URL from chain ──────────────────────────────────────
 
-GW_SELECTOR="0xec556889"  # keccak4("gatewayUrl()")
+GW_SELECTOR="0x8bf165d9"  # keccak4("gatewayUrl()")
 GW_RESPONSE=$(rpc_call "$RESOLVER" "$GW_SELECTOR")
 GW_URL=$(echo "$GW_RESPONSE" | python3 -c "
 import sys, json
