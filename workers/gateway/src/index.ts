@@ -3,13 +3,14 @@
  *
  * Implements the EIP-3668 off-chain resolver gateway.
  * Receives calldata from the L1 OffchainResolver, reads records from
- * L2Records on OP Sepolia, signs the response, and returns it.
+ * L2Records on OP Sepolia or OP Mainnet, signs the response, and returns it.
  *
- * Required secrets (set via `wrangler secret put <NAME>`):
- *   OP_SEPOLIA_RPC_URL       — Optimism Sepolia JSON-RPC endpoint
+ * Required secrets (set via `wrangler secret put <NAME> --env <testnet|production>`):
+ *   OP_RPC_URL               — Optimism RPC endpoint (Sepolia or Mainnet)
  *   PRIVATE_KEY_SUPPLIER     — 0x-prefixed private key that signs CCIP responses
  *
- * Required vars (wrangler.toml [vars]):
+ * Required vars (wrangler.toml [env.*].vars):
+ *   NETWORK                  — "op-sepolia" | "op-mainnet"
  *   L2_RECORDS_ADDRESS       — deployed L2Records contract address
  */
 
@@ -23,15 +24,16 @@ import {
   encodePacked,
   type Hex,
 } from 'viem'
-import { optimismSepolia } from 'viem/chains'
+import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Env {
-  OP_SEPOLIA_RPC_URL: string
+  OP_RPC_URL: string
   PRIVATE_KEY_SUPPLIER: string
   L2_RECORDS_ADDRESS: string
+  NETWORK: 'op-sepolia' | 'op-mainnet'
 }
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -104,12 +106,39 @@ const L2_RECORDS_ABI = [
   },
 ] as const
 
+// ─── Per-function ABIs (avoid overload ambiguity in encodeFunctionResult) ─────
+
+const ADDR_SINGLE_ABI = [{
+  type: 'function', name: 'addr', stateMutability: 'view',
+  inputs: [{ name: 'node', type: 'bytes32' }],
+  outputs: [{ name: '', type: 'address' }],
+}] as const
+
+const ADDR_MULTI_ABI = [{
+  type: 'function', name: 'addr', stateMutability: 'view',
+  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
+  outputs: [{ name: '', type: 'bytes' }],
+}] as const
+
+const TEXT_ABI = [{
+  type: 'function', name: 'text', stateMutability: 'view',
+  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }],
+  outputs: [{ name: '', type: 'string' }],
+}] as const
+
+const CONTENTHASH_ABI = [{
+  type: 'function', name: 'contenthash', stateMutability: 'view',
+  inputs: [{ name: 'node', type: 'bytes32' }],
+  outputs: [{ name: '', type: 'bytes' }],
+}] as const
+
 // ─── Core resolution logic ────────────────────────────────────────────────────
 
 async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
+  const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
   const client = createPublicClient({
-    chain: optimismSepolia,
-    transport: http(env.OP_SEPOLIA_RPC_URL),
+    chain,
+    transport: http(env.OP_RPC_URL),
   })
   const contractAddress = env.L2_RECORDS_ADDRESS as Hex
 
@@ -119,43 +148,31 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
     if (args.length === 2) {
       const [node, coinType] = args as [Hex, bigint]
       const value = await client.readContract({
-        address: contractAddress,
-        abi: L2_RECORDS_ABI,
-        functionName: 'addr',
-        args: [node, coinType],
+        address: contractAddress, abi: ADDR_MULTI_ABI, functionName: 'addr', args: [node, coinType],
       })
-      return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'addr', result: value as Hex })
+      return encodeFunctionResult({ abi: ADDR_MULTI_ABI, functionName: 'addr', result: value as Hex })
     }
     const [node] = args as [Hex]
     const value = await client.readContract({
-      address: contractAddress,
-      abi: L2_RECORDS_ABI,
-      functionName: 'addr',
-      args: [node],
+      address: contractAddress, abi: ADDR_SINGLE_ABI, functionName: 'addr', args: [node],
     })
-    return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'addr', result: value as Hex })
+    return encodeFunctionResult({ abi: ADDR_SINGLE_ABI, functionName: 'addr', result: value as `0x${string}` })
   }
 
   if (functionName === 'text') {
     const [node, key] = args as [Hex, string]
     const value = await client.readContract({
-      address: contractAddress,
-      abi: L2_RECORDS_ABI,
-      functionName: 'text',
-      args: [node, key],
+      address: contractAddress, abi: TEXT_ABI, functionName: 'text', args: [node, key],
     })
-    return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'text', result: value as string })
+    return encodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', result: value as string })
   }
 
   if (functionName === 'contenthash') {
     const [node] = args as [Hex]
     const value = await client.readContract({
-      address: contractAddress,
-      abi: L2_RECORDS_ABI,
-      functionName: 'contenthash',
-      args: [node],
+      address: contractAddress, abi: CONTENTHASH_ABI, functionName: 'contenthash', args: [node],
     })
-    return encodeFunctionResult({ abi: RESOLVE_ABI, functionName: 'contenthash', result: value as Hex })
+    return encodeFunctionResult({ abi: CONTENTHASH_ABI, functionName: 'contenthash', result: value as Hex })
   }
 
   throw new Error('Unsupported selector')

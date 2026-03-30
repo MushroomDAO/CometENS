@@ -3,13 +3,31 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
+# ─── Testnet (OP Sepolia + Ethereum Sepolia) ──────────────────────────────────
+# Deploy: wrangler deploy --env testnet
+# URL:    https://cometens-gateway.jhfnetboy.workers.dev
+# Secrets (per-env):
+#   wrangler secret put OP_RPC_URL --env testnet
+#   wrangler secret put PRIVATE_KEY_SUPPLIER --env testnet
+[env.testnet]
+name = "cometens-gateway"
+[env.testnet.vars]
+NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0xf8df7ffd1cefd1226bf0f302120cafd8f6119115"
-# OP_SEPOLIA_RPC_URL and PRIVATE_KEY_SUPPLIER must be set as secrets:
-#   wrangler secret put OP_SEPOLIA_RPC_URL
-#   wrangler secret put PRIVATE_KEY_SUPPLIER
 
-# Uncomment and set after assigning a custom domain in the CF dashboard:
-# [[routes]]
+# ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
+# Deploy: wrangler deploy --env production
+# URL:    https://cometens-gateway-production.jhfnetboy.workers.dev
+#         (or custom domain — uncomment routes below)
+# Secrets (per-env):
+#   wrangler secret put OP_RPC_URL --env production
+#   wrangler secret put PRIVATE_KEY_SUPPLIER --env production
+[env.production]
+name = "cometens-gateway-production"
+[env.production.vars]
+NETWORK = "op-mainnet"
+L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
+# Uncomment after assigning a custom domain in the CF dashboard:
+# [[env.production.routes]]
 # pattern = "gateway.yourdomain.com/*"
 # custom_domain = true
