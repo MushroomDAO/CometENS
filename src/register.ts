@@ -147,7 +147,8 @@ async function connectWallet(): Promise<`0x${string}`> {
 
 // ─── Existing registration banner ────────────────────────────────────────────
 
-const STORAGE_KEY = 'cometens_registrations'
+// Cache key includes contract address suffix so it auto-invalidates when contract changes
+const STORAGE_KEY = `cometens_reg_${config.l2RecordsAddress.toLowerCase().slice(-8)}`
 
 interface RegistrationRecord {
   address: string
@@ -157,7 +158,6 @@ interface RegistrationRecord {
 
 function saveRegistration(address: string, label: string, fullName: string) {
   const records: RegistrationRecord[] = getRegistrations()
-  // overwrite if same address already in list
   const idx = records.findIndex(r => r.address.toLowerCase() === address.toLowerCase())
   const rec = { address: address.toLowerCase(), label, fullName }
   if (idx >= 0) records[idx] = rec
@@ -177,36 +177,54 @@ function getRegistrationFor(address: string): RegistrationRecord | undefined {
   return getRegistrations().find(r => r.address.toLowerCase() === address.toLowerCase())
 }
 
+function clearRegistrationFor(address: string) {
+  const records = getRegistrations().filter(r => r.address.toLowerCase() !== address.toLowerCase())
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
+}
+
 async function checkExistingRegistration(address: string) {
-  // Primary: query L2Records on-chain — works without server, always current
+  const ZERO_NODE = '0x0000000000000000000000000000000000000000000000000000000000000000'
+
+  // Primary: query L2Records on-chain — authoritative, always current
+  let onChainReachable = false
   try {
     const client = getL2Client()
-    const ZERO_NODE = '0x0000000000000000000000000000000000000000000000000000000000000000'
     const node = await client.readContract({
       address: config.l2RecordsAddress,
       abi: L2_READ_ABI,
       functionName: 'primaryNode',
       args: [address as `0x${string}`],
     })
-    if (node && node !== ZERO_NODE) {
-      const label = await client.readContract({
-        address: config.l2RecordsAddress,
-        abi: L2_READ_ABI,
-        functionName: 'labelOf',
-        args: [node],
-      })
-      if (label) {
-        const fullName = `${label}.${config.rootDomain}`
-        saveRegistration(address, label, fullName)
-        showExistingBanner({ address, label, fullName })
-        return
-      }
+    onChainReachable = true
+
+    if (!node || node === ZERO_NODE) {
+      // Definitively not registered — clear any stale cache and stop
+      clearRegistrationFor(address)
+      return
     }
+
+    const label = await client.readContract({
+      address: config.l2RecordsAddress,
+      abi: L2_READ_ABI,
+      functionName: 'labelOf',
+      args: [node],
+    })
+    if (label) {
+      const fullName = `${label}.${config.rootDomain}`
+      saveRegistration(address, label, fullName)
+      showExistingBanner({ address, label, fullName })
+    } else {
+      clearRegistrationFor(address)
+    }
+    return
   } catch {
-    // Chain unreachable — fall through to server cache
+    // Chain unreachable — fall through to server/cache
   }
 
-  // Fallback: server cache (for dev server mode)
+  // On-chain was reachable but returned nothing — don't show stale cache
+  if (onChainReachable) return
+
+  // Fallback: server cache (for dev server mode, only if L2 RPC is down)
   try {
     const res = await fetch(`/api/manage/lookup?address=${encodeURIComponent(address)}`)
     if (res.ok) {
@@ -221,7 +239,7 @@ async function checkExistingRegistration(address: string) {
     // server unreachable — fall through to localStorage cache
   }
 
-  // Last resort: localStorage from a previous session
+  // Last resort: localStorage (only shown when both L2 RPC and server are unreachable)
   const cached = getRegistrationFor(address)
   if (cached) showExistingBanner(cached)
 }
