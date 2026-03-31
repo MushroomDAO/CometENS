@@ -1,0 +1,46 @@
+name = "cometens-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Testnet (OP Sepolia + Ethereum Sepolia) ──────────────────────────────────
+# Deploy: wrangler deploy --env testnet
+# URL:    https://cometens-gateway.jhfnetboy.workers.dev
+# 
+# Secrets (per-env, use `wrangler secret put`):
+#   OP_RPC_URL                 — Optimism RPC endpoint
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
+#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
+#   REGISTRATION_SECRET        — Password for registration auth
+#
+[env.testnet]
+name = "cometens-gateway"
+[env.testnet.vars]
+NETWORK = "op-sepolia"
+L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
+ROOT_DOMAIN = "aastar.eth"
+# ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+
+# ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
+# Deploy: wrangler deploy --env production
+# URL:    https://cometens-gateway-production.jhfnetboy.workers.dev
+#         (or custom domain — uncomment routes below)
+# 
+# Secrets (per-env, use `wrangler secret put`):
+#   OP_RPC_URL                 — Optimism RPC endpoint
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
+#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
+#   REGISTRATION_SECRET        — Password for registration auth
+#
+[env.production]
+name = "cometens-gateway-production"
+[env.production.vars]
+NETWORK = "op-mainnet"
+L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
+ROOT_DOMAIN = "aastar.eth"
+# ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+
+# Uncomment after assigning a custom domain in the CF dashboard:
+# [[env.production.routes]]
+# pattern = "gateway.yourdomain.com/*"
+# custom_domain = true

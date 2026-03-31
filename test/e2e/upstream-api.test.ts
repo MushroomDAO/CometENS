@@ -14,10 +14,6 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  keccak256,
-  toBytes,
-  toHex,
-  encodePacked,
   namehash,
   type Hex,
   type Address,
@@ -85,15 +81,9 @@ function signatureMessage(label: string, owner: string, timestamp: number): stri
   return `CometENS:register:${label}:${owner}:${timestamp}`
 }
 
-// ─── Inline gateway server ────────────────────────────────────────────────────
+// ─── Gateway server (uses the real shared handler, same as vite.config.ts) ───
 
 function startApiServer(l2RecordsAddr: Address, allowedSigners: Address[]): Server {
-  async function withWriter<T>(fn: (w: any) => Promise<T>): Promise<T> {
-    const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
-    const writer = new L2RecordsWriter(deployer, anvilChain, `http://127.0.0.1:${ANVIL_PORT}`, l2RecordsAddr)
-    return fn(writer)
-  }
-
   return createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json')
 
@@ -108,60 +98,16 @@ function startApiServer(l2RecordsAddr: Address, allowedSigners: Address[]): Serv
     })
 
     try {
-      const { recoverMessageAddress, isAddress, labelhash } = await import('viem')
-      const payload = JSON.parse(body) as {
-        label?: string; owner?: string; addr?: string
-        timestamp?: number; signature?: Hex
-      }
-
-      // ── Signature auth ───────────────────────────────────────────────────
-      const { signature, timestamp } = payload
-      if (!signature) { res.writeHead(401); res.end(JSON.stringify({ error: 'Missing signature' })); return }
-      if (!timestamp) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing timestamp' })); return }
-
-      const drift = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
-      if (drift > 60) {
-        res.writeHead(401)
-        res.end(JSON.stringify({ error: `Timestamp drift too large (${drift}s)` }))
-        return
-      }
-
-      const label = payload.label?.trim().toLowerCase()
-      if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
-        res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid label' })); return
-      }
-      const owner = payload.owner as Address
-      if (!owner || !isAddress(owner)) {
-        res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid owner' })); return
-      }
-
-      const message = signatureMessage(label, owner, timestamp)
-      const recovered = await recoverMessageAddress({ message, signature })
-      if (!allowedSigners.map(a => a.toLowerCase()).includes(recovered.toLowerCase())) {
-        res.writeHead(401)
-        res.end(JSON.stringify({ error: `Signer ${recovered} not in allowed list` }))
-        return
-      }
-
-      // ── Execute registration ─────────────────────────────────────────────
-      const parentNode = namehash(ROOT_DOMAIN) as Hex
-      const lh = labelhash(label) as Hex
-      const fullName = `${label}.${ROOT_DOMAIN}`
-      const node = namehash(fullName) as Hex
-
-      const txHash = await withWriter(w => w.setSubnodeOwner(parentNode, lh, owner))
-
-      const addrTarget = (payload.addr ?? owner) as Address
-      if (isAddress(addrTarget)) {
-        const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as Hex
-        await withWriter(w => w.setAddr(node, 60n, addrBytes))
-      }
-
+      const { handleV1Register } = await import('../../server/gateway/v1/register')
+      const { L2RecordsWriter } = await import('../../server/gateway/writer/L2RecordsWriter')
+      const writer = new L2RecordsWriter(deployer, anvilChain, `http://127.0.0.1:${ANVIL_PORT}`, l2RecordsAddr)
+      const payload = JSON.parse(body)
+      const result = await handleV1Register(payload, allowedSigners as string[], ROOT_DOMAIN, writer)
       res.writeHead(200)
-      res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))
-    } catch (e) {
-      res.writeHead(400)
-      res.end(JSON.stringify({ error: (e as Error).message }))
+      res.end(JSON.stringify(result))
+    } catch (e: any) {
+      res.writeHead(e?.status ?? 400)
+      res.end(JSON.stringify({ error: e?.message ?? String(e) }))
     }
   })
 }
@@ -268,7 +214,7 @@ describe('E2E: /api/v1/register upstream API', () => {
     })
     expect(res.status).toBe(401)
     const body = await res.json() as any
-    expect(body.error).toMatch(/not in allowed list/)
+    expect(body.error).toMatch(/not in the allowed list/)
   })
 
   it('rejects a request with a stale timestamp (anti-replay)', async () => {
@@ -300,7 +246,7 @@ describe('E2E: /api/v1/register upstream API', () => {
     })
     expect(res.status).toBe(401)
     const body = await res.json() as any
-    expect(body.error).toMatch(/not in allowed list/)
+    expect(body.error).toMatch(/not in the allowed list/)
   })
 
   it('rejects a request with missing signature', async () => {

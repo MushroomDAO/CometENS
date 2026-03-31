@@ -117,6 +117,68 @@
     <div class="result-box hidden" id="setTextResult"></div>
   </div>
 
+  <!-- ── Section 4: Add Registrar ── -->
+  <div class="card">
+    <h3>Add Registrar (Owner Only)</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Authorize an address to register subdomains under a parent domain</p>
+
+    <label for="addRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
+    <input id="addRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="addRegistrarAddress">Registrar Address (0x...)</label>
+    <input id="addRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <div class="row">
+      <div style="flex:1;">
+        <label for="addRegistrarQuota">Quota (max registrations, 0 = unlimited)</label>
+        <input id="addRegistrarQuota" type="number" value="1000" min="0" style="width:100%;" />
+      </div>
+      <div style="flex:1;">
+        <label for="addRegistrarExpiry">Expiry (timestamp, 0 = never)</label>
+        <input id="addRegistrarExpiry" type="number" value="0" min="0" style="width:100%;" />
+      </div>
+    </div>
+
+    <button class="btn-primary" id="addRegistrarBtn" style="background:#2e7d32;">Connect &amp; Sign AddRegistrar</button>
+    <div class="result-box hidden" id="addRegistrarResult"></div>
+  </div>
+
+  <!-- ── Deployed Contracts ── -->
+  <div class="card">
+    <h3>Deployed Contracts</h3>
+    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead>
+        <tr style="border-bottom:1px solid #e0e0e0;">
+          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left; width:180px;">Contract</th>
+          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left; width:80px;">Deployed by</th>
+          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left;">Address</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:6px 0; color:#333;">L2RecordsV2 (OP Sepolia)</td>
+          <td style="padding:6px 0; color:#0b79d0; font-size:11px;">CometENS</td>
+          <td><a href="https://sepolia-optimism.etherscan.io/address/0x4124c580a52E3E8d7E678E3023B913738e5B2FD3" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x4124c580a52E3E8d7E678E3023B913738e5B2FD3</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:6px 0; color:#333;">OffchainResolver (Sepolia)</td>
+          <td style="padding:6px 0; color:#0b79d0; font-size:11px;">CometENS</td>
+          <td><a href="https://sepolia.etherscan.io/address/0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:6px 0; color:#333;">ENS Registry (Sepolia)</td>
+          <td style="padding:6px 0; color:#666; font-size:11px;">ENS Official</td>
+          <td><a href="https://sepolia.etherscan.io/address/0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e</a></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#333;">ENS Universal Resolver (Sepolia)</td>
+          <td style="padding:6px 0; color:#666; font-size:11px;">ENS Official</td>
+          <td><a href="https://sepolia.etherscan.io/address/0x21B000Fd62a880b2125A61e36a284BB757b76025" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x21B000Fd62a880b2125A61e36a284BB757b76025</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <script type="module" src="/src/admin.ts"></script>
 </body>
 </html>

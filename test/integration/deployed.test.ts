@@ -43,7 +43,10 @@ const SKIP = !OP_RPC || !L2_ADDR || L2_ADDR === '' || !PRIVATE_KEY
 
 const L2_ABI = [
   { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'registerSubnode', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }, { name: 'label', type: 'string' }, { name: 'addrBytes', type: 'bytes' }], outputs: [] },
+  { type: 'function', name: 'setSubnodeOwner', stateMutability: 'nonpayable', inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'labelhash', type: 'bytes32' }, { name: 'newOwner', type: 'address' }, { name: 'label', type: 'string' }], outputs: [] },
+  { type: 'function', name: 'labelOf', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'primaryNode', stateMutability: 'view', inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'setAddr', stateMutability: 'nonpayable', inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }, { name: 'addrBytes', type: 'bytes' }], outputs: [] },
   { type: 'function', name: 'addr', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
@@ -52,7 +55,7 @@ const L2_ABI = [
 ] as const
 
 const RESOLVER_ABI = [
-  { type: 'function', name: 'signerAddress', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'gatewayUrl', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'resolveWithProof', stateMutability: 'view', inputs: [{ name: 'response', type: 'bytes' }, { name: 'extraData', type: 'bytes' }], outputs: [{ type: 'bytes' }] },
 ] as const
@@ -90,37 +93,28 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
     expect(owner.toLowerCase()).toBe(deployer.address.toLowerCase())
   }, 30_000)
 
-  it('registers a subdomain on OP Sepolia', async () => {
+  it('registers a subdomain + sets ETH addr atomically on OP Sepolia', async () => {
     const lh = labelhash(testLabel)
-    const node = makeNode(ROOT, testLabel)
-
-    const txHash = await opWallet.writeContract({
-      address: L2_ADDR, abi: L2_ABI, functionName: 'setSubnodeOwner',
-      args: [ROOT, lh, deployer.address],
-      account: deployer, chain: optimismSepolia,
-    })
-    console.log('setSubnodeOwner tx:', txHash)
-    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash })
-    expect(receipt.status).toBe('success')
-
-    const nodeOwner = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'subnodeOwner', args: [node] })
-    expect(nodeOwner.toLowerCase()).toBe(deployer.address.toLowerCase())
-  }, 60_000)
-
-  it('sets ETH addr record on OP Sepolia', async () => {
     const node = makeNode(ROOT, testLabel)
     const addrBytes = toHex(toBytes(deployer.address), { size: 20 }) as Hex
 
     const txHash = await opWallet.writeContract({
-      address: L2_ADDR, abi: L2_ABI, functionName: 'setAddr',
-      args: [node, 60n, addrBytes],
+      address: L2_ADDR, abi: L2_ABI, functionName: 'registerSubnode',
+      args: [ROOT, lh, deployer.address, testLabel, addrBytes],
       account: deployer, chain: optimismSepolia,
     })
-    console.log('setAddr tx:', txHash)
-    await opPub.waitForTransactionReceipt({ hash: txHash })
+    console.log('registerSubnode tx:', txHash)
+    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
+    expect(receipt.status).toBe('success')
+
+    const nodeOwner = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'subnodeOwner', args: [node] })
+    expect(nodeOwner.toLowerCase()).toBe(deployer.address.toLowerCase())
 
     const resolved = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'addr', args: [node] })
     expect(resolved.toLowerCase()).toBe(deployer.address.toLowerCase())
+
+    const label = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'labelOf', args: [node] })
+    expect(label).toBe(testLabel)
   }, 60_000)
 
   it('sets text record on OP Sepolia', async () => {
@@ -130,7 +124,7 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
       args: [node, 'com.twitter', '@cometens_test'],
       account: deployer, chain: optimismSepolia,
     })
-    await opPub.waitForTransactionReceipt({ hash: txHash })
+    await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
 
     const value = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'text', args: [node, 'com.twitter'] })
     expect(value).toBe('@cometens_test')
@@ -145,12 +139,12 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
   })
 
-  it('reads signer and gateway URL from deployed resolver', async () => {
-    const signer = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'signerAddress', args: [] })
+  it('reads owner and gateway URL from deployed resolver', async () => {
+    const owner = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'owner', args: [] })
     const gateway = await l1Pub.readContract({ address: L1_ADDR, abi: RESOLVER_ABI, functionName: 'gatewayUrl', args: [] })
-    console.log('Resolver signer:', signer)
+    console.log('Resolver owner:', owner)
     console.log('Resolver gateway:', gateway)
-    expect(signer).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect(owner).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(gateway).toMatch(/^https?:\/\//)
   }, 30_000)
 
@@ -256,7 +250,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
       account: deployer, chain: optimismSepolia,
     })
     console.log('L2 setAddr tx:', txHash)
-    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash })
+    const receipt = await opPub.waitForTransactionReceipt({ hash: txHash, confirmations: 2 })
     expect(receipt.status).toBe('success')
 
     const stored = await opPub.readContract({

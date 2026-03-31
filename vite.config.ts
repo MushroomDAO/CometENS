@@ -1,8 +1,67 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { join } from 'path'
 
 const MAX_BODY_BYTES = 10 * 1024 // 10 KB
 
-export default defineConfig({
+// ─── Registration registry (address → label, persisted to .registrations.json) ─
+
+const REGISTRY_FILE = join(process.cwd(), '.registrations.json')
+
+const registrationRegistry: Map<string, string> = (() => {
+  try {
+    if (existsSync(REGISTRY_FILE)) {
+      const data = JSON.parse(readFileSync(REGISTRY_FILE, 'utf8')) as Record<string, string>
+      return new Map(Object.entries(data))
+    }
+  } catch {}
+  return new Map()
+})()
+
+function saveToRegistry(address: string, label: string) {
+  registrationRegistry.set(address.toLowerCase(), label.toLowerCase())
+  const obj = Object.fromEntries(registrationRegistry)
+  try {
+    writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2))
+  } catch (e) {
+    console.error('[registry] Failed to persist .registrations.json:', e)
+  }
+}
+
+// ─── ABI constants (shared across request handlers) ──────────────────────────
+
+const L2_READ_ABI = [
+  { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'primaryNode', stateMutability: 'view',
+    inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
+] as const
+
+function getNetwork(): 'op-sepolia' | 'op-mainnet' {
+  return (process.env.VITE_NETWORK || 'op-sepolia') as 'op-sepolia' | 'op-mainnet'
+}
+
+function getL2RpcUrl(): string {
+  const network = getNetwork()
+  if (network === 'op-mainnet') {
+    return process.env.OP_MAINNET_RPC_URL ?? process.env.OP_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+  }
+  return process.env.OP_SEPOLIA_RPC_URL ?? process.env.OP_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+}
+
+async function getL2Chain() {
+  const { optimismSepolia, optimism } = await import('viem/chains')
+  return getNetwork() === 'op-mainnet' ? optimism : optimismSepolia
+}
+
+export default defineConfig(({ mode }) => {
+  // Load ALL env vars (empty prefix = no filter) into process.env so server
+  // middleware can read WORKER_EOA_PRIVATE_KEY, PRIVATE_KEY_SUPPLIER, etc.
+  // loadEnv with '' prefix loads everything; Object.assign merges into process.env.
+  const env = loadEnv(mode, process.cwd(), '')
+  Object.assign(process.env, env)
+
+  return {
   envPrefix: ['VITE_', 'OP_'],
   plugins: [
     {
@@ -77,97 +136,39 @@ export default defineConfig({
             return
           }
 
-          const body = await readBody(anyReq)
+          const allowedRaw = process.env.UPSTREAM_ALLOWED_SIGNERS ?? ''
+          if (!allowedRaw) {
+            res.statusCode = 503
+            res.end(JSON.stringify({ error: 'UPSTREAM_ALLOWED_SIGNERS not configured on server' }))
+            return
+          }
 
-          try {
-            const { isAddress, namehash, labelhash, recoverMessageAddress } = await import('viem')
-            const payload = JSON.parse(body || '{}') as {
-              label?: string
-              owner?: string
-              addr?: string
-              timestamp?: number
-              signature?: `0x${string}`
-            }
+          const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
+          if (!rootDomain) {
+            res.statusCode = 503
+            res.end(JSON.stringify({ error: 'VITE_ROOT_DOMAIN not configured on server' }))
+            return
+          }
 
-            // ── Signature-based authentication ────────────────────────────────
-            const allowedRaw = process.env.UPSTREAM_ALLOWED_SIGNERS ?? ''
-            if (!allowedRaw) {
-              res.statusCode = 503
-              res.end(JSON.stringify({ error: 'UPSTREAM_ALLOWED_SIGNERS not configured on server' }))
-              return
-            }
-            const allowedSigners = allowedRaw.split(',').map((a) => a.trim().toLowerCase())
-
-            const { signature, timestamp } = payload
-            if (!signature || !signature.startsWith('0x')) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: 'Missing signature' }))
-              return
-            }
-            if (!timestamp || typeof timestamp !== 'number') {
-              res.statusCode = 400
-              res.end(JSON.stringify({ error: 'Missing or invalid timestamp' }))
-              return
-            }
-
-            // Anti-replay: timestamp must be within ±60 seconds of server time
-            const drift = Math.abs(Math.floor(Date.now() / 1000) - timestamp)
-            if (drift > 60) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: `Timestamp drift too large (${drift}s). Must be within 60s of server time.` }))
-              return
-            }
-
-            const label = payload.label?.trim().toLowerCase()
-            if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
-              throw new Error('Invalid label: must be 1-63 lowercase alphanumeric or hyphen chars')
-            }
-            const owner = payload.owner as `0x${string}` | undefined
-            if (!owner || !isAddress(owner)) {
-              throw new Error('Invalid owner: must be a valid Ethereum address')
-            }
-
-            // Recover signer from canonical message
-            const message = `CometENS:register:${label}:${owner}:${timestamp}`
-            const recovered = await recoverMessageAddress({ message, signature })
-            if (!allowedSigners.includes(recovered.toLowerCase())) {
-              res.statusCode = 401
-              res.end(JSON.stringify({ error: `Signer ${recovered} is not in the allowed list` }))
-              return
-            }
-
-            const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
-            if (!rootDomain) throw new Error('VITE_ROOT_DOMAIN not configured on server')
-
-            if (url === '/register') {
-              const parentNode = namehash(rootDomain) as `0x${string}`
-              const lh = labelhash(label) as `0x${string}`
-              const fullName = `${label}.${rootDomain}`
-              const node = namehash(fullName) as `0x${string}`
-
-              // Register subdomain (setSubnodeOwner on L2)
-              const txHash = await withWriter((writer) =>
-                writer.setSubnodeOwner(parentNode, lh, owner)
-              )
-
-              // Optionally set ETH addr record in the same call sequence
-              const addrTarget = (payload.addr ?? owner) as `0x${string}`
-              if (addrTarget && isAddress(addrTarget)) {
-                const { toHex, toBytes } = await import('viem')
-                const addrBytes = toHex(toBytes(addrTarget), { size: 20 }) as `0x${string}`
-                await withWriter((writer) => writer.setAddr(node, 60n, addrBytes))
-              }
-
-              res.statusCode = 200
-              res.end(JSON.stringify({ ok: true, name: fullName, node, txHash }))
-              return
-            }
-
+          if (url !== '/register') {
             res.statusCode = 404
             res.end(JSON.stringify({ error: `Unknown endpoint: /api/v1${url}` }))
-          } catch (e) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: (e as Error)?.message ?? String(e) }))
+            return
+          }
+
+          const body = await readBody(anyReq)
+          const payload = JSON.parse(body || '{}')
+          const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
+
+          try {
+            const { handleV1Register } = await import('./server/gateway/v1/register')
+            const writer = await buildWriter()
+            const result = await handleV1Register(payload, allowedSigners, rootDomain, writer)
+            res.statusCode = 200
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.statusCode = e?.status ?? 400
+            res.end(JSON.stringify({ error: e?.message ?? String(e) }))
           }
         })
 
@@ -175,9 +176,110 @@ export default defineConfig({
           const anyReq = req as any
           const url = String(anyReq.url || '')
 
+          res.setHeader('content-type', 'application/json')
+
+          // ── GET /api/manage/check-label?label=alice&parent=aastar.eth ────
+          if (anyReq.method === 'GET' && url.startsWith('/check-label')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const label = qs.get('label')?.trim().toLowerCase()
+            const parent = qs.get('parent')?.trim()
+            if (!label || !parent) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing label or parent param' }))
+              return
+            }
+            try {
+              const { namehash: nh } = await import('viem/ens')
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+              const l2Rpc  = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const node = nh(`${label}.${parent}`) as `0x${string}`
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
+              const owner = await pubClient.readContract({ address: l2Addr, abi: L2_READ_ABI, functionName: 'subnodeOwner', args: [node] })
+              const taken = owner !== '0x0000000000000000000000000000000000000000'
+              res.statusCode = 200
+              res.end(JSON.stringify({ available: !taken, owner: taken ? owner : null }))
+            } catch (e) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: (e as Error).message }))
+            }
+            return
+          }
+
+          // ── GET /api/manage/check-owner?contract=0x... ────────────────────
+          if (anyReq.method === 'GET' && url.startsWith('/check-owner')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const contract = qs.get('contract')?.trim() as `0x${string}` | undefined
+            if (!contract) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing contract param' }))
+              return
+            }
+            try {
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const l2Rpc = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pub = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
+              const owner = await pub.readContract({
+                address: contract,
+                abi: [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
+                functionName: 'owner',
+              })
+              res.statusCode = 200
+              res.end(JSON.stringify({ owner }))
+            } catch (e) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: (e as Error).message }))
+            }
+            return
+          }
+
+          // ── GET /api/manage/lookup?address=0x... ───────────────────────────
+          if (anyReq.method === 'GET' && url.startsWith('/lookup')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const address = qs.get('address')?.toLowerCase()
+            if (!address) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing address param' }))
+              return
+            }
+            const label = registrationRegistry.get(address)
+            if (!label) {
+              res.statusCode = 200
+              res.end(JSON.stringify({ found: false }))
+              return
+            }
+            // Verify the cached entry still exists on-chain (guards against stale cache after redeployment)
+            try {
+              const { createPublicClient, http: viemHttp, isAddress } = await import('viem')
+              if (isAddress(address)) {
+                const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+                const l2Rpc  = getL2RpcUrl()
+                const chain = await getL2Chain()
+                const pub = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
+                const existingNode = await pub.readContract({
+                  address: l2Addr, abi: L2_READ_ABI, functionName: 'primaryNode', args: [address as `0x${string}`],
+                })
+                if (existingNode === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                  // Stale cache entry (e.g. after contract redeployment) — purge and report not found
+                  registrationRegistry.delete(address)
+                  try { writeFileSync(REGISTRY_FILE, JSON.stringify(Object.fromEntries(registrationRegistry), null, 2)) } catch {}
+                  res.statusCode = 200
+                  res.end(JSON.stringify({ found: false }))
+                  return
+                }
+              }
+            } catch { /* chain unreachable — fall through to return cached value */ }
+            const rootDomain = process.env.VITE_ROOT_DOMAIN || ''
+            const fullName = `${label}.${rootDomain}`
+            res.statusCode = 200
+            res.end(JSON.stringify({ found: true, label, fullName }))
+            return
+          }
+
           if (anyReq.method !== 'POST') {
             res.statusCode = 405
-            res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ error: 'Method Not Allowed' }))
             return
           }
@@ -270,12 +372,57 @@ export default defineConfig({
               })
               if (!ok) throw new Error('Invalid signature')
 
-              const txHash = await withWriter(async (writer) => {
-                const { namehash, labelhash } = await import('viem/ens')
-                const parentNode = namehash(message.parent) as `0x${string}`
-                const labelHash = labelhash(message.label) as `0x${string}`
-                return writer.setSubnodeOwner(parentNode, labelHash, message.owner)
+              // ── Duplicate checks (before executing) ───────────────────────
+              const { namehash: nh, labelhash: lh } = await import('viem/ens')
+              const { createPublicClient, http: viemHttp } = await import('viem')
+
+              const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
+              const l2Rpc  = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
+
+              const parentNode = nh(message.parent) as `0x${string}`
+              const labelHash  = lh(message.label)  as `0x${string}`
+              const node       = nh(`${message.label}.${message.parent}`) as `0x${string}`
+
+              // Check 1: label already taken
+              const existingOwner = await pubClient.readContract({
+                address: l2Addr, abi: L2_READ_ABI, functionName: 'subnodeOwner', args: [node],
               })
+              if (existingOwner !== '0x0000000000000000000000000000000000000000') {
+                res.statusCode = 409
+                res.setHeader('content-type', 'application/json')
+                res.end(JSON.stringify({
+                  error: `Label "${message.label}" is already registered under ${message.parent}`,
+                  code: 'LABEL_TAKEN',
+                }))
+                return
+              }
+
+              // Check 2: wallet already has a registration (primaryNode is set on first registration)
+              const existingPrimaryNode = await pubClient.readContract({
+                address: l2Addr, abi: L2_READ_ABI, functionName: 'primaryNode', args: [from as `0x${string}`],
+              })
+              if (existingPrimaryNode !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                res.statusCode = 409
+                res.setHeader('content-type', 'application/json')
+                res.end(JSON.stringify({
+                  error: `This wallet has already registered a subdomain under ${message.parent}`,
+                  code: 'ALREADY_REGISTERED',
+                  node: existingPrimaryNode,
+                }))
+                return
+              }
+
+              // Single transaction: register subdomain + set ETH addr record atomically
+              const { toHex, toBytes } = await import('viem')
+              const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as `0x${string}`
+              const txHash = await withWriter((writer) =>
+                writer.registerSubnode(parentNode, labelHash, message.owner, message.label, addrBytes)
+              )
+
+              // Persist owner → label mapping so lookup can return the human-readable name
+              saveToRegistry(message.owner, message.label)
 
               res.statusCode = 200
               res.setHeader('content-type', 'application/json')
@@ -320,6 +467,61 @@ export default defineConfig({
               return
             }
 
+            if (url === '/add-registrar') {
+              const { AddRegistrarTypes } = await import('./server/gateway/manage/schemas')
+              const msg = payload.message ?? {}
+
+              if (!isHex(msg.parentNode)) throw new Error('Invalid parentNode')
+              if (!isAddress(msg.registrar)) throw new Error('Invalid registrar')
+
+              const message = {
+                parentNode: msg.parentNode as `0x${string}`,
+                registrar: msg.registrar as `0x${string}`,
+                quota: asBigInt(msg.quota),
+                expiry: asBigInt(msg.expiry),
+                nonce: asBigInt(msg.nonce),
+                deadline: asBigInt(msg.deadline),
+              }
+
+              checkDeadline(message.deadline)
+
+              const ok = await verifyTypedData({
+                address: from,
+                domain,
+                primaryType: 'AddRegistrar',
+                types: AddRegistrarTypes as any,
+                message: message as any,
+                signature,
+              })
+              if (!ok) throw new Error('Invalid signature')
+
+              // Check if from is contract owner
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const l2Addr = verifyingContract
+              const l2Rpc = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
+              
+              const contractOwner = await pubClient.readContract({
+                address: l2Addr,
+                abi: [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
+                functionName: 'owner',
+              })
+              
+              if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
+                throw new Error('Only contract owner can add registrars')
+              }
+
+              const txHash = await withWriter(async (writer) =>
+                (writer as any).addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
+              )
+
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ ok, action: 'add-registrar', txHash }))
+              return
+            }
+
             res.statusCode = 404
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ error: 'Unknown manage endpoint' }))
@@ -336,6 +538,7 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
   },
+  }
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -369,15 +572,12 @@ function checkDeadline(deadline: bigint): void {
   if (deadline < now) throw new Error('Expired')
 }
 
-async function withWriter<T>(
-  fn: (writer: import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter) => Promise<T>
-): Promise<T | undefined> {
+async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsWriterV2').L2RecordsWriterV2 | undefined> {
   const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
   if (!workerPk) return undefined
 
   const { privateKeyToAccount } = await import('viem/accounts')
-  const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
-  const { optimismSepolia } = await import('viem/chains')
+  const { L2RecordsWriterV2 } = await import('./server/gateway/writer/L2RecordsWriterV2')
 
   const workerAccount = privateKeyToAccount(workerPk)
   const l2Address = (
@@ -385,8 +585,16 @@ async function withWriter<T>(
     process.env.VITE_L2_RECORDS_ADDRESS ??
     '0x0000000000000000000000000000000000000000'
   ) as `0x${string}`
-  const rpcUrl = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+  const rpcUrl = getL2RpcUrl()
+  const chain = await getL2Chain()
 
-  const writer = new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+  return new L2RecordsWriterV2(workerAccount, chain, rpcUrl, l2Address)
+}
+
+async function withWriter<T>(
+  fn: (writer: import('./server/gateway/writer/L2RecordsWriterV2').L2RecordsWriterV2) => Promise<T>
+): Promise<T | undefined> {
+  const writer = await buildWriter()
+  if (!writer) return undefined
   return fn(writer)
 }

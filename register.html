@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Register Subdomain — CometENS</title>
   <style>
-    body { font-family: monospace; padding: 40px; max-width: 600px; margin: 0 auto; }
+    body { font-family: monospace; padding: 40px; max-width: 640px; margin: 0 auto; }
     h2 { margin-bottom: 4px; }
     .muted { color: #666; font-size: 13px; margin-top: 0; }
     .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 20px; margin-top: 20px; }
@@ -28,6 +28,45 @@
     .step-label { font-size: 12px; color: #999; font-weight: bold; margin-bottom: 6px; }
     a.back { font-size: 12px; color: #0b79d0; text-decoration: none; display: inline-block; margin-bottom: 24px; }
     a.back:hover { text-decoration: underline; }
+    .chain-status { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+    .chain-name { font-weight: bold; }
+    .chain-name.ok { color: #2e7d32; }
+    .chain-name.wrong { color: #c62828; }
+    .chain-id { color: #999; }
+    .btn-switch { padding: 4px 10px; font-size: 11px; background: #fff3e0; color: #e65100; border: 1px solid #ffb74d; border-radius: 4px; cursor: pointer; font-family: monospace; }
+    .btn-switch:hover { background: #ffe0b2; }
+    .hidden { display: none !important; }
+    .verify-name { font-size: 15px; font-weight: bold; color: #0b79d0; margin-bottom: 12px; }
+    .verify-result { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 12.5px; line-height: 1.7; }
+    .verify-result.ok { background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; }
+    .verify-result.fail { background: #fdecea; border: 1px solid #e57373; color: #c62828; }
+    .verify-result.pending { background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; }
+    .verify-links { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .verify-links a { font-size: 12px; color: #0b79d0; text-decoration: none; padding: 4px 10px; border: 1px solid #0b79d0; border-radius: 4px; }
+    .verify-links a:hover { background: #e3f2fd; }
+    .existing-banner { margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; font-size: 13px; line-height: 1.6; }
+    .existing-banner a { color: #0b79d0; }
+
+    /* ── FAQ ── */
+    .faq-section { margin-top: 40px; border-top: 1px solid #e6e6e6; padding-top: 24px; }
+    .faq-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .faq-header h3 { margin: 0; font-size: 13px; text-transform: uppercase; color: #999; letter-spacing: 0.05em; }
+    .lang-toggle { display: flex; gap: 0; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; }
+    .lang-toggle button { padding: 3px 10px; font-size: 11px; border: none; border-radius: 0; background: #f0f0f0; color: #666; cursor: pointer; font-family: monospace; }
+    .lang-toggle button.active { background: #0b79d0; color: #fff; }
+    .faq-item { border: 1px solid #e6e6e6; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+    .faq-q { width: 100%; text-align: left; background: #fafafa; padding: 12px 16px; font-size: 13px; font-weight: bold; color: #222; cursor: pointer; border: none; border-radius: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .faq-q:hover { background: #f0f0f0; }
+    .faq-q .arrow { font-size: 10px; color: #999; flex-shrink: 0; transition: transform 0.15s; }
+    .faq-item.open .faq-q .arrow { transform: rotate(180deg); }
+    .faq-a { display: none; padding: 12px 16px 14px; font-size: 12.5px; line-height: 1.7; color: #333; background: #fff; border-top: 1px solid #f0f0f0; }
+    .faq-item.open .faq-a { display: block; }
+    .faq-a strong { color: #111; }
+    .faq-a .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+    .tag-now { background: #e8f5e9; color: #2e7d32; }
+    .tag-soon { background: #fff8e1; color: #f57f17; }
+    .tag-warn { background: #fdecea; color: #c62828; }
+    .faq-a code { background: #f5f5f5; padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
   </style>
 </head>
 <body>
@@ -46,6 +85,11 @@
 
   <div class="card">
     <div class="step-label">STEP 2 — Connect wallet</div>
+    <div class="chain-status" id="chainStatus">
+      <span id="chainName" class="chain-name">—</span>
+      <span id="chainId" class="chain-id"></span>
+      <button class="btn-switch hidden" id="switchChainBtn">Switch to OP Sepolia</button>
+    </div>
     <button class="btn-secondary" id="connectBtn">Connect MetaMask</button>
     <div class="address" id="connectedAddress"></div>
   </div>
@@ -56,6 +100,234 @@
     <div class="result hidden" id="result"></div>
   </div>
 
+  <div class="card hidden" id="verifyCard">
+    <div class="step-label">STEP 4 — Verify</div>
+    <div class="verify-name" id="verifyName"></div>
+    <button class="btn-secondary" id="verifyBtn">Check Resolution on L2</button>
+    <div class="verify-result hidden" id="verifyResult"></div>
+    <div class="verify-links" id="verifyLinks"></div>
+  </div>
+
+  <!-- ── FAQ ── -->
+  <div class="faq-section">
+    <div class="faq-header">
+      <h3>FAQ</h3>
+      <div class="lang-toggle">
+        <button id="langZh" class="active" onclick="setLang('zh')">中文</button>
+        <button id="langEn" onclick="setLang('en')">EN</button>
+      </div>
+    </div>
+    <div id="faqList"></div>
+  </div>
+
   <script type="module" src="/src/register.ts"></script>
+  <script>
+    const faqs = [
+      {
+        zh: {
+          q: '注册是免费的吗？',
+          a: `<strong>是的，注册完全免费。</strong>你只需在 MetaMask 里签名（无需支付 Gas），Gas 费用由服务的 Worker 账户代付。<br><br>
+              未来可能会根据域名长度或用量引入选择性收费，但基础注册将保持免费。`
+        },
+        en: {
+          q: 'Is registration free?',
+          a: `<strong>Yes, registration is completely free.</strong> You only sign a message in MetaMask — no gas fee is required from you. The service's Worker account pays the L2 transaction fee on your behalf.<br><br>
+              Selective fees may be introduced in the future based on name length or usage, but basic registration will remain free.`
+        }
+      },
+      {
+        zh: {
+          q: '根域名所有者不续费过期了，我的子域名还有效吗？',
+          a: `这是最重要的问题之一。分两个层面理解：<br><br>
+              <strong>① L2 数据层（Optimism）—— 永久安全 <span class="tag tag-now">安全</span></strong><br>
+              你的地址、文本等记录存储在 Optimism 链上的合约里，<strong>链上数据永不删除</strong>，与根域名是否续费完全无关。<br><br>
+              <strong>② L1 解析层（Ethereum ENS）—— 可能中断 <span class="tag tag-warn">风险</span></strong><br>
+              ENS 解析依赖根域名（如 <code>aastar.eth</code>）指向的 Resolver 合约。若根域名到期未续费：<br>
+              &nbsp;• 该域名进入宽限期（90天），解析服务暂停<br>
+              &nbsp;• 宽限期后可被他人重新注册，新所有者可更换 Resolver<br>
+              &nbsp;• 你的子域名解析可能失效（虽然 L2 数据仍在）<br><br>
+              <strong>长期解决方案（路线图 D）：</strong>通过 ENS Name Wrapper 烧断 <code>CANNOT_SET_RESOLVER</code> Fuse，让 Resolver 永久锁定，任何人（包括根域名所有者）都无法再更改，子域名生态永久有效。`
+        },
+        en: {
+          q: 'What happens if the root domain owner stops renewing? Is my subdomain still valid?',
+          a: `This is one of the most important questions. There are two layers to understand:<br><br>
+              <strong>① L2 data layer (Optimism) — permanently safe <span class="tag tag-now">safe</span></strong><br>
+              Your address, text, and other records are stored in a contract on the Optimism blockchain. <strong>On-chain data is never deleted</strong>, regardless of whether the root domain is renewed.<br><br>
+              <strong>② L1 resolution layer (Ethereum ENS) — may break <span class="tag tag-warn">risk</span></strong><br>
+              ENS resolution depends on the Resolver contract pointed to by the root domain (e.g. <code>aastar.eth</code>). If the root domain expires without renewal:<br>
+              &nbsp;• The domain enters a grace period (90 days), resolution pauses<br>
+              &nbsp;• After the grace period, anyone can re-register it and set a new Resolver<br>
+              &nbsp;• Your subdomain resolution may break (even though L2 data still exists)<br><br>
+              <strong>Long-term solution (Roadmap D):</strong> Burn the <code>CANNOT_SET_RESOLVER</code> Fuse via ENS Name Wrapper to permanently lock the Resolver — no one (including the root domain owner) can ever change it again.`
+        }
+      },
+      {
+        zh: {
+          q: '我对子域名的控制权有哪些？如何验证？',
+          a: `<strong>当前阶段（Milestone A）的控制权：</strong><br>
+              &nbsp;• 地址记录默认指向你的钱包，你是概念上的所有者<br>
+              &nbsp;• 通过 Admin 页面，用 EIP-712 签名可修改地址/文本记录（需要 MetaMask 确认，你的签名证明了操作来自你）<br>
+              &nbsp;• 当前在链上没有正式的所有权 NFT <span class="tag tag-soon">即将支持</span><br><br>
+              <strong>未来阶段（Milestone B）：</strong><br>
+              子域名将成为 ERC-721 NFT，你持有即代表完整所有权，可在 OpenSea 等平台转让、交易。<br><br>
+              <strong>验证方式：</strong><br>
+              &nbsp;① ENS 官方 App：<code>app.ens.domains</code> → 搜索你的域名<br>
+              &nbsp;② Etherscan（OP Sepolia）：查询 L2Records 合约 <code>0x9Ed5d10...</code> 的 addr/text 记录<br>
+              &nbsp;③ 代码验证：<code>viem.getEnsAddress("alice.aastar.eth")</code> 返回你的地址即为成功`
+        },
+        en: {
+          q: 'What control rights do I have over my subdomain? How can I verify?',
+          a: `<strong>Current control rights (Milestone A):</strong><br>
+              &nbsp;• The address record defaults to your wallet — you are the conceptual owner<br>
+              &nbsp;• Via the Admin page, you can modify address/text records with an EIP-712 signature (MetaMask confirmation required, proving the action came from you)<br>
+              &nbsp;• There is currently no formal on-chain ownership NFT <span class="tag tag-soon">coming soon</span><br><br>
+              <strong>Future (Milestone B):</strong><br>
+              Subdomains will become ERC-721 NFTs — holding one represents full ownership, transferable and tradeable on OpenSea and other platforms.<br><br>
+              <strong>How to verify:</strong><br>
+              &nbsp;① ENS official app: <code>app.ens.domains</code> → search your domain<br>
+              &nbsp;② Etherscan (OP Sepolia): query the L2Records contract <code>0x9Ed5d10...</code> for addr/text records<br>
+              &nbsp;③ Code verification: <code>viem.getEnsAddress("alice.aastar.eth")</code> returning your address confirms success`
+        }
+      },
+      {
+        zh: {
+          q: '子域名需要每年续费吗？有效期是多久？',
+          a: `<strong>子域名本身不需要续费。</strong><br><br>
+              在 CometENS 模型中，子域名记录存储在 Optimism L2 链上，链上数据永久存在，没有到期时间。<br><br>
+              需要续费的只有根域名（如 <code>aastar.eth</code>），这是向 ENS 协议支付的年费。根域名续费由根域名所有者（即服务运营方）负责，与你无关。<br><br>
+              <strong>总结：注册一次，永久有效（只要根域名持续运营）。</strong>`
+        },
+        en: {
+          q: 'Does my subdomain need annual renewal? How long is it valid?',
+          a: `<strong>No, subdomains do not need renewal.</strong><br><br>
+              In the CometENS model, subdomain records are stored on the Optimism L2 blockchain — on-chain data is permanent and has no expiration date.<br><br>
+              Only the root domain (e.g. <code>aastar.eth</code>) needs annual renewal — that fee is paid to the ENS protocol by the root domain owner (the service operator), not by you.<br><br>
+              <strong>Summary: register once, valid forever (as long as the root domain stays active).</strong>`
+        }
+      },
+      {
+        zh: {
+          q: '子域名在哪些应用里能直接使用？',
+          a: `任何支持 ENS 解析的应用都可以直接使用，无需任何额外配置：<br><br>
+              &nbsp;• <strong>钱包</strong>：MetaMask、Rainbow、Coinbase Wallet 等——发送资产时输入域名即可<br>
+              &nbsp;• <strong>DApp</strong>：Uniswap、OpenSea、Aave 等——用于身份显示<br>
+              &nbsp;• <strong>ENS 生态工具</strong>：ENS App、ENS Profile 页面<br>
+              &nbsp;• <strong>开发者</strong>：viem 的 <code>getEnsAddress()</code>、ethers.js 的 <code>resolveName()</code> 原生支持<br><br>
+              当前解析网络：<strong>Ethereum Sepolia 测试网</strong>。主网上线后将在 Ethereum Mainnet 生效。`
+        },
+        en: {
+          q: 'Which apps can use my subdomain directly?',
+          a: `Any app that supports ENS resolution works out of the box — no extra configuration needed:<br><br>
+              &nbsp;• <strong>Wallets</strong>: MetaMask, Rainbow, Coinbase Wallet — just type your domain name when sending assets<br>
+              &nbsp;• <strong>DApps</strong>: Uniswap, OpenSea, Aave — used for identity display<br>
+              &nbsp;• <strong>ENS tools</strong>: ENS App, ENS Profile pages<br>
+              &nbsp;• <strong>Developers</strong>: viem's <code>getEnsAddress()</code>, ethers.js's <code>resolveName()</code> natively supported<br><br>
+              Current resolution network: <strong>Ethereum Sepolia testnet</strong>. Will work on Ethereum Mainnet after mainnet launch.`
+        }
+      },
+      {
+        zh: {
+          q: '可以把子域名转让给别人吗？',
+          a: `<strong>当前阶段（Milestone A）：不支持正式转让。</strong><br><br>
+              当前没有链上所有权 NFT，"所有者"是注册时填写的地址，地址记录可以通过 Admin 页面修改。<br><br>
+              <strong>未来（Milestone B）：</strong>子域名将成为 ERC-721 NFT，转让就像转移任何 NFT 一样简单——在 OpenSea 或直接调用 <code>transferFrom()</code> 即可，完整所有权随之转移。<span class="tag tag-soon">开发中</span>`
+        },
+        en: {
+          q: 'Can I transfer my subdomain to someone else?',
+          a: `<strong>Current (Milestone A): formal transfer is not supported.</strong><br><br>
+              There is currently no on-chain ownership NFT — the "owner" is the address set at registration time, and address records can be updated via the Admin page.<br><br>
+              <strong>Future (Milestone B):</strong> Subdomains will become ERC-721 NFTs. Transfer will be as simple as transferring any NFT — on OpenSea or by calling <code>transferFrom()</code> directly — with full ownership transferring along with it. <span class="tag tag-soon">in development</span>`
+        }
+      },
+      {
+        zh: {
+          q: '我的子域名能存储哪些信息？',
+          a: `每个子域名可以存储以下 ENS 标准记录：<br><br>
+              &nbsp;• <strong>地址记录</strong>：ETH 地址及多链地址（ENSIP-11：Bitcoin、Solana、Base 等）<br>
+              &nbsp;• <strong>文本记录</strong>：任意键值对，常用字段包括：<br>
+              &nbsp;&nbsp;&nbsp;— <code>com.twitter</code>、<code>com.github</code>、<code>com.discord</code><br>
+              &nbsp;&nbsp;&nbsp;— <code>email</code>、<code>url</code>、<code>description</code>、<code>avatar</code><br>
+              &nbsp;• <strong>内容哈希</strong>：IPFS / Arweave 去中心化网站地址（如 <code>ipfs://Qm...</code>）<br><br>
+              在 Admin 页面可以设置和查询上述所有记录。`
+        },
+        en: {
+          q: 'What information can my subdomain store?',
+          a: `Each subdomain can store the following ENS-standard records:<br><br>
+              &nbsp;• <strong>Address records</strong>: ETH address and multi-chain addresses (ENSIP-11: Bitcoin, Solana, Base, etc.)<br>
+              &nbsp;• <strong>Text records</strong>: arbitrary key-value pairs, common fields include:<br>
+              &nbsp;&nbsp;&nbsp;— <code>com.twitter</code>, <code>com.github</code>, <code>com.discord</code><br>
+              &nbsp;&nbsp;&nbsp;— <code>email</code>, <code>url</code>, <code>description</code>, <code>avatar</code><br>
+              &nbsp;• <strong>Content hash</strong>: IPFS / Arweave decentralized website address (e.g. <code>ipfs://Qm...</code>)<br><br>
+              All of these records can be set and queried from the Admin page.`
+        }
+      },
+      {
+        zh: {
+          q: '注册时我签名了什么？这安全吗？',
+          a: `你签名的是一个 <strong>EIP-712 结构化消息</strong>，内容清晰可读：<br><br>
+              <code>Register Subdomain<br>
+              parent: aastar.eth<br>
+              label: alice<br>
+              owner: 0x你的地址<br>
+              nonce: 唯一随机数<br>
+              deadline: 过期时间（10分钟内有效）</code><br><br>
+              <strong>安全保证：</strong><br>
+              &nbsp;• 签名仅授权这一次特定注册操作，不能被复用（nonce 防重放）<br>
+              &nbsp;• 签名不会扣你任何 Gas 或资产，只是证明"我同意注册这个名字"<br>
+              &nbsp;• 你可以在 MetaMask 弹窗里逐字验证签名内容`
+        },
+        en: {
+          q: 'What am I signing during registration? Is it safe?',
+          a: `You are signing an <strong>EIP-712 structured message</strong> with clearly readable content:<br><br>
+              <code>Register Subdomain<br>
+              parent: aastar.eth<br>
+              label: alice<br>
+              owner: 0xYourAddress<br>
+              nonce: unique random number<br>
+              deadline: expiry (valid for 10 minutes)</code><br><br>
+              <strong>Safety guarantees:</strong><br>
+              &nbsp;• The signature authorizes only this one specific registration — it cannot be reused (nonce prevents replay attacks)<br>
+              &nbsp;• Signing does not deduct any gas or assets from you — it just proves "I agree to register this name"<br>
+              &nbsp;• You can verify the signature content word by word in the MetaMask popup`
+        }
+      }
+    ]
+
+    let currentLang = 'zh'
+
+    function setLang(lang) {
+      currentLang = lang
+      document.getElementById('langZh').classList.toggle('active', lang === 'zh')
+      document.getElementById('langEn').classList.toggle('active', lang === 'en')
+      renderFaq()
+    }
+
+    function renderFaq() {
+      const container = document.getElementById('faqList')
+      const openStates = {}
+      container.querySelectorAll('.faq-item').forEach((el, i) => {
+        openStates[i] = el.classList.contains('open')
+      })
+      container.innerHTML = faqs.map((faq, i) => {
+        const item = faq[currentLang]
+        const isOpen = openStates[i] || false
+        return `<div class="faq-item${isOpen ? ' open' : ''}" data-index="${i}">
+          <button class="faq-q">
+            <span>${item.q}</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="faq-a">${item.a}</div>
+        </div>`
+      }).join('')
+
+      container.querySelectorAll('.faq-q').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.closest('.faq-item').classList.toggle('open')
+        })
+      })
+    }
+
+    renderFaq()
+  </script>
 </body>
 </html>

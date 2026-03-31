@@ -8,3 +8,5 @@ dist
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+.claude/
+.registrations.json

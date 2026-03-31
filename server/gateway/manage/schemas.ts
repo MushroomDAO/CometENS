@@ -75,6 +75,26 @@ export type SetContenthashMessage = {
   deadline: bigint
 }
 
+export const AddRegistrarTypes = {
+  AddRegistrar: [
+    { name: 'parentNode', type: 'bytes32' },
+    { name: 'registrar', type: 'address' },
+    { name: 'quota', type: 'uint256' },
+    { name: 'expiry', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const
+
+export type AddRegistrarMessage = {
+  parentNode: `0x${string}`
+  registrar: `0x${string}`
+  quota: bigint
+  expiry: bigint
+  nonce: bigint
+  deadline: bigint
+}
+
 export function buildDomain(chainId: number, verifyingContract: `0x${string}`): Eip712Domain {
   return { name: 'CometENS', version: '1', chainId, verifyingContract }
 }

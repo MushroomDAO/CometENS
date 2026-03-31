@@ -6,18 +6,37 @@ L2 subdomain distribution system: register subdomains under a root `.eth` name o
 
 ```bash
 cp .env.op-sepolia .env.local   # fill in values
-npm run dev                     # gateway + frontend on :4173
+pnpm dev                        # gateway + frontend on :4173
 ```
 
 ## Commands
 
 ```bash
-npm run dev           # start dev server (gateway middleware included)
-npm run build         # production build
-npm run typecheck     # TypeScript validation
-npm test              # vitest unit + E2E tests
-npm run test:coverage # coverage report
+pnpm dev              # start dev server (gateway middleware included)
+pnpm build            # production build
+pnpm typecheck        # TypeScript validation
+pnpm test             # vitest unit + E2E tests
+pnpm test:coverage    # coverage report
 cd contracts && forge test   # Solidity unit tests
+```
+
+## Running Tests
+
+```bash
+# 1. Start dev server (required for E2E tests that hit /api/*)
+pnpm dev
+
+# 2. Unit tests — no external dependencies
+pnpm vitest run test/unit/
+
+# 3. Anvil E2E tests — spins up local chain automatically (requires foundry)
+pnpm vitest run test/e2e/
+
+# 4. On-chain integration tests — requires .env.local with OP Sepolia RPC + keys
+pnpm vitest run test/integration/
+
+# 5. Solidity contract tests
+cd contracts && forge test
 ```
 
 ## Architecture
