@@ -431,21 +431,10 @@ export default {
         })
       }
 
-      try {
-        const payload = (await request.json()) as RegisterPayload
-        const result = await handleRegister(payload, env)
-
-        return new Response(JSON.stringify(result), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        })
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        return new Response(JSON.stringify({ error: message }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        })
-      }
+      return new Response(JSON.stringify({ error: 'Registration is not implemented on the worker yet.' }), {
+        status: 501,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      })
     }
 
     // ─── Health check ─────────────────────────────────────────────────────────

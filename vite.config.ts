@@ -37,6 +37,23 @@ const L2_READ_ABI = [
     inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
 ] as const
 
+function getNetwork(): 'op-sepolia' | 'op-mainnet' {
+  return (process.env.VITE_NETWORK || 'op-sepolia') as 'op-sepolia' | 'op-mainnet'
+}
+
+function getL2RpcUrl(): string {
+  const network = getNetwork()
+  if (network === 'op-mainnet') {
+    return process.env.OP_MAINNET_RPC_URL ?? process.env.OP_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+  }
+  return process.env.OP_SEPOLIA_RPC_URL ?? process.env.OP_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+}
+
+async function getL2Chain() {
+  const { optimismSepolia, optimism } = await import('viem/chains')
+  return getNetwork() === 'op-mainnet' ? optimism : optimismSepolia
+}
+
 export default defineConfig(({ mode }) => {
   // Load ALL env vars (empty prefix = no filter) into process.env so server
   // middleware can read WORKER_EOA_PRIVATE_KEY, PRIVATE_KEY_SUPPLIER, etc.
@@ -174,11 +191,11 @@ export default defineConfig(({ mode }) => {
             try {
               const { namehash: nh } = await import('viem/ens')
               const { createPublicClient, http: viemHttp } = await import('viem')
-              const { optimismSepolia: opSep } = await import('viem/chains')
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
-              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+              const l2Rpc  = getL2RpcUrl()
+              const chain = await getL2Chain()
               const node = nh(`${label}.${parent}`) as `0x${string}`
-              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
               const owner = await pubClient.readContract({ address: l2Addr, abi: L2_READ_ABI, functionName: 'subnodeOwner', args: [node] })
               const taken = owner !== '0x0000000000000000000000000000000000000000'
               res.statusCode = 200
@@ -201,9 +218,9 @@ export default defineConfig(({ mode }) => {
             }
             try {
               const { createPublicClient, http: viemHttp } = await import('viem')
-              const { optimismSepolia: opSep } = await import('viem/chains')
-              const l2Rpc = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
-              const pub = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const l2Rpc = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pub = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
               const owner = await pub.readContract({
                 address: contract,
                 abi: [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
@@ -236,11 +253,11 @@ export default defineConfig(({ mode }) => {
             // Verify the cached entry still exists on-chain (guards against stale cache after redeployment)
             try {
               const { createPublicClient, http: viemHttp, isAddress } = await import('viem')
-              const { optimismSepolia: opSep } = await import('viem/chains')
               if (isAddress(address)) {
                 const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
-                const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
-                const pub = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+                const l2Rpc  = getL2RpcUrl()
+                const chain = await getL2Chain()
+                const pub = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
                 const existingNode = await pub.readContract({
                   address: l2Addr, abi: L2_READ_ABI, functionName: 'primaryNode', args: [address as `0x${string}`],
                 })
@@ -358,11 +375,11 @@ export default defineConfig(({ mode }) => {
               // ── Duplicate checks (before executing) ───────────────────────
               const { namehash: nh, labelhash: lh } = await import('viem/ens')
               const { createPublicClient, http: viemHttp } = await import('viem')
-              const { optimismSepolia: opSep } = await import('viem/chains')
 
               const l2Addr = (process.env.OP_L2_RECORDS_ADDRESS ?? process.env.VITE_L2_RECORDS_ADDRESS ?? '') as `0x${string}`
-              const l2Rpc  = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
-              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const l2Rpc  = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
 
               const parentNode = nh(message.parent) as `0x${string}`
               const labelHash  = lh(message.label)  as `0x${string}`
@@ -480,10 +497,10 @@ export default defineConfig(({ mode }) => {
 
               // Check if from is contract owner
               const { createPublicClient, http: viemHttp } = await import('viem')
-              const { optimismSepolia: opSep } = await import('viem/chains')
               const l2Addr = verifyingContract
-              const l2Rpc = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
-              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const l2Rpc = getL2RpcUrl()
+              const chain = await getL2Chain()
+              const pubClient = createPublicClient({ chain, transport: viemHttp(l2Rpc) })
               
               const contractOwner = await pubClient.readContract({
                 address: l2Addr,
@@ -561,7 +578,6 @@ async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsW
 
   const { privateKeyToAccount } = await import('viem/accounts')
   const { L2RecordsWriterV2 } = await import('./server/gateway/writer/L2RecordsWriterV2')
-  const { optimismSepolia } = await import('viem/chains')
 
   const workerAccount = privateKeyToAccount(workerPk)
   const l2Address = (
@@ -569,9 +585,10 @@ async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsW
     process.env.VITE_L2_RECORDS_ADDRESS ??
     '0x0000000000000000000000000000000000000000'
   ) as `0x${string}`
-  const rpcUrl = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+  const rpcUrl = getL2RpcUrl()
+  const chain = await getL2Chain()
 
-  return new L2RecordsWriterV2(workerAccount, optimismSepolia, rpcUrl, l2Address)
+  return new L2RecordsWriterV2(workerAccount, chain, rpcUrl, l2Address)
 }
 
 async function withWriter<T>(

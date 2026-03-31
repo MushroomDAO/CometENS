@@ -57,7 +57,9 @@ describe('L2RecordsWriter', () => {
         args: [TEST_PARENT, TEST_LABEL, TEST_ADDR, 'alice', addrBytes],
       })
     )
-    expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith({ hash: MOCK_TX_HASH })
+    expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ hash: MOCK_TX_HASH })
+    )
   })
 
   it('setAddr calls writeContract with correct args', async () => {

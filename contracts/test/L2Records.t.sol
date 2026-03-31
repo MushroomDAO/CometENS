@@ -70,6 +70,16 @@ contract L2RecordsTest is Test {
         records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
     }
 
+    function test_revertSetSubnodeOwnerLabelMismatch() public {
+        vm.expectRevert(L2Records.LabelMismatch.selector);
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "bob");
+    }
+
+    function test_revertSetSubnodeOwnerZeroOwner() public {
+        vm.expectRevert(L2Records.ZeroAddress.selector);
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, address(0), "alice");
+    }
+
     // ─── nameOf / labelOf ─────────────────────────────────────────────────────
 
     function test_nameOfReturnsEncodedNameAfterRegistration() public {

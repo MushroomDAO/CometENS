@@ -82,7 +82,10 @@ export async function handleV1Register(
   // Address is a validated 20-byte hex string; viem encodes it correctly for `bytes calldata`.
   const addrBytes = addrTarget as Hex
 
-  const txHash = await writer?.registerSubnode(parentNode, lh, owner, label, addrBytes)
+  if (!writer) {
+    throw Object.assign(new Error('Writer not configured on server'), { status: 503 })
+  }
+  const txHash = await writer.registerSubnode(parentNode, lh, owner, label, addrBytes)
 
   return { ok: true, name: fullName, node, txHash }
 }

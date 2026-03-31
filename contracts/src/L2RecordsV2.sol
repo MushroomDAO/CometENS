@@ -51,6 +51,7 @@ contract L2RecordsV2 {
     error AlreadyRegistered();
     error QuotaExceeded();
     error RegistrarExpired();
+    error LabelMismatch();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -263,8 +264,10 @@ contract L2RecordsV2 {
         address newOwner,
         string calldata label
     ) private returns (bytes32 node) {
+        if (newOwner == address(0)) revert ZeroAddress();
         bytes memory labelBytes = bytes(label);
         if (labelBytes.length == 0 || labelBytes.length > 63) revert InvalidLabel();
+        if (labelhash != keccak256(labelBytes)) revert LabelMismatch();
         node = keccak256(abi.encodePacked(parentNode, labelhash));
         if (_owners[node] != address(0)) revert AlreadyRegistered();
         _owners[node] = newOwner;

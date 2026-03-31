@@ -111,15 +111,18 @@ async function switchToRequiredChain(): Promise<void> {
   } catch (err: any) {
     // 4902 = chain not added yet — add it
     if (err.code === 4902) {
+      const params: any = {
+        chainId: hexId,
+        chainName: required.name,
+        nativeCurrency: required.nativeCurrency,
+        rpcUrls: required.rpcUrls.default.http,
+      }
+      if (required.blockExplorers?.default.url) {
+        params.blockExplorerUrls = [required.blockExplorers.default.url]
+      }
       await eth.request({
         method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: hexId,
-          chainName: 'OP Sepolia',
-          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-          rpcUrls: ['https://sepolia.optimism.io'],
-          blockExplorerUrls: ['https://sepolia-optimism.etherscan.io'],
-        }],
+        params: [params],
       })
     } else {
       throw err
@@ -259,12 +262,19 @@ function showExistingBanner(rec: RegistrationRecord) {
       card.appendChild(banner)
     }
   }
-  banner.innerHTML =
-    `This wallet already has a subdomain: ` +
-    `<strong>${rec.fullName}</strong> — ` +
-    `<a href="#" id="forceRegisterLink">register another</a>`
+  banner.textContent = ''
+  const prefix = document.createElement('span')
+  prefix.textContent = 'This wallet already has a subdomain: '
+  const strong = document.createElement('strong')
+  strong.textContent = rec.fullName
+  const sep = document.createTextNode(' — ')
+  const link = document.createElement('a')
+  link.href = '#'
+  link.id = 'forceRegisterLink'
+  link.textContent = 'register another'
+  banner.append(prefix, strong, sep, link)
 
-  byId('forceRegisterLink')?.addEventListener('click', (e) => {
+  link.addEventListener('click', (e) => {
     e.preventDefault()
     banner!.remove()
   })
@@ -388,7 +398,6 @@ function showVerifyCard(fullName: string, owner: `0x${string}`) {
   card.classList.remove('hidden')
 
   // Build external links
-  const node = namehash(fullName)
   const l2Contract = config.l2RecordsAddress
   const isTestnet = config.network === 'op-sepolia'
 
@@ -400,12 +409,28 @@ function showVerifyCard(fullName: string, owner: `0x${string}`) {
     : `https://app.ens.domains/${fullName}`
 
   const txHash = (byId('result')?.textContent ?? '').match(/0x[a-f0-9]{64}/i)?.[0] ?? ''
-  const links = [
-    `<a href="${ensApp}" target="_blank" style="background:#0b79d0;color:#fff;border-color:#0b79d0">View on ENS App</a>`,
-    `<a href="${etherscanBase}/address/${l2Contract}#readContract" target="_blank">L2Records on Etherscan</a>`,
-  ]
-  if (txHash) links.push(`<a href="${etherscanBase}/tx/${txHash}" target="_blank">View Tx</a>`)
-  linksEl.innerHTML = links.join('')
+  linksEl.textContent = ''
+  const ensLink = document.createElement('a')
+  ensLink.href = ensApp
+  ensLink.target = '_blank'
+  ensLink.style.background = '#0b79d0'
+  ensLink.style.color = '#fff'
+  ensLink.style.borderColor = '#0b79d0'
+  ensLink.textContent = 'View on ENS App'
+
+  const contractLink = document.createElement('a')
+  contractLink.href = `${etherscanBase}/address/${l2Contract}#readContract`
+  contractLink.target = '_blank'
+  contractLink.textContent = 'L2Records on Etherscan'
+
+  linksEl.append(ensLink, contractLink)
+  if (txHash) {
+    const txLink = document.createElement('a')
+    txLink.href = `${etherscanBase}/tx/${txHash}`
+    txLink.target = '_blank'
+    txLink.textContent = 'View Tx'
+    linksEl.append(txLink)
+  }
 
   // Wire verify button — passes owner so we can compare
   const btn = byId<HTMLButtonElement>('verifyBtn')
@@ -438,20 +463,40 @@ async function verifyResolution(fullName: string, expectedOwner: `0x${string}`) 
 
     const match = resolved.toLowerCase() === expectedOwner.toLowerCase()
     resultEl.className = `verify-result ${match ? 'ok' : 'fail'}`
+    const setContent = (parts: Array<string | HTMLElement>) => {
+      resultEl.textContent = ''
+      for (const part of parts) {
+        if (typeof part === 'string') resultEl.append(document.createTextNode(part))
+        else resultEl.append(part)
+      }
+    }
     if (match) {
-      resultEl.innerHTML =
-        `✓ Resolved successfully<br>` +
-        `<strong>${fullName}</strong><br>` +
-        `→ <code>${resolved}</code>`
+      const strong = document.createElement('strong')
+      strong.textContent = fullName
+      const code = document.createElement('code')
+      code.textContent = resolved
+      setContent([
+        '✓ Resolved successfully', document.createElement('br'),
+        strong, document.createElement('br'),
+        '→ ', code,
+      ])
     } else if (resolved === '0x0000000000000000000000000000000000000000') {
-      resultEl.innerHTML =
-        `⚠ Not found yet — the L2 transaction may still be confirming.<br>` +
-        `Wait ~10 seconds and try again.`
+      setContent([
+        '⚠ Not found yet — the L2 transaction may still be confirming.',
+        document.createElement('br'),
+        'Wait ~10 seconds and try again.',
+      ])
     } else {
-      resultEl.innerHTML =
-        `⚠ Resolved to a different address:<br>` +
-        `<code>${resolved}</code><br>` +
-        `Expected: <code>${expectedOwner}</code>`
+      const resolvedCode = document.createElement('code')
+      resolvedCode.textContent = resolved
+      const expectedCode = document.createElement('code')
+      expectedCode.textContent = expectedOwner
+      setContent([
+        '⚠ Resolved to a different address:',
+        document.createElement('br'),
+        resolvedCode, document.createElement('br'),
+        'Expected: ', expectedCode,
+      ])
     }
   } catch (e) {
     resultEl.className = 'verify-result fail'

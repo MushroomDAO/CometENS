@@ -31,6 +31,7 @@ contract L2Records {
 
     error Unauthorized();
     error ZeroAddress();
+    error LabelMismatch();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -152,6 +153,8 @@ contract L2Records {
         address newOwner,
         string calldata label
     ) private returns (bytes32 node) {
+        if (newOwner == address(0)) revert ZeroAddress();
+        if (labelhash != keccak256(bytes(label))) revert LabelMismatch();
         node = keccak256(abi.encodePacked(parentNode, labelhash));
         _owners[node] = newOwner;
         _names[node] = _encodeDnsName(label);
