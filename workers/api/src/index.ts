@@ -59,6 +59,14 @@ export interface Env {
   UPSTREAM_ALLOWED_SIGNERS?: string
   /** CF KV namespace for address→label registry */
   REGISTRY?: KVNamespace
+  /**
+   * CF KV namespace for ENS record cache (Phase 2).
+   * Keys:  addr60:{node}     → ETH address hex
+   *        text:{node}:{key} → text record value
+   *        ch:{node}         → contenthash hex bytes
+   * Must bind to the same KV namespace ID as the Gateway Worker's RECORD_CACHE.
+   */
+  RECORD_CACHE?: KVNamespace
 }
 
 // ─── ABI fragments (read-only calls) ─────────────────────────────────────────
@@ -222,12 +230,13 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   if (path === '/set-addr') {
     const msg = payload.message ?? {}
     if (!isHex(msg.node)) throw badReq('Invalid node')
-    if (!isAddress(msg.addr)) throw badReq('Invalid addr')
+    const isClearing = !msg.addr || msg.addr === '0x0000000000000000000000000000000000000000'
+    if (!isClearing && !isAddress(msg.addr)) throw badReq('Invalid addr')
 
     const message = {
       node: msg.node as Hex,
       coinType: asBigInt(msg.coinType),
-      addr: msg.addr as Address,
+      addr: (msg.addr ?? '0x0000000000000000000000000000000000000000') as Address,
       nonce: asBigInt(msg.nonce),
       deadline: asBigInt(msg.deadline),
     }
@@ -243,8 +252,18 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
 
     const writer = requireWriter(env)
-    const addrBytes = toHex(toBytes(message.addr), { size: 20 }) as Hex
+    const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
     const txHash = await writer.setAddr(message.node, message.coinType, addrBytes)
+
+    // Sync to KV record cache (coinType=60 only)
+    if (env.RECORD_CACHE && message.coinType === 60n) {
+      if (isClearing) {
+        await env.RECORD_CACHE.delete(`addr60:${message.node}`)
+      } else {
+        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr)
+      }
+    }
+
     return json({ ok, action: 'set-addr', txHash })
   }
 
@@ -297,7 +316,12 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const writer = requireWriter(env)
     const txHash = await writer.registerSubnode(parentNode, lh, message.owner, message.label, addrBytes)
 
-    if (env.REGISTRY) await env.REGISTRY.put(`reg:${message.owner.toLowerCase()}`, message.label)
+    // Persist to KV caches (fire-and-forget; don't block response)
+    const ownerLower = message.owner.toLowerCase()
+    const kvWrites: Promise<void>[] = []
+    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, message.label))
+    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
+    await Promise.all(kvWrites)
 
     return json({ ok, action: 'register', txHash })
   }
@@ -328,6 +352,17 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
+
+    // Sync to KV record cache
+    if (env.RECORD_CACHE) {
+      const kvKey = `text:${message.node}:${message.key}`
+      if (message.value === '') {
+        await env.RECORD_CACHE.delete(kvKey)
+      } else {
+        await env.RECORD_CACHE.put(kvKey, message.value)
+      }
+    }
+
     return json({ ok, action: 'set-text', txHash })
   }
 
@@ -355,6 +390,17 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
+
+    // Sync to KV record cache
+    if (env.RECORD_CACHE) {
+      const kvKey = `ch:${message.node}`
+      if (message.hash === '0x') {
+        await env.RECORD_CACHE.delete(kvKey)
+      } else {
+        await env.RECORD_CACHE.put(kvKey, message.hash)
+      }
+    }
+
     return json({ ok, action: 'set-contenthash', txHash })
   }
 

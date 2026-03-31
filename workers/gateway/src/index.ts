@@ -44,6 +44,14 @@ interface Env {
   NETWORK: 'op-sepolia' | 'op-mainnet'
   ROOT_DOMAIN?: string
   ALLOWED_REGISTRANTS?: string
+  /**
+   * CF KV namespace for ENS record cache (Phase 2).
+   * Keys:  addr60:{node}     → ETH address hex (20 bytes, "0x..." or absent)
+   *        text:{node}:{key} → text record value string
+   *        ch:{node}         → contenthash hex bytes
+   * Shared with the API Worker (same namespace ID in wrangler.toml).
+   */
+  RECORD_CACHE?: KVNamespace
 }
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -214,25 +222,57 @@ async function verifySignatureAuth(
 
 // ─── Core resolution logic ────────────────────────────────────────────────────
 
+// ─── KV cache helpers ─────────────────────────────────────────────────────────
+
+/** Read ETH addr from KV; returns null on miss or if KV not bound. */
+async function kvGetAddr(kv: KVNamespace | undefined, node: Hex): Promise<`0x${string}` | null> {
+  if (!kv) return null
+  const val = await kv.get(`addr60:${node}`)
+  if (!val || val === '0x0000000000000000000000000000000000000000') return null
+  return val as `0x${string}`
+}
+
+/** Read text record from KV; returns null on miss. */
+async function kvGetText(kv: KVNamespace | undefined, node: Hex, key: string): Promise<string | null> {
+  if (!kv) return null
+  return kv.get(`text:${node}:${key}`)
+}
+
+/** Read contenthash from KV; returns null on miss. */
+async function kvGetContenthash(kv: KVNamespace | undefined, node: Hex): Promise<Hex | null> {
+  if (!kv) return null
+  const val = await kv.get(`ch:${node}`)
+  if (!val || val === '0x') return null
+  return val as Hex
+}
+
+// ─── Core resolution logic ────────────────────────────────────────────────────
+
 async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
   const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
-  const client = createPublicClient({
-    chain,
-    transport: http(env.OP_RPC_URL),
-  })
   const contractAddress = env.L2_RECORDS_ADDRESS as Hex
+  const kv = env.RECORD_CACHE
 
   const { functionName, args } = decodeFunctionData({ abi: RESOLVE_ABI, data: calldata })
 
   if (functionName === 'addr') {
     if (args.length === 2) {
+      // Multi-coin addr — bypass KV (less common; only cache ETH addr)
       const [node, coinType] = args as [Hex, bigint]
+      const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
       const value = await client.readContract({
         address: contractAddress, abi: ADDR_MULTI_ABI, functionName: 'addr', args: [node, coinType],
       })
       return encodeFunctionResult({ abi: ADDR_MULTI_ABI, functionName: 'addr', result: value as Hex })
     }
+
+    // ETH addr — KV first
     const [node] = args as [Hex]
+    const cached = await kvGetAddr(kv, node)
+    if (cached) {
+      return encodeFunctionResult({ abi: ADDR_SINGLE_ABI, functionName: 'addr', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
       address: contractAddress, abi: ADDR_SINGLE_ABI, functionName: 'addr', args: [node],
     })
@@ -241,6 +281,11 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
 
   if (functionName === 'text') {
     const [node, key] = args as [Hex, string]
+    const cached = await kvGetText(kv, node, key)
+    if (cached !== null) {
+      return encodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
       address: contractAddress, abi: TEXT_ABI, functionName: 'text', args: [node, key],
     })
@@ -249,6 +294,11 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
 
   if (functionName === 'contenthash') {
     const [node] = args as [Hex]
+    const cached = await kvGetContenthash(kv, node)
+    if (cached) {
+      return encodeFunctionResult({ abi: CONTENTHASH_ABI, functionName: 'contenthash', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
       address: contractAddress, abi: CONTENTHASH_ABI, functionName: 'contenthash', args: [node],
     })

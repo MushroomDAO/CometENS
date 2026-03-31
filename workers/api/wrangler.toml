@@ -12,6 +12,10 @@ compatibility_flags = ["nodejs_compat"]
 #   WORKER_EOA_PRIVATE_KEY     — EOA that submits L2 transactions (contract owner key)
 #   UPSTREAM_ALLOWED_SIGNERS   — Comma-separated addresses for /v1/register whitelist
 #
+# KV namespaces (create with: wrangler kv namespace create NAME --env testnet):
+#   REGISTRY     — address→label registry for /lookup endpoint
+#   RECORD_CACHE — ENS record cache; MUST use the same namespace ID as Gateway Worker's RECORD_CACHE
+#
 [env.testnet]
 name = "cometens-api"
 [env.testnet.vars]
@@ -19,11 +23,13 @@ NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
 ROOT_DOMAIN = "aastar.eth"
 
-# KV namespace for address→label registry (create with: wrangler kv namespace create REGISTRY --env testnet)
-# After creating, replace the id below with the actual namespace ID.
 # [[env.testnet.kv_namespaces]]
 # binding = "REGISTRY"
-# id = "REPLACE_WITH_NAMESPACE_ID"
+# id = "REPLACE_WITH_REGISTRY_NAMESPACE_ID"
+#
+# [[env.testnet.kv_namespaces]]
+# binding = "RECORD_CACHE"
+# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"  # same ID as gateway's RECORD_CACHE
 
 # ─── Production (OP Mainnet) ──────────────────────────────────────────────────
 # Deploy: wrangler deploy --env production
@@ -37,4 +43,8 @@ ROOT_DOMAIN = "aastar.eth"
 
 # [[env.production.kv_namespaces]]
 # binding = "REGISTRY"
-# id = "REPLACE_WITH_NAMESPACE_ID"
+# id = "REPLACE_WITH_REGISTRY_NAMESPACE_ID"
+#
+# [[env.production.kv_namespaces]]
+# binding = "RECORD_CACHE"
+# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
