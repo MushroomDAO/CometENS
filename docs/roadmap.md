@@ -2,14 +2,36 @@
 
 ## 当前状态（2026-03）
 
-| 里程碑 | 名称 | 状态 |
-|--------|------|------|
-| **A** | 可信签名 MVP | ✅ **已完成** |
-| B | Name Wrapper + NFT 子域 | 计划中 |
-| C | 状态证明（ENS V2 标准） | 计划中 |
-| D | 生产强化与治理 | 计划中 |
-| E | .box 写路径 | 待官方开放 |
-| F | 多链扩展 | 远期规划 |
+| 里程碑 | 名称 | 状态 | 说明 |
+|--------|------|------|------|
+| **A** | 可信签名 MVP | ✅ **已完成** | 基础功能全部完成 |
+| B | 完整 ENS 记录支持 | 🟡 **下一步** | Contenthash + 多记录类型 |
+| C | 生产强化与治理 | 计划中 | 安全加固，主网上线前必须 |
+| D | 多根域名 + 无许可注册 | 计划中 | 开源框架化，支持第三方 |
+| E | Name Wrapper + NFT 子域 | 计划中 | 子域名成为可交易 NFT |
+| F | 状态证明（ENS V2） | 远期规划 | 信任最小化 |
+| G | 多链扩展 | 远期规划 | Base/Arb/Scroll 等 |
+| H | .box 写路径 | 待官方开放 | 依赖 my.box 官方 API |
+
+---
+
+## 路线图总览
+
+```
+时间轴 ──────────────────────────────────────────────────────────────▶
+
+A (已完成)    B (Next)      C (P0)        D (框架化)    E (NFT)       F (V2)
+├─ MVP 完成    ├─ Contenthash ├─ 多签名者    ├─ 多根域名    ├─ NameWrapper ├─ 状态证明
+├─ 测试网运行  ├─ 完整记录    ├─ 密钥轮换    ├─ 无许可注册  ├─ NFT 交易    ├─ 信任最小化
+└─ 基础 API    └─ 记录验证    └─ 生产安全    └─ 开源框架    └─ 数据迁移    └─ Merkle 证明
+
+依赖关系：
+A → B → C ─┬─→ D ─┬─→ E
+           │      └─→ G
+           └─→ F
+
+关键路径：A → B → C → D （主网上线最短路径）
+```
 
 ---
 
@@ -29,178 +51,279 @@
 | A8 | 上游应用 API（/api/v1/register 签名鉴权）| ✅ |
 | A9 | 测试覆盖（unit + e2e + integration）| ✅ |
 | A10 | Cloudflare Workers 网关部署 | ✅ `workers/gateway/` 已配置 |
-| A11 | Contenthash 前端管理入口 | 🟡 admin.html 补充 setContenthash |
-
-**补充任务说明：**
-- **A10 Cloudflare Workers**：已部署，生产环境使用 Cloudflare Worker 作为网关，替代 Vite 开发服务器
-- **A11 Contenthash**：当前 admin.html 只支持 addr/text，需补充 contenthash 设置能力（IPFS/IPNS/Arweave 等）
 
 ---
 
-## 里程碑 B：Name Wrapper + NFT 子域
+## 里程碑 B：完整 ENS 记录支持 🟡 NEXT
 
-**目标**：子域名成为真正的 ERC-1155 NFT，可转让、可交易，父域名所有者无法收回。
+**目标**：支持完整的 ENS 记录类型，为生产环境做准备。
 
-| 任务 | 内容 | 状态 |
+| 任务 | 内容 | 优先级 | 依赖 |
+|------|------|--------|------|
+| B1 | Contenthash 前端管理（admin.html）| 🔴 P0 | 无 |
+| B2 | Contenthash 用户注册（register.html）| 🔴 P0 | B1 |
+| B3 | ABI 记录支持 | 🟡 P1 | 无 |
+| B4 | Pubkey 记录支持 | 🟡 P1 | 无 |
+| B5 | 多文本记录批量设置 | 🟢 P2 | 无 |
+| B6 | ENS 记录验证工具 | 🟢 P2 | B1-B5 |
+
+**为什么放在 C 之前**：
+- Contenthash 是 ENS 核心功能（去中心化网站）
+- 需要在安全加固前完成功能完整性
+- 里程碑 C 的生产测试需要完整的记录类型覆盖
+
+---
+
+## 里程碑 C：生产强化与治理 🔴 主网上线前必须
+
+**目标**：达到生产级安全与可运维标准，确保主网上线安全。
+
+| 任务 | 内容 | 优先级 | 说明 |
+|------|------|--------|------|
+| C1 | OffchainResolver 多签名者支持 | 🔴 **P0** | 零停机密钥轮换 |
+| C2 | Worker EOA 密钥轮换方案 | 🔴 **P0** | 配合多签名者 |
+| C3 | Rate limiting、nonce 防重放 | 🔴 **P0** | API 安全基础 |
+| C4 | 合约紧急暂停机制（Circuit Breaker）| 🔴 **P0** | 应急响应 |
+| C5 | 完整的 ENS 记录测试覆盖 | 🟡 P1 | addr/text/contenthash/ABI/pubkey |
+| C6 | 监控看板与告警系统 | 🟡 P1 | 运维基础 |
+| C7 | L1 根域名包裹（可选）| 🟢 P2 | CANNOT_SET_RESOLVER 烧断 |
+
+**关键依赖**：
+- 依赖里程碑 B 的完整记录类型（需要全面测试）
+- 多签名者是后续多根域名的基础（不同根域名可用不同签名者）
+
+---
+
+## 里程碑 D：多根域名 + 无许可注册（开源框架化）
+
+**目标**：从单域名系统升级为支持多根域名的开源框架，允许第三方无许可注册。
+
+### D1: 多根域名架构 🔴 P0
+
+| 任务 | 内容 | 依赖 |
 |------|------|------|
-| B1 | 接入 OP 上的官方 ENS Name Wrapper 合约 | 计划中 |
-| B2 | Gateway Reader 扩展为 NameWrapperReader | 计划中 |
-| B3 | Portal 支持 NFT 批量发放、冲突检测 | 计划中 |
-| B4 | 提供 L2Records → Name Wrapper 数据迁移脚本 | 计划中 |
-| B5 | 完整的 Contenthash 用户能力 | 🟡 用户可设置/修改/删除 contenthash |
+| D1.1 | L2Records 合约：多根域名配置表 | 无 |
+| D1.2 | L2Records：根域名添加/移除接口（Owner）| D1.1 |
+| D1.3 | OffchainResolver：支持多实例（每根域名一个）| 无 |
+| D1.4 | Gateway：多 Resolver 路由支持 | C1（多签名者）|
+| D1.5 | 配置系统：支持多根域名环境变量 | D1.4 |
+| D1.6 | 前端：根域名选择器组件 | D1.5 |
 
-**补充任务说明：**
-- **B5 Contenthash 完整能力**：参考 CometENS-old 的设计，在 register.html 和 box.html 中支持用户设置 contenthash，用于去中心化网站托管（IPFS + IPNS）
+### D2: 无许可注册模型 🔴 P0
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| D2.1 | L2Records：注册商（Registrar）数据模型 | D1.1 |
+| D2.2 | L2Records：注册商添加/移除接口（Owner）| D2.1 |
+| D2.3 | L2Records：`registerByRegistrar` 无许可接口 | D2.2 |
+| D2.4 | L2Records：注册商配额与过期管理 | D2.1 |
+| D2.5 | API：注册商 EIP-712 签名验证系统 | C3（Rate limiting）|
+| D2.6 | API：`/api/v1/registrar/register` 接口 | D2.3, D2.5 |
+| D2.7 | API：批量注册接口（注册商使用）| D2.6 |
+
+### D3: 注册商生态 🟡 P1
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| D3.1 | 注册商申请与审核流程 | D2.5 |
+| D3.2 | 注册商 Dashboard（查看配额、已注册列表）| D2.6 |
+| D3.3 | 注册商批量工具（CSV 导入）| D2.7 |
+| D3.4 | 注册商文档与 SDK | D3.2 |
+
+### D4: 多级子域名 🟢 P2
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| D4.1 | 支持注册商为其子域名继续授权（jack.forest.aastar.eth）| D2.3 |
+| D4.2 | 递归注册商验证 | D4.1 |
+| D4.3 | 多级域名前端展示 | D4.2 |
+
+**为什么放在 C 之后**：
+- 依赖 C1 多签名者（不同根域名可用不同签名者增强安全）
+- 依赖 C3 Rate limiting（防止注册商 API 滥用）
+- 生产安全是多根域名开放的基础
+
+**为什么放在 E 之前**：
+- 多根域名 + 无许可是框架核心能力
+- Name Wrapper（E）是多根域名下的功能增强
+- 逻辑顺序：先能支持多域名，再支持 NFT 化
 
 ---
 
-## 里程碑 C：状态证明（ENS V2 标准路径）
+## 里程碑 E：Name Wrapper + NFT 子域
+
+**目标**：子域名成为真正的 ERC-1155 NFT，可转让、可交易。
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| E1 | 接入 OP 上的官方 ENS Name Wrapper 合约 | D1（多根域名架构）|
+| E2 | Gateway Reader 扩展为 NameWrapperReader | E1 |
+| E3 | L2Records → Name Wrapper 数据迁移脚本 | E1 |
+| E4 | Portal 支持 NFT 批量发放 | E2 |
+| E5 | NFT 交易与转让前端支持 | E4 |
+| E6 | 子域名所有权与解析分离 | E1 |
+
+**依赖说明**：
+- Name Wrapper 需要在多根域名架构下工作（每个根域名独立配置是否启用 Wrapper）
+
+---
+
+## 里程碑 F：状态证明（ENS V2 标准路径）
 
 **目标**：用 Bedrock 状态证明替代 Gateway 签名，实现信任最小化。
 
-| 任务 | 内容 | 来源/参考 | 状态 |
+| 任务 | 内容 | 来源/参考 | 依赖 |
 |------|------|-----------|------|
-| C1 | 部署 OPResolver（替代 OffchainResolver）| CometENS (aastar-dev) / unruggable-gateways | 计划中 |
-| C2 | Gateway 返回 Merkle 状态证明而非签名 | OPFault Proof 验证机制 | 计划中 |
-| C3 | L1 验证链上可验，不依赖 Gateway 诚实性 | 里程碑 C 核心目标 | 计划中 |
-| C4 | 切换与回退策略 | 保证升级平滑 | 计划中 |
-| C5 | OPResolver 状态证明集成测试 | eval/CometENS/providers.ts 配置参考 | 🟡 需配置多链 Provider |
+| F1 | OPResolver 合约（替代 OffchainResolver）| eval/CometENS | D1（多根域名）|
+| F2 | Gateway 返回 Merkle 状态证明 | unruggable-gateways | F1 |
+| F3 | L1 链上验证（无需信任 Gateway）| OPFault Proof | F2 |
+| F4 | 签名模式与证明模式并存/切换 | - | F3 |
+| F5 | 状态证明集成测试 | eval/CometENS/providers.ts | F4 |
 
-**补充任务说明：**
-- **C5 OPResolver 参考**：eval/CometENS/contracts/OPResolver.sol 提供了完整的 GatewayFetcher 模式实现，使用 @unruggable/gateways 库进行状态证明验证
-- **技术要点**：OPResolver 通过 `GatewayFetcher` 构建链上可验证的存储证明请求，替代当前的签名模式
-
-**背景**：签名模式需信任 Gateway 私钥；证明模式任何人可独立验证，是 ENS V2 的标准方向。
+**依赖说明**：
+- 多根域名架构下，不同根域名可选择不同验证模式（签名或证明）
+- 状态证明是长期演进方向，不影响前期功能
 
 ---
 
-## 里程碑 D：生产强化与治理
-
-**目标**：达到生产级安全与可运维标准。
-
-| 任务 | 内容 | 优先级 | 来源/参考 |
-|------|------|--------|-----------|
-| D1 | OffchainResolver 多签名者支持 | 🔴 **主网上线前必须** | ENS-offchain-resolver |
-| D2 | 在 L1 包裹根域名并烧断 `CANNOT_SET_RESOLVER` | 🟡 高 | 里程碑 D 核心 |
-| D3 | Worker EOA 密钥轮换方案 | 🟡 高 | 配合多签名者 |
-| D4 | Rate limiting、nonce 防重放强化 | 🟡 高 | 生产安全 |
-| D5 | 告警、监控看板与应急预案 | 🟢 中 | 运维标准 |
-| D6 | 多实例/多根域名支持 | 🟢 中 | 里程碑 D5 扩展 |
-| D7 | IERC7996 直接解析路径（可选优化）| 🟢 低 | ens-contracts |
-
-**关键任务详解：**
-
-### D1 多签名者支持（🔴 主网上线前必须）
-
-**现状问题**：当前 OffchainResolver 只支持单签名者
-```solidity
-address public signerAddress;  // 单一签名者
-```
-
-**生产风险**：
-- 密钥轮换需停机（setSigner 即时切换，旧签名立即失效）
-- 多网关部署需共享同一密钥
-- 无法实现热/冷密钥分离
-
-**解决方案**（约 20 行代码）：
-```solidity
-mapping(address => bool) public signers;  // 多签名者白名单
-
-function addSigner(address signer) external onlyOwner {
-    signers[signer] = true;
-    emit SignerAdded(signer);
-}
-
-function removeSigner(address signer) external onlyOwner {
-    signers[signer] = false;
-    emit SignerRemoved(signer);
-}
-
-// resolveWithProof 中验证
-if (!signers[recovered]) revert InvalidSigner();
-```
-
-**优势**：
-- ✅ 零停机密钥轮换（先 add 新签名者，等旧 TTL 过期再 remove）
-- ✅ 多网关可各用独立密钥
-- ✅ 支持热/冷密钥分离
-
-**参考实现**：eval/ENS-offchain-resolver/packages/contracts/contracts/OffchainResolver.sol
-
----
-
-## 里程碑 E：.box 写路径（依赖官方）
-
-**目标**：接入 my.box 写入能力（当前仅只读展示）。
-
-- E1 跟进 my.box 官方 API/授权接口开放情况
-- E2 与 .eth 管理闭环对齐
-
----
-
-## 里程碑 F：多链扩展（远期规划）
+## 里程碑 G：多链扩展
 
 **目标**：支持其他 OP-stack L2 链（Base、Arbitrum、Scroll 等）。
 
-| 任务 | 内容 | 来源/参考 | 状态 |
+| 任务 | 内容 | 来源/参考 | 依赖 |
 |------|------|-----------|------|
-| F1 | 多链 Provider 配置系统 | CometENS providers.ts | 规划中 |
-| F2 | Base 网络支持 | eval/CometENS/base.ts | 规划中 |
-| F3 | Arbitrum 网络支持 | eval/CometENS/arbitrum.ts | 规划中 |
-| F4 | 统一的多链 Gateway 路由 | eval/CometENS/packages/gateway/ | 规划中 |
+| G1 | 多链 Provider 配置系统 | eval/CometENS/providers.ts | D1 |
+| G2 | Base 网络支持 | eval/CometENS/base.ts | G1 |
+| G3 | Arbitrum 网络支持 | eval/CometENS/arbitrum.ts | G1 |
+| G4 | 跨链根域名管理（同一 ENS 域名跨多 L2）| - | D1, G1 |
+| G5 | 统一的多链 Gateway 路由 | eval/CometENS/gateway | G4 |
 
-**参考资源**：
-- eval/CometENS/providers.ts 包含 40+ 条链的完整 RPC 配置（Alchemy/Infura/Ankr/drpc/public）
-- eval/CometENS/base.ts、arbitrum.ts、optimism.ts 提供各链的部署示例
-- 支持链列表：Ethereum、Optimism、Base、Arbitrum、Scroll、Taiko、zkSync、Polygon、Linea、Blast、Mantle、Mode、Celo 等
+**依赖说明**：
+- 多链是多根域名的自然延伸（不同链上的相同/不同根域名）
+- 需要先稳定单链多根域名架构
 
 ---
 
-## 历史仓库价值参考
+## 里程碑 H：.box 写路径（依赖官方）
+
+**目标**：接入 my.box 写入能力。
+
+| 任务 | 内容 | 依赖 |
+|------|------|------|
+| H1 | 跟进 my.box 官方 API 开放情况 | 官方 |
+| H2 | .box 与 .eth 管理闭环对齐 | H1 |
+
+---
+
+## 依赖关系图
+
+```
+                    ┌─────────────────────────────────────┐
+                    │            里程碑 A (已完成)          │
+                    │   MVP: L2Records + OffchainResolver  │
+                    └───────────────┬─────────────────────┘
+                                    │
+                                    ▼
+                    ┌─────────────────────────────────────┐
+                    │         里程碑 B (Next)              │
+                    │   完整记录: Contenthash + ABI + ...  │
+                    └───────────────┬─────────────────────┘
+                                    │
+                                    ▼
+                    ┌─────────────────────────────────────┐
+                    │      里程碑 C (主网上线前必须)        │
+                    │  生产安全: 多签名者 + Rate limit +    │
+                    │          密钥轮换 + 监控告警          │
+                    └───────────────┬─────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+    ┌───────────────────────────┐   ┌───────────────────────────┐
+    │    里程碑 D (框架化)       │   │      里程碑 F (V2)        │
+    │  多根域名 + 无许可注册      │   │  状态证明 (远期)           │
+    │  ├─ D1: 多根域名架构       │   │  （可与 D 并行研发）        │
+    │  ├─ D2: 无许可注册         │   │                           │
+    │  └─ D3: 注册商生态         │   │                           │
+    └───────────┬───────────────┘   └───────────────────────────┘
+                │
+                ├───────────────────┬───────────────────┐
+                │                   │                   │
+                ▼                   ▼                   ▼
+    ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+    │ 里程碑 E (NFT)    │ │ 里程碑 G (多链)   │ │ 里程碑 H (.box)  │
+    │ Name Wrapper      │ │ Base/Arb/Scroll   │ │ （依赖官方）      │
+    │                   │ │                   │ │                   │
+    └───────────────────┘ └───────────────────┘ └───────────────────┘
+```
+
+---
+
+## 主网上线路径（最短路径）
+
+```
+当前 ──▶ 里程碑 B ──▶ 里程碑 C ──▶ 主网上线
+                │
+                └─▶ 里程碑 D（主网后迭代）
+
+时间估算：
+- 里程碑 B: 2 周
+- 里程碑 C: 3 周
+- 总计: 5 周后可主网上线（仅 aastar.eth 单域名）
+
+主网上线后：
+- 迭代里程碑 D（多根域名 + 无许可）
+- 并行研发里程碑 F（状态证明）
+- 根据需求开启里程碑 E（Name Wrapper）
+```
+
+---
+
+## 历史仓库价值映射
 
 | 内容 | 来源 | 里程碑 | 说明 |
 |------|------|--------|------|
-| 多签名者支持 | ENS-offchain-resolver | **D1** | 生产上线前必须添加（约20行）|
-| Cloudflare Workers 网关 | ENS-offchain-resolver | **A10** ✅ | 已部署，生产环境使用 |
-| Multi-chain Provider 配置 | CometENS (aastar-dev) | **F1** | 扩展到其他 OP-stack L2 时参考 |
-| OPResolver 状态证明 | CometENS (aastar-dev) | **C5** | 里程碑 C 的实现参考 |
-| Contenthash 前端入口 | CometENS-old | **A11/B5** | admin.html + register.html 补充 setContenthash |
-| IERC7996 直接解析路径 | ens-contracts | **D7** | 主网可选优化，减少一次网络往返 |
+| 多签名者支持 | ENS-offchain-resolver | **C1** | 生产上线前必须 |
+| Cloudflare Workers | ENS-offchain-resolver | **A10** ✅ | 已部署 |
+| Contenthash 前端 | CometENS-old | **B1** | admin.html 补充 |
+| 多根域名配置 | CometENS (aastar-dev) | **D1** | providers.ts 参考 |
+| 无许可注册模型 | eval/设计文档 | **D2** | 新增架构 |
+| OPResolver/状态证明 | CometENS (aastar-dev) | **F1** | 里程碑 F |
+| Multi-chain Provider | CometENS (aastar-dev) | **G1** | 里程碑 G |
+| IERC7996 直接解析 | ens-contracts | **F4** | 可选优化 |
 
 ---
 
-## 参考：ENS V2 路径对应
+## P0 任务清单（按里程碑分组）
 
-```
-CometENS 路径                  ENS V2 对应
-─────────────────────────────────────────────
-L2Records (里程碑A) ──────▶  L2 存储验证
-OffchainResolver (里程碑A) ──▶  可信签名（过渡态）
-OPResolver (里程碑C) ─────▶  状态证明（V2 标准）
-Name Wrapper (里程碑B) ───▶  Per-name Registry
-Fuse 烧断 (里程碑D) ──────▶  不可变信任根
-Multi-chain (里程碑F) ────▶  ENSIP-11 多链地址
-```
+### 里程碑 B (Next)
+- [ ] B1: Contenthash 前端管理
+- [ ] B2: Contenthash 用户注册
 
----
+### 里程碑 C (主网上线前)
+- [ ] C1: 多签名者支持
+- [ ] C2: 密钥轮换方案
+- [ ] C3: Rate limiting + nonce 防重放
+- [ ] C4: 合约紧急暂停机制
 
-## 主网上线前必须完成清单（🔴 P0）
-
-| 任务 | 里程碑 | 说明 |
-|------|--------|------|
-| OffchainResolver 多签名者支持 | D1 | 零停机密钥轮换能力 |
-| Worker EOA 密钥轮换方案 | D3 | 配合多签名者实现 |
-| Rate limiting、nonce 防重放 | D4 | 生产安全基础 |
-| 完整的 ENS 配置测试 | A11/B5 | addr + text + contenthash 全覆盖 |
+### 里程碑 D (框架化)
+- [ ] D1.1: L2Records 多根域名配置
+- [ ] D1.4: Gateway 多 Resolver 路由
+- [ ] D2.1: 注册商数据模型
+- [ ] D2.3: `registerByRegistrar` 接口
+- [ ] D2.5: 注册商签名验证系统
 
 ---
 
-## 测试覆盖要求
+## 测试覆盖矩阵
 
-| 里程碑 | 测试重点 |
-|--------|----------|
-| A | Gateway 签名验证、EIP-712 注册、CCIP-Read 端到端 |
-| B | Name Wrapper NFT 转移、权限变更 |
-| C | Merkle 证明验证、链上状态校验 |
-| D | 多签名者轮换、密钥泄露应急响应 |
-| F | 多链切换、跨链解析一致性 |
+| 里程碑 | 单元测试 | E2E 测试 | 集成测试 | 安全审计 |
+|--------|----------|----------|----------|----------|
+| A | ✅ | ✅ | ✅ | - |
+| B | 🟡 | 🟡 | - | - |
+| C | 🔴 | 🔴 | 🔴 | 🔴 |
+| D | 🔴 | 🔴 | 🔴 | 🟡 |
+| E | 🟡 | 🟡 | 🟡 | - |
+| F | 🔴 | 🔴 | 🔴 | 🔴 |
+
+🔴 = 必需  🟡 = 建议  ✅ = 已完成
