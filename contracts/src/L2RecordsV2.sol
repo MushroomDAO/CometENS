@@ -99,10 +99,12 @@ contract L2RecordsV2 {
 
         registrars[parentNode][registrar] = true;
         // 0 in external API = unlimited; stored as type(uint256).max to distinguish from exhausted (0)
-        registrarQuota[parentNode][registrar] = quota == 0 ? type(uint256).max : quota;
+        uint256 storedQuota = quota == 0 ? type(uint256).max : quota;
+        registrarQuota[parentNode][registrar] = storedQuota;
         registrarExpiry[parentNode][registrar] = expiry;
 
-        emit RegistrarAdded(parentNode, registrar, quota, expiry);
+        // Emit resolved quota so indexers/events reflect the actual stored sentinel
+        emit RegistrarAdded(parentNode, registrar, storedQuota, expiry);
     }
 
     /// @notice Remove a registrar
@@ -207,6 +209,7 @@ contract L2RecordsV2 {
         bytes memory encoded = _names[node];
         if (encoded.length < 2) return "";
         uint8 len = uint8(encoded[0]);
+        if (encoded.length < uint256(len) + 2) return "";
         bytes memory label = new bytes(len);
         for (uint i = 0; i < len; i++) {
             label[i] = encoded[i + 1];
@@ -219,9 +222,17 @@ contract L2RecordsV2 {
     }
 
     /// @notice Override the primary node for an address (owner only).
-    ///         Useful when a user transfers their subdomain or wants a different primary.
+    ///         Pass node=0 to clear the primary. Reverts if node is non-zero and unregistered.
     function setPrimaryNode(address addr_, bytes32 node) external onlyOwner {
+        if (node != bytes32(0) && _owners[node] == address(0)) revert Unauthorized();
         _primaryNode[addr_] = node;
+    }
+
+    /// @notice Allows a subdomain owner to set their own primary node.
+    ///         Pass node=0 to clear. Reverts if node is non-zero and caller is not its owner.
+    function setPrimaryNodeSelf(bytes32 node) external {
+        if (node != bytes32(0) && _owners[node] != msg.sender) revert Unauthorized();
+        _primaryNode[msg.sender] = node;
     }
 
     // ─── Write records ──────────────────────────────────────────────────────────
@@ -233,9 +244,9 @@ contract L2RecordsV2 {
     //      forwarding the write. This avoids per-user on-chain tx costs while keeping
     //      the gateway accountable. Future: add an onlyOwnerOrSubnodeOwner modifier.
 
-    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes.
+    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes or empty (clear).
     function setAddr(bytes32 node, uint256 coinType, bytes calldata addrBytes) external onlyOwner {
-        if (coinType == 60 && addrBytes.length != 20) revert InvalidAddrBytes();
+        if (coinType == 60 && addrBytes.length != 0 && addrBytes.length != 20) revert InvalidAddrBytes();
         _addrs[node][coinType] = addrBytes;
         emit AddrSet(node, coinType, addrBytes);
     }

@@ -90,6 +90,7 @@ contract L2Records {
         bytes memory encoded = _names[node];
         if (encoded.length < 2) return "";
         uint8 len = uint8(encoded[0]);
+        if (encoded.length < uint256(len) + 2) return "";
         bytes memory label = new bytes(len);
         for (uint i = 0; i < len; i++) {
             label[i] = encoded[i + 1];
@@ -104,9 +105,9 @@ contract L2Records {
 
     // ─── Write records ────────────────────────────────────────────────────────
 
-    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes.
+    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes or empty (clear).
     function setAddr(bytes32 node, uint256 coinType, bytes calldata addrBytes) external onlyOwner {
-        if (coinType == 60 && addrBytes.length != 20) revert InvalidAddrBytes();
+        if (coinType == 60 && addrBytes.length != 0 && addrBytes.length != 20) revert InvalidAddrBytes();
         _addrs[node][coinType] = addrBytes;
         emit AddrSet(node, coinType, addrBytes);
     }
