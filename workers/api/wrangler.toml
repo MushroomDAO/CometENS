@@ -1,0 +1,40 @@
+name = "cometens-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Testnet (OP Sepolia) ─────────────────────────────────────────────────────
+# Deploy: wrangler deploy --env testnet
+# URL:    https://cometens-api.jhfnetboy.workers.dev
+#
+# Secrets (set via `wrangler secret put --env testnet`):
+#   OP_RPC_URL                 — Optimism Sepolia RPC endpoint
+#   WORKER_EOA_PRIVATE_KEY     — EOA that submits L2 transactions (contract owner key)
+#   UPSTREAM_ALLOWED_SIGNERS   — Comma-separated addresses for /v1/register whitelist
+#
+[env.testnet]
+name = "cometens-api"
+[env.testnet.vars]
+NETWORK = "op-sepolia"
+L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
+ROOT_DOMAIN = "aastar.eth"
+
+# KV namespace for address→label registry (create with: wrangler kv namespace create REGISTRY --env testnet)
+# After creating, replace the id below with the actual namespace ID.
+# [[env.testnet.kv_namespaces]]
+# binding = "REGISTRY"
+# id = "REPLACE_WITH_NAMESPACE_ID"
+
+# ─── Production (OP Mainnet) ──────────────────────────────────────────────────
+# Deploy: wrangler deploy --env production
+#
+[env.production]
+name = "cometens-api-production"
+[env.production.vars]
+NETWORK = "op-mainnet"
+L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
+ROOT_DOMAIN = "aastar.eth"
+
+# [[env.production.kv_namespaces]]
+# binding = "REGISTRY"
+# id = "REPLACE_WITH_NAMESPACE_ID"
