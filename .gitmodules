@@ -4,3 +4,21 @@
 [submodule "eval/durin"]
 	path = eval/durin
 	url = https://github.com/namestonehq/durin
+[submodule "eval/CometENS-old"]
+	path = eval/CometENS-old
+	url = https://github.com/AAStarCommunity/CometENS-old
+[submodule "eval/CometENS"]
+	path = eval/CometENS
+	url = https://github.com/AAStarCommunity/CometENS
+[submodule "eval/ENS-offchain-resolver"]
+	path = eval/ENS-offchain-resolver
+	url = https://github.com/AAStarCommunity/ENS-offchain-resolver
+[submodule "eval/ens-contracts"]
+	path = eval/ens-contracts
+	url = https://github.com/ensdomains/ens-contracts
+[submodule "eval/ensjs"]
+	path = eval/ensjs
+	url = https://github.com/ensdomains/ensjs
+[submodule "eval/ens-docs"]
+	path = eval/ens-docs
+	url = https://github.com/ensdomains/docs
