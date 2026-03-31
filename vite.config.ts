@@ -190,6 +190,34 @@ export default defineConfig(({ mode }) => {
             return
           }
 
+          // ── GET /api/manage/check-owner?contract=0x... ────────────────────
+          if (anyReq.method === 'GET' && url.startsWith('/check-owner')) {
+            const qs = new URLSearchParams(url.split('?')[1] ?? '')
+            const contract = qs.get('contract')?.trim() as `0x${string}` | undefined
+            if (!contract) {
+              res.statusCode = 400
+              res.end(JSON.stringify({ error: 'Missing contract param' }))
+              return
+            }
+            try {
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const { optimismSepolia: opSep } = await import('viem/chains')
+              const l2Rpc = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+              const pub = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              const owner = await pub.readContract({
+                address: contract,
+                abi: [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
+                functionName: 'owner',
+              })
+              res.statusCode = 200
+              res.end(JSON.stringify({ owner }))
+            } catch (e) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: (e as Error).message }))
+            }
+            return
+          }
+
           // ── GET /api/manage/lookup?address=0x... ───────────────────────────
           if (anyReq.method === 'GET' && url.startsWith('/lookup')) {
             const qs = new URLSearchParams(url.split('?')[1] ?? '')
@@ -422,6 +450,61 @@ export default defineConfig(({ mode }) => {
               return
             }
 
+            if (url === '/add-registrar') {
+              const { AddRegistrarTypes } = await import('./server/gateway/manage/schemas')
+              const msg = payload.message ?? {}
+
+              if (!isHex(msg.parentNode)) throw new Error('Invalid parentNode')
+              if (!isAddress(msg.registrar)) throw new Error('Invalid registrar')
+
+              const message = {
+                parentNode: msg.parentNode as `0x${string}`,
+                registrar: msg.registrar as `0x${string}`,
+                quota: asBigInt(msg.quota),
+                expiry: asBigInt(msg.expiry),
+                nonce: asBigInt(msg.nonce),
+                deadline: asBigInt(msg.deadline),
+              }
+
+              checkDeadline(message.deadline)
+
+              const ok = await verifyTypedData({
+                address: from,
+                domain,
+                primaryType: 'AddRegistrar',
+                types: AddRegistrarTypes as any,
+                message: message as any,
+                signature,
+              })
+              if (!ok) throw new Error('Invalid signature')
+
+              // Check if from is contract owner
+              const { createPublicClient, http: viemHttp } = await import('viem')
+              const { optimismSepolia: opSep } = await import('viem/chains')
+              const l2Addr = verifyingContract
+              const l2Rpc = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
+              const pubClient = createPublicClient({ chain: opSep, transport: viemHttp(l2Rpc) })
+              
+              const contractOwner = await pubClient.readContract({
+                address: l2Addr,
+                abi: [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
+                functionName: 'owner',
+              })
+              
+              if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
+                throw new Error('Only contract owner can add registrars')
+              }
+
+              const txHash = await withWriter(async (writer) =>
+                (writer as any).addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
+              )
+
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ ok, action: 'add-registrar', txHash }))
+              return
+            }
+
             res.statusCode = 404
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ error: 'Unknown manage endpoint' }))
@@ -472,12 +555,12 @@ function checkDeadline(deadline: bigint): void {
   if (deadline < now) throw new Error('Expired')
 }
 
-async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter | undefined> {
+async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsWriterV2').L2RecordsWriterV2 | undefined> {
   const workerPk = process.env.WORKER_EOA_PRIVATE_KEY as `0x${string}` | undefined
   if (!workerPk) return undefined
 
   const { privateKeyToAccount } = await import('viem/accounts')
-  const { L2RecordsWriter } = await import('./server/gateway/writer/L2RecordsWriter')
+  const { L2RecordsWriterV2 } = await import('./server/gateway/writer/L2RecordsWriterV2')
   const { optimismSepolia } = await import('viem/chains')
 
   const workerAccount = privateKeyToAccount(workerPk)
@@ -488,11 +571,11 @@ async function buildWriter(): Promise<import('./server/gateway/writer/L2RecordsW
   ) as `0x${string}`
   const rpcUrl = process.env.OP_SEPOLIA_RPC_URL ?? process.env.L2_RPC_URL ?? ''
 
-  return new L2RecordsWriter(workerAccount, optimismSepolia, rpcUrl, l2Address)
+  return new L2RecordsWriterV2(workerAccount, optimismSepolia, rpcUrl, l2Address)
 }
 
 async function withWriter<T>(
-  fn: (writer: import('./server/gateway/writer/L2RecordsWriter').L2RecordsWriter) => Promise<T>
+  fn: (writer: import('./server/gateway/writer/L2RecordsWriterV2').L2RecordsWriterV2) => Promise<T>
 ): Promise<T | undefined> {
   const writer = await buildWriter()
   if (!writer) return undefined

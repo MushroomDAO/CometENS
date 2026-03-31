@@ -117,6 +117,32 @@
     <div class="result-box hidden" id="setTextResult"></div>
   </div>
 
+  <!-- ── Section 4: Add Registrar ── -->
+  <div class="card">
+    <h3>Add Registrar (Owner Only)</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Authorize an address to register subdomains under a parent domain</p>
+
+    <label for="addRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
+    <input id="addRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="addRegistrarAddress">Registrar Address (0x...)</label>
+    <input id="addRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <div class="row">
+      <div style="flex:1;">
+        <label for="addRegistrarQuota">Quota (max registrations, 0 = unlimited)</label>
+        <input id="addRegistrarQuota" type="number" value="1000" min="0" style="width:100%;" />
+      </div>
+      <div style="flex:1;">
+        <label for="addRegistrarExpiry">Expiry (timestamp, 0 = never)</label>
+        <input id="addRegistrarExpiry" type="number" value="0" min="0" style="width:100%;" />
+      </div>
+    </div>
+
+    <button class="btn-primary" id="addRegistrarBtn" style="background:#2e7d32;">Connect &amp; Sign AddRegistrar</button>
+    <div class="result-box hidden" id="addRegistrarResult"></div>
+  </div>
+
   <!-- ── Deployed Contracts ── -->
   <div class="card">
     <h3>Deployed Contracts</h3>
