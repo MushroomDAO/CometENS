@@ -88,6 +88,7 @@ contract L2Records {
         bytes memory encoded = _names[node];
         if (encoded.length < 2) return "";
         uint8 len = uint8(encoded[0]);
+        if (encoded.length < uint(len) + 2) return ""; // bounds guard against malformed storage
         bytes memory label = new bytes(len);
         for (uint i = 0; i < len; i++) {
             label[i] = encoded[i + 1];
@@ -152,7 +153,9 @@ contract L2Records {
         address newOwner,
         string calldata label
     ) private returns (bytes32 node) {
+        require(bytes(label).length > 0 && bytes(label).length <= 63, "L2Records: invalid label length");
         node = keccak256(abi.encodePacked(parentNode, labelhash));
+        require(_owners[node] == address(0), "L2Records: already registered");
         _owners[node] = newOwner;
         _names[node] = _encodeDnsName(label);
         if (_primaryNode[newOwner] == bytes32(0)) _primaryNode[newOwner] = node;

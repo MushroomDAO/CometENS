@@ -427,7 +427,7 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
     if (addBtn) addBtn.textContent = 'Signing...'
 
     const ethereum = getEthereum()
-    const chain = getChain()
+    const chain = getL2Chain()
     const wallet = createWalletClient({ chain, transport: custom(ethereum) })
 
     const now = Math.floor(Date.now() / 1000)

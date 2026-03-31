@@ -78,11 +78,15 @@ export async function handleV1Register(
   const fullName = `${label}.${rootDomain}`
   const node = namehash(fullName) as Hex
 
+  if (!writer) {
+    throw Object.assign(new Error('Writer not configured: WORKER_EOA_PRIVATE_KEY is missing'), { status: 503 })
+  }
+
   const addrTarget = (payload.addr && isAddress(payload.addr) ? payload.addr : owner) as Address
   // Address is a validated 20-byte hex string; viem encodes it correctly for `bytes calldata`.
   const addrBytes = addrTarget as Hex
 
-  const txHash = await writer?.registerSubnode(parentNode, lh, owner, label, addrBytes)
+  const txHash = await writer.registerSubnode(parentNode, lh, owner, label, addrBytes)
 
   return { ok: true, name: fullName, node, txHash }
 }
