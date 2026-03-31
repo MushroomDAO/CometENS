@@ -116,6 +116,14 @@ contract L2RecordsV2Test is Test {
         assertEq(records.registrarQuota(ROOT_NODE, registrar), type(uint256).max);
     }
 
+    function test_updateRegistrarQuotaEventEmitsResolvedValue() public {
+        // quota=0 stored as type(uint256).max; event must emit resolved sentinel, not raw 0
+        records.addRegistrar(ROOT_NODE, registrar, 5, 0);
+        vm.expectEmit(true, true, false, true);
+        emit L2RecordsV2.RegistrarQuotaUpdated(ROOT_NODE, registrar, type(uint256).max);
+        records.updateRegistrarQuota(ROOT_NODE, registrar, 0);
+    }
+
     function test_updateRegistrarQuotaOnExpiredReverts() public {
         records.addRegistrar(ROOT_NODE, registrar, 5, block.timestamp + 100);
         vm.warp(block.timestamp + 200);

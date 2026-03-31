@@ -125,8 +125,9 @@ contract L2RecordsV2 {
         if (!registrars[parentNode][registrar]) revert Unauthorized();
         uint256 exp = registrarExpiry[parentNode][registrar];
         if (exp != 0 && block.timestamp > exp) revert RegistrarExpired();
-        registrarQuota[parentNode][registrar] = newQuota == 0 ? type(uint256).max : newQuota;
-        emit RegistrarQuotaUpdated(parentNode, registrar, newQuota);
+        uint256 stored = newQuota == 0 ? type(uint256).max : newQuota;
+        registrarQuota[parentNode][registrar] = stored;
+        emit RegistrarQuotaUpdated(parentNode, registrar, stored);
     }
 
     /// @notice Check if an address is an active registrar for a parent domain
