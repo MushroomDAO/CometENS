@@ -47,6 +47,7 @@ contract L2RecordsV2 {
     error Unauthorized();
     error ZeroAddress();
     error InvalidLabel();
+    error InvalidAddrBytes();
     error AlreadyRegistered();
     error QuotaExceeded();
     error RegistrarExpired();
@@ -57,8 +58,10 @@ contract L2RecordsV2 {
     }
 
     modifier onlyOwnerOrRegistrar(bytes32 parentNode) {
-        if (msg.sender != owner && !registrars[parentNode][msg.sender]) {
-            revert Unauthorized();
+        if (msg.sender != owner) {
+            if (!registrars[parentNode][msg.sender]) revert Unauthorized();
+            uint256 exp = registrarExpiry[parentNode][msg.sender];
+            if (exp != 0 && block.timestamp > exp) revert RegistrarExpired();
         }
         _;
     }
@@ -85,17 +88,18 @@ contract L2RecordsV2 {
     /// @param quota Maximum number of registrations allowed (0 = unlimited)
     /// @param expiry Timestamp when registrar expires (0 = never)
     function addRegistrar(
-        bytes32 parentNode, 
-        address registrar, 
+        bytes32 parentNode,
+        address registrar,
         uint256 quota,
         uint256 expiry
     ) external onlyOwner {
         if (registrar == address(0)) revert ZeroAddress();
-        
+
         registrars[parentNode][registrar] = true;
-        registrarQuota[parentNode][registrar] = quota;
+        // 0 in external API = unlimited; stored as type(uint256).max to distinguish from exhausted (0)
+        registrarQuota[parentNode][registrar] = quota == 0 ? type(uint256).max : quota;
         registrarExpiry[parentNode][registrar] = expiry;
-        
+
         emit RegistrarAdded(parentNode, registrar, quota, expiry);
     }
 
@@ -108,14 +112,14 @@ contract L2RecordsV2 {
         emit RegistrarRemoved(parentNode, registrar);
     }
 
-    /// @notice Update quota for an existing registrar
+    /// @notice Update quota for an existing registrar (0 = unlimited)
     function updateRegistrarQuota(
-        bytes32 parentNode, 
-        address registrar, 
+        bytes32 parentNode,
+        address registrar,
         uint256 newQuota
     ) external onlyOwner {
         if (!registrars[parentNode][registrar]) revert Unauthorized();
-        registrarQuota[parentNode][registrar] = newQuota;
+        registrarQuota[parentNode][registrar] = newQuota == 0 ? type(uint256).max : newQuota;
         emit RegistrarQuotaUpdated(parentNode, registrar, newQuota);
     }
 
@@ -129,22 +133,16 @@ contract L2RecordsV2 {
         return true;
     }
 
-    /// @notice Get registrar info
+    /// @notice Get registrar info. remainingQuota = type(uint256).max means unlimited.
     function getRegistrarInfo(bytes32 parentNode, address registrar) external view returns (
         bool isActive,
-        uint256 quota,
         uint256 remainingQuota,
         uint256 expiry
     ) {
         isActive = registrars[parentNode][registrar];
-        quota = registrarQuota[parentNode][registrar];
-        remainingQuota = quota; // Simplified - would need to track usage separately
+        remainingQuota = registrarQuota[parentNode][registrar]; // max = unlimited, 0 = exhausted
         expiry = registrarExpiry[parentNode][registrar];
-        
-        // Check expiry
-        if (expiry != 0 && block.timestamp > expiry) {
-            isActive = false;
-        }
+        if (expiry != 0 && block.timestamp > expiry) isActive = false;
     }
 
     // ─── Subdomain Registration ─────────────────────────────────────────────────
@@ -170,29 +168,24 @@ contract L2RecordsV2 {
         string calldata label,
         bytes calldata addrBytes
     ) external onlyOwnerOrRegistrar(parentNode) {
+        if (addrBytes.length != 20) revert InvalidAddrBytes();
         _checkRegistrarQuota(parentNode);
         bytes32 node = _registerNode(parentNode, labelhash, newOwner, label);
         _addrs[node][60] = addrBytes;
         emit AddrSet(node, 60, addrBytes);
     }
 
-    /// @notice Internal function to check and decrement registrar quota
+    /// @notice Internal function to check and decrement registrar quota.
+    ///         Expiry is already enforced by the modifier; this handles quota only.
     function _checkRegistrarQuota(bytes32 parentNode) internal {
         if (msg.sender != owner) {
-            // Check expiry
-            uint256 expiry = registrarExpiry[parentNode][msg.sender];
-            if (expiry != 0 && block.timestamp > expiry) {
-                revert RegistrarExpired();
-            }
-            
-            // Check and decrement quota
             uint256 quota = registrarQuota[parentNode][msg.sender];
-            if (quota != 0) {
-                if (quota == 1) {
-                    revert QuotaExceeded();
-                }
+            if (quota != type(uint256).max) {
+                // limited quota: 0 = exhausted
+                if (quota == 0) revert QuotaExceeded();
                 registrarQuota[parentNode][msg.sender] = quota - 1;
             }
+            // type(uint256).max = unlimited — no decrement needed
         }
     }
 
@@ -270,7 +263,10 @@ contract L2RecordsV2 {
         address newOwner,
         string calldata label
     ) private returns (bytes32 node) {
+        bytes memory labelBytes = bytes(label);
+        if (labelBytes.length == 0 || labelBytes.length > 63) revert InvalidLabel();
         node = keccak256(abi.encodePacked(parentNode, labelhash));
+        if (_owners[node] != address(0)) revert AlreadyRegistered();
         _owners[node] = newOwner;
         _names[node] = _encodeDnsName(label);
         if (_primaryNode[newOwner] == bytes32(0)) _primaryNode[newOwner] = node;
