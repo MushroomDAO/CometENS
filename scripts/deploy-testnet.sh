@@ -30,20 +30,20 @@ echo "  L1: Ethereum Sepolia (11155111)"
 echo "  L2: Optimism Sepolia (11155420)"
 echo "═══════════════════════════════════════════════"
 
-# ── Step 1: Deploy L2Records ────────────────────────────────────────────────────
+# ── Step 1: Deploy L2RecordsV2 ──────────────────────────────────────────────────
 echo ""
-echo "▶ Step 1/3 — Deploy L2Records (OP Sepolia)"
+echo "▶ Step 1/3 — Deploy L2RecordsV2 (OP Sepolia)"
 cd "$ROOT/contracts"
-forge script script/DeployL2Records.s.sol \
+forge script script/DeployL2RecordsV2.s.sol \
   --rpc-url "$OP_SEPOLIA_RPC_URL" \
   --private-key "$PRIVATE_KEY_SUPPLIER" \
   --broadcast \
   --verify \
   2>&1 | tee /tmp/deploy-l2records.log
 
-L2_ADDR=$(grep -oP '(?<=Deployed L2Records at: )0x[0-9a-fA-F]+' /tmp/deploy-l2records.log || \
+L2_ADDR=$(grep -oP '(?<=L2RecordsV2 deployed at: )0x[0-9a-fA-F]+' /tmp/deploy-l2records.log || \
           grep -oP '(?<=Contract Address: )0x[0-9a-fA-F]+' /tmp/deploy-l2records.log | tail -1)
-echo "  L2Records deployed: $L2_ADDR"
+echo "  L2RecordsV2 deployed: $L2_ADDR"
 
 # ── Step 2: Deploy OffchainResolver ─────────────────────────────────────────────
 echo ""

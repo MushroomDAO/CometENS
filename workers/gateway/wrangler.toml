@@ -17,7 +17,7 @@ compatibility_flags = ["nodejs_compat"]
 name = "cometens-gateway"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0xf8df7ffd1cefd1226bf0f302120cafd8f6119115"
+L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
 ROOT_DOMAIN = "aastar.eth"
 # ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
 
