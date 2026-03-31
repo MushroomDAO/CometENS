@@ -31,6 +31,7 @@ contract L2Records {
 
     error Unauthorized();
     error ZeroAddress();
+    error InvalidAddrBytes();
     error LabelMismatch();
 
     modifier onlyOwner() {
@@ -103,7 +104,9 @@ contract L2Records {
 
     // ─── Write records ────────────────────────────────────────────────────────
 
+    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes.
     function setAddr(bytes32 node, uint256 coinType, bytes calldata addrBytes) external onlyOwner {
+        if (coinType == 60 && addrBytes.length != 20) revert InvalidAddrBytes();
         _addrs[node][coinType] = addrBytes;
         emit AddrSet(node, coinType, addrBytes);
     }
@@ -121,9 +124,13 @@ contract L2Records {
     // ─── Read records ─────────────────────────────────────────────────────────
 
     /// @notice Returns the ETH address (coinType 60) as an address type.
+    /// @dev Assembly: b points to the length slot (32 bytes). mload(b+20) reads bytes
+    ///      [b+20..b+51]: the last 12 bytes of the length slot (zeroes) + all 20 address
+    ///      bytes. Casting to address takes the low 160 bits = the address. Correct ✓.
+    ///      Guarded: b.length < 20 returns address(0) to prevent reading uninitialized memory.
     function addr(bytes32 node) external view returns (address) {
         bytes memory b = _addrs[node][60];
-        if (b.length == 0) return address(0);
+        if (b.length < 20) return address(0);
         address result;
         assembly {
             result := mload(add(b, 20))

@@ -24,7 +24,8 @@ contract L2RecordsV2 {
     // ─── V2: Registrar model ────────────────────────────────────────────────────
     
     /// @notice parentNode => registrar address => is active
-    mapping(bytes32 => mapping(address => bool)) public registrars;
+    /// @dev Use isRegistrar() for external queries — this raw slot does not account for expiry.
+    mapping(bytes32 => mapping(address => bool)) private registrars;
     
     /// @notice parentNode => registrar address => remaining quota
     mapping(bytes32 => mapping(address => uint256)) public registrarQuota;
@@ -113,13 +114,15 @@ contract L2RecordsV2 {
         emit RegistrarRemoved(parentNode, registrar);
     }
 
-    /// @notice Update quota for an existing registrar (0 = unlimited)
+    /// @notice Update quota for an existing (non-expired) registrar (0 = unlimited)
     function updateRegistrarQuota(
         bytes32 parentNode,
         address registrar,
         uint256 newQuota
     ) external onlyOwner {
         if (!registrars[parentNode][registrar]) revert Unauthorized();
+        uint256 exp = registrarExpiry[parentNode][registrar];
+        if (exp != 0 && block.timestamp > exp) revert RegistrarExpired();
         registrarQuota[parentNode][registrar] = newQuota == 0 ? type(uint256).max : newQuota;
         emit RegistrarQuotaUpdated(parentNode, registrar, newQuota);
     }
@@ -215,9 +218,24 @@ contract L2RecordsV2 {
         return _primaryNode[addr_];
     }
 
-    // ─── Write records ──────────────────────────────────────────────────────────
+    /// @notice Override the primary node for an address (owner only).
+    ///         Useful when a user transfers their subdomain or wants a different primary.
+    function setPrimaryNode(address addr_, bytes32 node) external onlyOwner {
+        _primaryNode[addr_] = node;
+    }
 
+    // ─── Write records ──────────────────────────────────────────────────────────
+    //
+    // @dev DESIGN: setAddr / setText / setContenthash are intentionally onlyOwner.
+    //      Subdomain owners (tracked in _owners[node]) manage their records through
+    //      the off-chain API gateway which holds the contract owner key. The gateway
+    //      verifies the caller's EIP-712 signature against subnodeOwner(node) before
+    //      forwarding the write. This avoids per-user on-chain tx costs while keeping
+    //      the gateway accountable. Future: add an onlyOwnerOrSubnodeOwner modifier.
+
+    /// @dev For coinType 60 (ETH), addrBytes must be exactly 20 bytes.
     function setAddr(bytes32 node, uint256 coinType, bytes calldata addrBytes) external onlyOwner {
+        if (coinType == 60 && addrBytes.length != 20) revert InvalidAddrBytes();
         _addrs[node][coinType] = addrBytes;
         emit AddrSet(node, coinType, addrBytes);
     }
@@ -234,9 +252,11 @@ contract L2RecordsV2 {
 
     // ─── Read records ───────────────────────────────────────────────────────────
 
+    /// @dev Assembly explanation: see L2Records.addr() — same pattern, same correctness proof.
+    ///      Guarded: b.length < 20 returns address(0) to prevent reading uninitialized memory.
     function addr(bytes32 node) external view returns (address) {
         bytes memory b = _addrs[node][60];
-        if (b.length == 0) return address(0);
+        if (b.length < 20) return address(0);
         address result;
         assembly {
             result := mload(add(b, 20))
