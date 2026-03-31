@@ -229,7 +229,7 @@ async function checkExistingRegistration(address: string) {
 
   // Fallback: server cache (for dev server mode, only if L2 RPC is down)
   try {
-    const res = await fetch(`/api/manage/lookup?address=${encodeURIComponent(address)}`)
+    const res = await fetch(`${config.apiUrl}/lookup?address=${encodeURIComponent(address)}`)
     if (res.ok) {
       const json = await res.json() as { found: boolean; label?: string; fullName?: string }
       if (json.found && json.label && json.fullName) {
@@ -305,7 +305,7 @@ async function register(): Promise<void> {
   try {
     // Pre-flight: check availability before asking MetaMask to sign
     const checkRes = await fetch(
-      `/api/manage/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(config.rootDomain)}`
+      `${config.apiUrl}/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(config.rootDomain)}`
     )
     if (checkRes.ok) {
       const checkJson = await checkRes.json() as { available: boolean; owner?: string }
@@ -343,7 +343,7 @@ async function register(): Promise<void> {
 
     if (registerBtn) registerBtn.textContent = 'Submitting…'
 
-    const response = await fetch('/api/manage/register', {
+    const response = await fetch(`${config.apiUrl}/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

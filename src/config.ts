@@ -28,6 +28,8 @@ export interface CometENSConfig {
   l1ResolverAddress: `0x${string}`
   /** Gateway URL for CCIP-Read signed responses */
   gatewayUrl: string
+  /** API Worker base URL for write operations (no trailing slash) */
+  apiUrl: string
   /** L2 (Optimism) JSON-RPC endpoint */
   l2RpcUrl: string
   /** L1 Sepolia JSON-RPC endpoint (active when network = op-sepolia) */
@@ -43,7 +45,8 @@ export const config: CometENSConfig = {
   rootDomain: env.VITE_ROOT_DOMAIN || '',
   l2RecordsAddress: (env.VITE_L2_RECORDS_ADDRESS || '0x0000000000000000000000000000000000000000') as `0x${string}`,
   l1ResolverAddress: (env.VITE_L1_OFFCHAIN_RESOLVER_ADDRESS || '0x0000000000000000000000000000000000000000') as `0x${string}`,
-  gatewayUrl: env.VITE_GATEWAY_URL || '/api/ccip',
+  gatewayUrl: env.VITE_GATEWAY_URL || 'https://cometens-gateway.jhfnetboy.workers.dev',
+  apiUrl: (env.VITE_API_URL || 'https://cometens-api.jhfnetboy.workers.dev').replace(/\/$/, ''),
   l2RpcUrl: env.VITE_L2_RPC_URL || '',
   l1SepoliaRpcUrl: env.VITE_L1_SEPOLIA_RPC_URL || '',
   l1MainnetRpcUrl: env.VITE_L1_MAINNET_RPC_URL || '',

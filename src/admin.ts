@@ -281,7 +281,7 @@ async function signAndSubmitSetAddr(): Promise<void> {
 
     if (setAddrBtn) setAddrBtn.textContent = 'Submitting…'
 
-    const response = await fetch('/api/manage/set-addr', {
+    const response = await fetch(`${config.apiUrl}/set-addr`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -352,7 +352,7 @@ async function signAndSubmitSetText(): Promise<void> {
 
     if (setTextBtn) setTextBtn.textContent = 'Submitting…'
 
-    const response = await fetch('/api/manage/set-text', {
+    const response = await fetch(`${config.apiUrl}/set-text`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -417,7 +417,7 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
 
   try {
     // Check if connected wallet is the contract owner
-    const checkRes = await fetch(`/api/manage/check-owner?contract=${config.l2RecordsAddress}`)
+    const checkRes = await fetch(`${config.apiUrl}/check-owner?contract=${config.l2RecordsAddress}`)
     const ownerData = await checkRes.json() as { owner: string }
     
     if (ownerData.owner.toLowerCase() !== connectedAddress.toLowerCase()) {
@@ -455,7 +455,7 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
 
     if (addBtn) addBtn.textContent = 'Submitting...'
 
-    const response = await fetch('/api/manage/add-registrar', {
+    const response = await fetch(`${config.apiUrl}/add-registrar`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
