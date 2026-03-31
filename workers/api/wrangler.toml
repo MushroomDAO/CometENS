@@ -23,13 +23,13 @@ NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
 ROOT_DOMAIN = "aastar.eth"
 
-# [[env.testnet.kv_namespaces]]
-# binding = "REGISTRY"
-# id = "REPLACE_WITH_REGISTRY_NAMESPACE_ID"
-#
-# [[env.testnet.kv_namespaces]]
-# binding = "RECORD_CACHE"
-# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"  # same ID as gateway's RECORD_CACHE
+[[env.testnet.kv_namespaces]]
+binding = "REGISTRY"
+id = "a8ec4846317c430d81c5fd7816bac4d6"
+
+[[env.testnet.kv_namespaces]]
+binding = "RECORD_CACHE"
+id = "6147f1fe8d5141389e10475cab1f6647"
 
 # ─── Production (OP Mainnet) ──────────────────────────────────────────────────
 # Deploy: wrangler deploy --env production

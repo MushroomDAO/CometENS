@@ -23,9 +23,9 @@ ROOT_DOMAIN = "aastar.eth"
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
-# [[env.testnet.kv_namespaces]]
-# binding = "RECORD_CACHE"
-# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
+[[env.testnet.kv_namespaces]]
+binding = "RECORD_CACHE"
+id = "6147f1fe8d5141389e10475cab1f6647"
 
 # ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
 # Deploy: wrangler deploy --env production
