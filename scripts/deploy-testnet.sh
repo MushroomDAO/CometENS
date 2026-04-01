@@ -70,6 +70,7 @@ cd "$ROOT/workers/gateway"
 # Update L2Records address in wrangler.toml if we got one
 if [[ -n "${L2_ADDR:-}" ]]; then
   sed -i.bak "s|L2_RECORDS_ADDRESS = \"[^\"]*\"|L2_RECORDS_ADDRESS = \"$L2_ADDR\"|g" wrangler.toml
+  rm -f wrangler.toml.bak
   echo "  Updated gateway wrangler.toml: L2_RECORDS_ADDRESS = $L2_ADDR"
 fi
 
@@ -83,6 +84,7 @@ cd "$ROOT/workers/api"
 # Update L2Records address in wrangler.toml if we got one
 if [[ -n "${L2_ADDR:-}" ]]; then
   sed -i.bak "s|L2_RECORDS_ADDRESS = \"[^\"]*\"|L2_RECORDS_ADDRESS = \"$L2_ADDR\"|g" wrangler.toml
+  rm -f wrangler.toml.bak
   echo "  Updated API wrangler.toml: L2_RECORDS_ADDRESS = $L2_ADDR"
 fi
 

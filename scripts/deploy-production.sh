@@ -48,6 +48,20 @@ fi
 
 GATEWAY_URL="${GATEWAY_URL:-https://cometens-gateway-production.jhfnetboy.workers.dev}"
 
+# Require explicitly set PRIVATE_KEY_SUPPLIER — never fall back to deployer key
+if [[ -z "${PRIVATE_KEY_SUPPLIER:-}" ]]; then
+  echo "  ✗ PRIVATE_KEY_SUPPLIER is not set."
+  echo "    This is the CCIP signing key and must be separate from the deployer key."
+  echo "    Set it in .env.production and retry."
+  exit 1
+fi
+if [[ -z "${WORKER_EOA_PRIVATE_KEY:-}" ]]; then
+  echo "  ✗ WORKER_EOA_PRIVATE_KEY is not set."
+  echo "    This is the API Worker's transaction-signing key."
+  echo "    Set it in .env.production and retry."
+  exit 1
+fi
+
 # ── Step 1: Deploy L2RecordsV2 (OP Mainnet) ──────────────────────────────────
 echo ""
 echo "▶ Step 1/4 — Deploy L2RecordsV2 (OP Mainnet)"
@@ -87,6 +101,7 @@ cd "$ROOT/workers/gateway"
 # Update production L2Records address in wrangler.toml
 if [[ -n "${L2_ADDR:-}" ]]; then
   sed -i.bak "s|L2_RECORDS_ADDRESS = \"[^\"]*\"|L2_RECORDS_ADDRESS = \"$L2_ADDR\"|g" wrangler.toml
+  rm -f wrangler.toml.bak
   echo "  Updated wrangler.toml production L2_RECORDS_ADDRESS = $L2_ADDR"
 fi
 
@@ -94,7 +109,7 @@ fi
 echo ""
 echo "  Setting Gateway Worker secrets..."
 echo "${OP_MAINNET_RPC_URL}" | wrangler secret put OP_RPC_URL --env production
-echo "${PRIVATE_KEY_SUPPLIER:-$PRIVATE_KEY}" | wrangler secret put PRIVATE_KEY_SUPPLIER --env production
+echo "${PRIVATE_KEY_SUPPLIER}" | wrangler secret put PRIVATE_KEY_SUPPLIER --env production
 
 wrangler deploy --env production
 
@@ -106,6 +121,7 @@ cd "$ROOT/workers/api"
 # Update production L2Records address in wrangler.toml
 if [[ -n "${L2_ADDR:-}" ]]; then
   sed -i.bak "s|L2_RECORDS_ADDRESS = \"[^\"]*\"|L2_RECORDS_ADDRESS = \"$L2_ADDR\"|g" wrangler.toml
+  rm -f wrangler.toml.bak
   echo "  Updated API wrangler.toml production L2_RECORDS_ADDRESS = $L2_ADDR"
 fi
 
@@ -113,7 +129,7 @@ fi
 echo ""
 echo "  Setting API Worker secrets..."
 echo "${OP_MAINNET_RPC_URL}" | wrangler secret put OP_RPC_URL --env production
-echo "${WORKER_EOA_PRIVATE_KEY:-$PRIVATE_KEY}" | wrangler secret put WORKER_EOA_PRIVATE_KEY --env production
+echo "${WORKER_EOA_PRIVATE_KEY}" | wrangler secret put WORKER_EOA_PRIVATE_KEY --env production
 echo "${UPSTREAM_ALLOWED_SIGNERS:-$DEPLOYER_ADDRESS}" | wrangler secret put UPSTREAM_ALLOWED_SIGNERS --env production
 
 wrangler deploy --env production

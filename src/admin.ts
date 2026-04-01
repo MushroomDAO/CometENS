@@ -65,8 +65,9 @@ const PUBLIC_RESOLVER_ABI = [
 
 // ─── Clients ──────────────────────────────────────────────────────────────────
 
+// Chain is resolved at startup so l2Client always matches config.network
 const l2Client = createPublicClient({
-  chain: optimismSepolia,
+  chain: config.network === 'op-mainnet' ? optimism : optimismSepolia,
   transport: http(config.l2RpcUrl),
 })
 
@@ -432,8 +433,8 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
   try {
     // Check if connected wallet is the contract owner
     const checkRes = await fetch(`${config.apiUrl}/check-owner?contract=${config.l2RecordsAddress}`)
+    if (!checkRes.ok) throw new Error(`check-owner failed: server ${checkRes.status}`)
     const ownerData = await checkRes.json() as { owner: string }
-    
     if (ownerData.owner.toLowerCase() !== connectedAddress.toLowerCase()) {
       throw new Error(`Only contract owner (${ownerData.owner}) can add registrars`)
     }
@@ -561,6 +562,7 @@ async function signAndSubmitRemoveRegistrar(): Promise<void> {
     if (removeBtn) { removeBtn.disabled = true; removeBtn.textContent = 'Checking Owner...' }
 
     const checkRes = await fetch(`${config.apiUrl}/check-owner?contract=${config.l2RecordsAddress}`)
+    if (!checkRes.ok) throw new Error(`check-owner failed: server ${checkRes.status}`)
     const ownerData = await checkRes.json() as { owner: string }
     if (ownerData.owner.toLowerCase() !== connectedAddress.toLowerCase()) {
       throw new Error(`Only contract owner (${ownerData.owner}) can remove registrars`)
@@ -630,6 +632,7 @@ async function signAndSubmitSetContenthash(): Promise<void> {
   const hash = (hashEl?.value.trim() ?? '') as Hex
 
   if (!name) { showResult('setChResult', 'Please enter an ENS name.', 'error'); return }
+  if (hash && !isHex(hash)) { showResult('setChResult', 'Contenthash must be a hex string (0x...) or empty to clear.', 'error'); return }
 
   const setChBtn = byId<HTMLButtonElement>('setChBtn')
   try {
