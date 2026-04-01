@@ -11,7 +11,7 @@ import {
 } from 'viem'
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
 import { config, isTestnet } from './config'
-import { buildDomain, SetAddrTypes, SetTextTypes, AddRegistrarTypes } from '../server/gateway/manage/schemas'
+import { buildDomain, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes } from '../server/gateway/manage/schemas'
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,20 @@ const L2_RECORDS_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'node', type: 'bytes32' }],
     outputs: [{ name: '', type: 'bytes' }],
+  },
+  {
+    type: 'function',
+    name: 'getRegistrarInfo',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'parentNode', type: 'bytes32' },
+      { name: 'registrar', type: 'address' },
+    ],
+    outputs: [
+      { name: 'isActive', type: 'bool' },
+      { name: 'remainingQuota', type: 'uint256' },
+      { name: 'expiry', type: 'uint256' },
+    ],
   },
 ] as const
 
@@ -491,6 +505,187 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
   }
 }
 
+// ─── Query Registrar Info ─────────────────────────────────────────────────────
+
+async function queryRegistrarInfo(): Promise<void> {
+  clearResult('queryRegistrarResult')
+
+  const parentEl = byId<HTMLInputElement>('queryRegistrarParent')
+  const registrarEl = byId<HTMLInputElement>('queryRegistrarAddress')
+
+  const parentDomain = parentEl?.value.trim() ?? ''
+  const registrar = (registrarEl?.value.trim() ?? '') as `0x${string}`
+
+  if (!parentDomain) { showResult('queryRegistrarResult', 'Please enter a parent domain.', 'error'); return }
+  if (!registrar || !isAddress(registrar)) { showResult('queryRegistrarResult', 'Please enter a valid registrar address.', 'error'); return }
+
+  try {
+    const parentNode = namehash(parentDomain) as Hex
+    const result = await l2Client.readContract({
+      address: CONTRACT,
+      abi: L2_RECORDS_ABI,
+      functionName: 'getRegistrarInfo',
+      args: [parentNode, registrar],
+    })
+    const [isActive, remainingQuota, expiry] = result as [boolean, bigint, bigint]
+    const MAX_UINT256 = 2n ** 256n - 1n
+    const quotaStr = remainingQuota === MAX_UINT256 ? 'unlimited' : remainingQuota.toString()
+    const expiryStr = expiry === 0n ? 'never' : new Date(Number(expiry) * 1000).toISOString()
+    showResult(
+      'queryRegistrarResult',
+      `Parent:    ${parentDomain}\nRegistrar: ${registrar}\nActive:    ${isActive}\nQuota:     ${quotaStr}\nExpiry:    ${expiryStr}`,
+      'info',
+    )
+  } catch (e) {
+    showResult('queryRegistrarResult', `Error: ${(e as Error)?.message ?? String(e)}`, 'error')
+  }
+}
+
+// ─── Remove Registrar ─────────────────────────────────────────────────────────
+
+async function signAndSubmitRemoveRegistrar(): Promise<void> {
+  clearResult('removeRegistrarResult')
+
+  const parentEl = byId<HTMLInputElement>('removeRegistrarParent')
+  const registrarEl = byId<HTMLInputElement>('removeRegistrarAddress')
+
+  const parentDomain = parentEl?.value.trim() ?? ''
+  const registrar = (registrarEl?.value.trim() ?? '') as `0x${string}`
+
+  if (!parentDomain) { showResult('removeRegistrarResult', 'Please enter a parent domain.', 'error'); return }
+  if (!registrar || !isAddress(registrar)) { showResult('removeRegistrarResult', 'Please enter a valid registrar address.', 'error'); return }
+  if (!connectedAddress) { showResult('removeRegistrarResult', 'Please connect your wallet first.', 'error'); return }
+
+  const removeBtn = byId<HTMLButtonElement>('removeRegistrarBtn')
+  try {
+    if (removeBtn) { removeBtn.disabled = true; removeBtn.textContent = 'Checking Owner...' }
+
+    const checkRes = await fetch(`${config.apiUrl}/check-owner?contract=${config.l2RecordsAddress}`)
+    const ownerData = await checkRes.json() as { owner: string }
+    if (ownerData.owner.toLowerCase() !== connectedAddress.toLowerCase()) {
+      throw new Error(`Only contract owner (${ownerData.owner}) can remove registrars`)
+    }
+
+    if (removeBtn) removeBtn.textContent = 'Signing...'
+
+    const ethereum = getEthereum()
+    const chain = getL2Chain()
+    const wallet = createWalletClient({ chain, transport: custom(ethereum) })
+
+    const now = Math.floor(Date.now() / 1000)
+    const nonce = BigInt(Date.now())
+    const deadline = BigInt(now + 600)
+    const parentNode = namehash(parentDomain) as Hex
+
+    const domain = buildDomain(chain.id, config.l2RecordsAddress)
+    const message = { parentNode, registrar, nonce, deadline }
+
+    const signature = await wallet.signTypedData({
+      account: connectedAddress,
+      domain,
+      primaryType: 'RemoveRegistrar',
+      types: RemoveRegistrarTypes as any,
+      message: message as any,
+    })
+
+    if (removeBtn) removeBtn.textContent = 'Submitting...'
+
+    const response = await fetch(`${config.apiUrl}/remove-registrar`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: connectedAddress,
+        signature,
+        domain: { verifyingContract: config.l2RecordsAddress },
+        message: {
+          parentNode,
+          registrar,
+          nonce: nonce.toString(),
+          deadline: deadline.toString(),
+        },
+      }),
+    })
+
+    const json = await response.json()
+    if (!response.ok) throw new Error(json.error ?? `Server error ${response.status}`)
+
+    const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx)'
+    showResult('removeRegistrarResult', `Registrar removed for ${parentDomain}\nAddress: ${registrar}${txInfo}`, 'success')
+  } catch (e) {
+    showResult('removeRegistrarResult', (e as Error)?.message ?? String(e), 'error')
+  } finally {
+    if (removeBtn) { removeBtn.disabled = false; removeBtn.textContent = 'Connect & Sign RemoveRegistrar' }
+  }
+}
+
+// ─── Set Contenthash ──────────────────────────────────────────────────────────
+
+async function signAndSubmitSetContenthash(): Promise<void> {
+  clearResult('setChResult')
+
+  const nameEl = byId<HTMLInputElement>('setChName')
+  const hashEl = byId<HTMLInputElement>('setChHash')
+
+  const name = nameEl?.value.trim() ?? ''
+  const hash = (hashEl?.value.trim() ?? '') as Hex
+
+  if (!name) { showResult('setChResult', 'Please enter an ENS name.', 'error'); return }
+
+  const setChBtn = byId<HTMLButtonElement>('setChBtn')
+  try {
+    if (setChBtn) { setChBtn.disabled = true; setChBtn.textContent = 'Signing…' }
+
+    const from = await ensureConnected()
+    const chain = getL2Chain()
+    const wallet = createWalletClient({ chain, transport: custom(getEthereum()) })
+
+    const node = toNode(name)
+    const now = Math.floor(Date.now() / 1000)
+    const nonce = BigInt(Date.now())
+    const deadline = BigInt(now + 600)
+
+    const domain = buildDomain(chain.id, CONTRACT)
+    const message = { node, hash: hash || '0x', nonce, deadline }
+
+    const signature = await wallet.signTypedData({
+      account: from,
+      domain,
+      primaryType: 'SetContenthash',
+      types: SetContenthashTypes as any,
+      message: message as any,
+    })
+
+    if (setChBtn) setChBtn.textContent = 'Submitting…'
+
+    const response = await fetch(`${config.apiUrl}/set-contenthash`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        signature,
+        domain: { verifyingContract: CONTRACT },
+        message: {
+          node: message.node,
+          hash: message.hash,
+          nonce: nonce.toString(),
+          deadline: deadline.toString(),
+        },
+      }),
+    })
+
+    const json = await response.json()
+    if (!response.ok) throw new Error(json.error ?? `Server error ${response.status}`)
+
+    const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
+    const action = hash ? `set to ${hash}` : 'cleared'
+    showResult('setChResult', `Contenthash ${action} for ${name}${txInfo}`, 'success')
+  } catch (e) {
+    showResult('setChResult', (e as Error)?.message ?? String(e), 'error')
+  } finally {
+    if (setChBtn) { setChBtn.disabled = false; setChBtn.textContent = 'Connect & Sign SetContenthash' }
+  }
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -523,6 +718,13 @@ document.addEventListener('DOMContentLoaded', () => {
   byId<HTMLButtonElement>('setAddrBtn')?.addEventListener('click', signAndSubmitSetAddr)
   byId<HTMLButtonElement>('setTextBtn')?.addEventListener('click', signAndSubmitSetText)
 
-  // Add registrar
+  // Add / remove registrar
   byId<HTMLButtonElement>('addRegistrarBtn')?.addEventListener('click', signAndSubmitAddRegistrar)
+  byId<HTMLButtonElement>('removeRegistrarBtn')?.addEventListener('click', signAndSubmitRemoveRegistrar)
+
+  // Query registrar info
+  byId<HTMLButtonElement>('queryRegistrarBtn')?.addEventListener('click', queryRegistrarInfo)
+
+  // Set contenthash
+  byId<HTMLButtonElement>('setChBtn')?.addEventListener('click', signAndSubmitSetContenthash)
 })
