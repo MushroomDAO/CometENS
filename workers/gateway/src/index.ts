@@ -207,7 +207,13 @@ export default {
           })
         }
 
-        const resolverAddress: Hex = payload.sender ?? '0x0000000000000000000000000000000000000000'
+        if (!payload.sender || !payload.sender.startsWith('0x')) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid sender (resolver address)' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        const resolverAddress: Hex = payload.sender
         const result = await handleResolveSigned(calldata, resolverAddress, env)
 
         return new Response(JSON.stringify(result), {

@@ -218,22 +218,22 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const message = {
       node: msg.node as Hex,
-      coinType: asBigInt(msg.coinType),
+      coinType: asBigInt(msg.coinType, 'coinType'),
       addr: (msg.addr ?? '0x0000000000000000000000000000000000000000') as Address,
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
-    // Authorization: recovered signer must be subdomain owner
+    // Authorization: recovered signer must be subdomain owner (check BEFORE consuming nonce)
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -258,20 +258,27 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (typeof msg.label !== 'string' || !msg.label) throw badReq('Invalid label')
     if (!isAddress(msg.owner)) throw badReq('Invalid owner')
 
+    // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤64 chars).
+    // Reject if not normalized — prevents signature mismatch from server-side normalization.
+    const label = msg.label as string
+    const normalizedLabel = label.trim().toLowerCase()
+    if (label !== normalizedLabel) throw badReq('Label must be lowercase and trimmed')
+    if (!normalizedLabel || normalizedLabel.length > 64) throw badReq('Label must be 1–64 characters')
+    if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
+
     const message = {
       parent: msg.parent as string,
-      label: msg.label as string,
+      label: normalizedLabel,
       owner: msg.owner as Address,
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
-    // Authorization: verify signer is a registrar or the contract owner
+    // Authorization: verify signer is a registrar or the contract owner (check BEFORE consuming nonce)
     const parentNode = namehash(message.parent) as Hex
     const [contractOwner, isReg] = await Promise.all([
       pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' }),
@@ -297,6 +304,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
@@ -323,19 +331,20 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       node: msg.node as Hex,
       key: msg.key as string,
       value: msg.value as string,
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
+    // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -362,19 +371,20 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const message = {
       node: msg.node as Hex,
       hash: msg.hash as Hex,
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
+    // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -401,10 +411,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const message = {
       parentNode: msg.parentNode as Hex,
       registrar: msg.registrar as Address,
-      quota: asBigInt(msg.quota),
-      expiry: asBigInt(msg.expiry),
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      quota: asBigInt(msg.quota, 'quota'),
+      expiry: asBigInt(msg.expiry, 'expiry'),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
@@ -431,8 +441,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const message = {
       parentNode: msg.parentNode as Hex,
       registrar: msg.registrar as Address,
-      nonce: asBigInt(msg.nonce),
-      deadline: asBigInt(msg.deadline),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
     }
     checkDeadline(message.deadline)
 
@@ -480,16 +490,17 @@ function requireWriter(env: Env): L2RecordsWriterV2 {
   return writer
 }
 
-function asBigInt(value: unknown): bigint {
+function asBigInt(value: unknown, fieldName = 'field'): bigint {
   if (typeof value === 'bigint') return value
   if (typeof value === 'number') return BigInt(value)
-  if (typeof value === 'string') return BigInt(value)
-  throw new Error('Invalid bigint field')
+  if (typeof value === 'string' && value !== '') return BigInt(value)
+  throw badReq(`Invalid or missing bigint ${fieldName}`)
 }
 
 function checkDeadline(deadline: bigint): void {
   const now = BigInt(Math.floor(Date.now() / 1000))
-  if (deadline < now) throw Object.assign(new Error('Request deadline expired'), { status: 400 })
+  if (deadline < now) throw badReq('Request deadline expired')
+  if (deadline > now + BigInt(MAX_NONCE_TTL)) throw badReq('Deadline too far in future (max 24h)')
 }
 
 /**
@@ -497,12 +508,14 @@ function checkDeadline(deadline: bigint): void {
  * Throws 409 if the nonce was already used within its validity window.
  * No-ops gracefully if RECORD_CACHE is not bound (dev/test environments).
  */
+const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
+
 async function consumeNonce(kv: KVNamespace | undefined, from: string, nonce: bigint, deadline: bigint): Promise<void> {
   if (!kv) return
   const key = `nonce:${from.toLowerCase()}:${nonce}`
   const existing = await kv.get(key)
   if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
-  const ttl = Math.max(60, Number(deadline) - Math.floor(Date.now() / 1000))
+  const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(deadline) - Math.floor(Date.now() / 1000)))
   await kv.put(key, '1', { expirationTtl: ttl })
 }
 
