@@ -4,6 +4,61 @@
 
 ---
 
+## [Unreleased] — Production API Server + Security Hardening（2026-04-03）
+
+### 架构重构：纯前端 + CF Worker API
+
+**Phase 1 — cometens-api Cloudflare Worker**（`workers/api/`）
+- 完整 EIP-712 鉴权写端点：`/register`、`/set-addr`、`/set-text`、`/set-contenthash`、`/add-registrar`、`/remove-registrar`
+- 上游应用端点：`POST /v1/register`（personal_sign + UPSTREAM_ALLOWED_SIGNERS 白名单）
+- 公开查询端点：`/check-label`、`/check-owner`、`/lookup`
+- CF KV `REGISTRY` 绑定（address→label 持久化，仅 API Worker）
+
+**Phase 2 — CF KV 边缘缓存**（`workers/gateway/`）
+- Gateway Worker 在链上读取前先查 `RECORD_CACHE` KV
+  - `addr(node)` → `addr60:{node}`，命中 <5ms（vs 链上 ~200ms）
+  - `text(node, key)` → `text:{node}:{key}`
+  - `contenthash(node)` → `ch:{node}`
+- API Worker 每次成功写入后同步更新 / 删除对应 KV 键
+- 两个 Worker 共享同一 `RECORD_CACHE` KV namespace
+
+**Phase 3 — 纯前端构建**
+- `vite.config.ts` 精简至 17 行（移除全部 ~420 行服务器中间件）
+- `src/register.ts` / `src/admin.ts` 所有 `/api/manage/*` 改为 `${config.apiUrl}/*`（指向 CF Worker）
+- `src/config.ts` 新增 `apiUrl`（`VITE_API_URL` 环境变量，默认指向 CF Worker）
+
+### Admin 页面新增
+- **Query Registrar Info** — 查询地址是否被授权为 Registrar
+- **Remove Registrar** — 撤销 Registrar 授权（Owner Only，EIP-712）
+- **Set Contenthash** — 设置内容哈希（Name Owner，EIP-712）
+
+### ABI 去重（单一来源）
+- `contracts/abi/L2RecordsV2.json` 从 Foundry artifact 提取，纳入 git 追踪
+- `server/gateway/abi.ts` 统一导出 shim，5 个消费方移除各自内联 ABI
+- `scripts/sync-abi.mjs` + `pnpm abi:sync` — forge build 后自动同步
+
+### 安全加固（自审 + Codex + Kimi 三轮）
+
+**三个高危问题（开发阶段发现并修复，无需外部补丁）：**
+1. **跨合约签名重放**：`verifyingContract` 强制取自 `env.L2_RECORDS_ADDRESS`，不再信任客户端请求体中的 `domain.verifyingContract`
+2. **EIP-712 签名重放**：`consumeNonce()` 将 `nonce:{from}:{nonce}` 写入 `REGISTRY` KV（带 deadline TTL），重复提交返回 409
+3. **所有权检查绕过**：`primaryNode` 防刷检查改为对比 `message.owner`（而非 signer 地址），修复了 Registrar 可为同一 owner 重复注册的漏洞
+
+**中危修复：**
+- `add-registrar` / `remove-registrar`：`consumeNonce` 移至 owner 鉴权之后，避免鉴权失败的请求消耗 nonce
+- `admin.ts`：`l2Client` 根据 `config.network` 选择 `optimism` / `optimismSepolia`（修复主网误连测试网）
+- `admin.ts`：`addRegistrar` / `removeRegistrar` 增加 `check-owner` 响应 `.ok` 守卫
+- `admin.ts`：`setContenthash` 输入 hex 格式校验（签名前拒绝非法格式）
+
+**部署脚本安全加固：**
+- `deploy-production.sh`：显式要求 `PRIVATE_KEY_SUPPLIER`、`WORKER_EOA_PRIVATE_KEY`、`UPSTREAM_ALLOWED_SIGNERS` 三个变量，任一未设置则退出，移除对部署者密钥的任何 fallback
+- 清理 `sed` 遗留的 `.bak` 文件，防止敏感配置泄漏至仓库
+
+### 安全审计结论
+三轮审计（Codex / Kimi / 人工自审）**未发现残留高危问题**。所有高危项均在开发阶段修复，PR 提交时代码状态已通过完整安全审查。
+
+---
+
 ## [Unreleased] — Milestone A+（2026-03-30）
 
 ### 合约：OffchainResolver.sol — Breaking Change
