@@ -270,7 +270,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   // ── /set-addr ─────────────────────────────────────────────────────────────
   if (path === '/set-addr') {
     const msg = payload.message ?? {}
-    if (!isHex(msg.node)) throw badReq('Invalid node')
+    if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     const isClearing = !msg.addr || msg.addr === '0x0000000000000000000000000000000000000000'
     if (!isClearing && !isAddress(msg.addr)) throw badReq('Invalid addr')
 
@@ -381,7 +381,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   // ── /set-text ─────────────────────────────────────────────────────────────
   if (path === '/set-text') {
     const msg = payload.message ?? {}
-    if (!isHex(msg.node)) throw badReq('Invalid node')
+    if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     if (typeof msg.key !== 'string' || !msg.key) throw badReq('Invalid key')
     if (typeof msg.value !== 'string') throw badReq('Invalid value')
 
@@ -423,7 +423,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   // ── /set-contenthash ──────────────────────────────────────────────────────
   if (path === '/set-contenthash') {
     const msg = payload.message ?? {}
-    if (!isHex(msg.node)) throw badReq('Invalid node')
+    if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     if (!isHex(msg.hash)) throw badReq('Invalid hash')
 
     const message = {
@@ -521,7 +521,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   // ── /transfer-subnode ─────────────────────────────────────────────────────
   if (path === '/transfer-subnode') {
     const msg = payload.message ?? {}
-    if (!isHex(msg.node)) throw badReq('Invalid node')
+    if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     if (!isAddress(msg.to)) throw badReq('Invalid to address')
     if ((msg.to as string).toLowerCase() === '0x0000000000000000000000000000000000000000') {
       throw badReq('Cannot transfer to zero address')
@@ -697,6 +697,11 @@ async function checkRateLimit(
 
 function badReq(msg: string): Error {
   return Object.assign(new Error(msg), { status: 400 })
+}
+
+/** Validates that a value is a hex string of exactly 32 bytes (0x + 64 hex chars). */
+function isBytes32(v: unknown): v is Hex {
+  return typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v)
 }
 
 async function parseJson(request: Request): Promise<any> {
