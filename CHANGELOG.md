@@ -4,7 +4,17 @@
 
 ---
 
-## [Unreleased] — Production API Server + Security Hardening（2026-04-03）
+## [v0.4.0] — Production API Server + Security Hardening（2026-04-03）✅
+
+**已部署合约（Testnet）**
+| 合约 | 网络 | 地址 |
+|---|---|---|
+| L2RecordsV2 | OP Sepolia | `0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e` |
+| OffchainResolver | Eth Sepolia | `0xe138Ec90E6a793F69455a45cF78494c7baFd1A1b` |
+| Gateway Worker | Cloudflare | https://cometens-gateway.jhfnetboy.workers.dev |
+| API Worker | Cloudflare | https://cometens-api.jhfnetboy.workers.dev |
+
+**测试通过**：109 Foundry 合约测试 + 45 TS 测试（unit/e2e/integration 全绿）
 
 ### 架构重构：纯前端 + CF Worker API
 
