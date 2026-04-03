@@ -263,7 +263,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const label = msg.label as string
     const normalizedLabel = label.trim().toLowerCase()
     if (label !== normalizedLabel) throw badReq('Label must be lowercase and trimmed')
-    if (!normalizedLabel || normalizedLabel.length > 64) throw badReq('Label must be 1–64 characters')
+    if (!normalizedLabel || normalizedLabel.length > 63) throw badReq('Label must be 1–63 characters')
     if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
 
     const message = {
