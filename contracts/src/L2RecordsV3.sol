@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "./IRegistrarPlugin.sol";
 
 /// @title L2Records V3
 /// @notice Extends V2 functionality with ERC-721 subdomain ownership.
@@ -34,6 +35,11 @@ contract L2RecordsV3 is ERC721 {
     /// @notice parentNode => registrar address => expiry timestamp (0 = no expiry)
     mapping(bytes32 => mapping(address => uint256)) public registrarExpiry;
 
+    // ─── V3: Plugin model ───────────────────────────────────────────────────────
+
+    /// @notice parentNode => active IRegistrarPlugin (address(0) = no plugin, use registrar auth)
+    mapping(bytes32 => IRegistrarPlugin) public registrarPlugin;
+
     // ─── Events ────────────────────────────────────────────────────────────────
 
     event AddrSet(bytes32 indexed node, uint256 coinType, bytes addr);
@@ -45,6 +51,7 @@ contract L2RecordsV3 is ERC721 {
     event RegistrarAdded(bytes32 indexed parentNode, address indexed registrar, uint256 quota, uint256 expiry);
     event RegistrarRemoved(bytes32 indexed parentNode, address indexed registrar);
     event RegistrarQuotaUpdated(bytes32 indexed parentNode, address indexed registrar, uint256 newQuota);
+    event PluginSet(bytes32 indexed parentNode, address indexed plugin);
 
     // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +63,8 @@ contract L2RecordsV3 is ERC721 {
     error QuotaExceeded();
     error RegistrarExpired();
     error LabelMismatch();
+    error PluginRejected();
+    error InsufficientFee();
 
     // ─── Modifiers ───────────────────────────────────────────────────────────────
 
@@ -150,9 +159,28 @@ contract L2RecordsV3 is ERC721 {
         if (expiry != 0 && block.timestamp > expiry) isActive = false;
     }
 
+    // ─── V3: Plugin Management ──────────────────────────────────────────────────
+
+    /// @notice Attach a registrar plugin to a parent domain.
+    ///         Only the parent domain's NFT owner (or the contract owner) may call this.
+    ///         Pass plugin=address(0) to remove an existing plugin.
+    /// @param parentNode The namehash of the parent domain.
+    /// @param plugin     The IRegistrarPlugin implementation to attach.
+    function setPlugin(bytes32 parentNode, IRegistrarPlugin plugin) external {
+        // Contract owner may set a plugin on any parentNode.
+        // Otherwise, the caller must own the parentNode NFT.
+        if (msg.sender != owner) {
+            address parentOwner = _ownerOf(uint256(parentNode));
+            if (parentOwner == address(0) || parentOwner != msg.sender) revert Unauthorized();
+        }
+        registrarPlugin[parentNode] = plugin;
+        emit PluginSet(parentNode, address(plugin));
+    }
+
     // ─── Subdomain Registration ─────────────────────────────────────────────────
 
-    /// @notice Register a subdomain (Owner or authorized Registrar)
+    /// @notice Register a subdomain (Owner or authorized Registrar).
+    ///         If a plugin is set on parentNode, the plugin's canRegister() is consulted.
     function setSubnodeOwner(
         bytes32 parentNode,
         bytes32 labelhash,
@@ -160,19 +188,23 @@ contract L2RecordsV3 is ERC721 {
         string calldata label
     ) external onlyOwnerOrRegistrar(parentNode) {
         _checkRegistrarQuota(parentNode);
+        _checkPlugin(parentNode, label, newOwner);
         _registerNode(parentNode, labelhash, newOwner, label);
     }
 
-    /// @notice Atomically register a subdomain and set its ETH address record
+    /// @notice Atomically register a subdomain and set its ETH address record.
+    ///         If a plugin is set on parentNode, plugin fees and canRegister() are enforced.
+    ///         Any ETH in excess of the plugin fee is forwarded to the parentNode NFT owner.
     function registerSubnode(
         bytes32 parentNode,
         bytes32 labelhash,
         address newOwner,
         string calldata label,
         bytes calldata addrBytes
-    ) external onlyOwnerOrRegistrar(parentNode) {
+    ) external payable onlyOwnerOrRegistrar(parentNode) {
         if (addrBytes.length != 20) revert InvalidAddrBytes();
         _checkRegistrarQuota(parentNode);
+        _checkPluginWithFee(parentNode, label, newOwner);
         bytes32 node = _registerNode(parentNode, labelhash, newOwner, label);
         _addrs[node][60] = addrBytes;
         emit AddrSet(node, 60, addrBytes);
@@ -185,6 +217,37 @@ contract L2RecordsV3 is ERC721 {
             if (quota != type(uint256).max) {
                 if (quota == 0) revert QuotaExceeded();
                 registrarQuota[parentNode][msg.sender] = quota - 1;
+            }
+        }
+    }
+
+    /// @notice Internal: consult the plugin's canRegister (no fee enforcement).
+    ///         Used by setSubnodeOwner where msg.value is not available.
+    function _checkPlugin(bytes32 parentNode, string calldata label, address requester) internal view {
+        IRegistrarPlugin plugin = registrarPlugin[parentNode];
+        if (address(plugin) == address(0)) return;
+        if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
+    }
+
+    /// @notice Internal: consult the plugin's canRegister and enforce fee.
+    ///         Excess ETH is forwarded to the parentNode NFT owner.
+    function _checkPluginWithFee(bytes32 parentNode, string calldata label, address requester) internal {
+        IRegistrarPlugin plugin = registrarPlugin[parentNode];
+        if (address(plugin) == address(0)) return;
+        if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
+        uint256 fee = plugin.registrationFee(parentNode, label, requester);
+        if (fee > 0) {
+            if (msg.value < fee) revert InsufficientFee();
+            // Forward fee to the parentNode NFT owner; refund any excess to caller.
+            address parentOwner = _ownerOf(uint256(parentNode));
+            if (parentOwner != address(0)) {
+                (bool ok,) = parentOwner.call{value: fee}("");
+                require(ok, "fee transfer failed");
+            }
+            uint256 excess = msg.value - fee;
+            if (excess > 0) {
+                (bool ok2,) = msg.sender.call{value: excess}("");
+                require(ok2, "refund failed");
             }
         }
     }
