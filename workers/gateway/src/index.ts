@@ -46,7 +46,8 @@ interface Env {
    * Shared with the API Worker (same namespace ID in wrangler.toml).
    */
   RECORD_CACHE?: KVNamespace
-  PROOF_MODE?: string  // "true" enables Bedrock storage proof mode (stub — returns 501)
+  PROOF_MODE?: string  // "true" enables Bedrock storage proof mode — only active when DEV_MODE=true also set
+  DEV_MODE?: string   // "true" required alongside PROOF_MODE to prevent accidental production activation
 }
 
 // L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
@@ -235,9 +236,10 @@ export default {
         }
         const resolverAddress: Hex = payload.sender
 
-        // PROOF_MODE is disabled on op-mainnet even if the var is set, to prevent
-        // accidental production outage. It is a C2 development stub only.
-        if (env.PROOF_MODE === 'true' && env.NETWORK !== 'op-mainnet') {
+        // PROOF_MODE is a C2 development stub (returns 501). It requires BOTH
+        // PROOF_MODE=true AND DEV_MODE=true to activate, preventing accidental
+        // enablement in any deployed environment (testnet or mainnet).
+        if (env.PROOF_MODE === 'true' && env.DEV_MODE === 'true') {
           return handleProofMode(calldata, resolverAddress)
         }
 

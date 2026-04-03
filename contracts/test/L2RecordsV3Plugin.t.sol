@@ -12,7 +12,7 @@ import "../src/plugins/FlatFeePlugin.sol";
 /// @dev A helper plugin that always rejects — for negative canRegister testing.
 contract RejectPlugin is ERC165, IRegistrarPlugin {
     function supportsInterface(bytes4 interfaceId) public view override(ERC165, IERC165) returns (bool) {
-        bytes4 ifaceId = IRegistrarPlugin.canRegister.selector ^ IRegistrarPlugin.registrationFee.selector;
+        bytes4 ifaceId = type(IRegistrarPlugin).interfaceId;
         return interfaceId == ifaceId || super.supportsInterface(interfaceId);
     }
     function canRegister(bytes32, string calldata, address) external pure returns (bool) {

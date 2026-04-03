@@ -15,7 +15,7 @@ contract FlatFeePlugin is ERC165, IRegistrarPlugin {
 
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC165, IERC165) returns (bool) {
-        bytes4 ifaceId = IRegistrarPlugin.canRegister.selector ^ IRegistrarPlugin.registrationFee.selector;
+        bytes4 ifaceId = type(IRegistrarPlugin).interfaceId;
         return interfaceId == ifaceId || super.supportsInterface(interfaceId);
     }
 

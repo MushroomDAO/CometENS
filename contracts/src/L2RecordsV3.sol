@@ -198,14 +198,15 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         }
         // If a non-zero plugin address is provided, verify it implements IRegistrarPlugin.
         // Code-size check guards against EOAs; the ERC-165 call guards against incompatible contracts.
+        // Using type(IRegistrarPlugin).interfaceId is the canonical Solidity approach — it equals
+        // the XOR of selectors defined directly in IRegistrarPlugin (canRegister ^ registrationFee),
+        // excluding inherited IERC165 functions. This avoids manual XOR and is consistent with
+        // how plugin implementations should compute their own interfaceId.
         if (address(plugin) != address(0)) {
             uint256 codeSize;
             assembly { codeSize := extcodesize(plugin) }
             if (codeSize == 0) revert InvalidPlugin();
-            // IRegistrarPlugin interfaceId = bytes4(keccak256("canRegister(bytes32,string,address)")) ^
-            //                                bytes4(keccak256("registrationFee(bytes32,string,address)"))
-            bytes4 ifaceId = IRegistrarPlugin.canRegister.selector ^ IRegistrarPlugin.registrationFee.selector;
-            try IERC165(address(plugin)).supportsInterface(ifaceId) returns (bool supported) {
+            try IERC165(address(plugin)).supportsInterface(type(IRegistrarPlugin).interfaceId) returns (bool supported) {
                 if (!supported) revert InvalidPlugin();
             } catch {
                 revert InvalidPlugin();
