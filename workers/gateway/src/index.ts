@@ -46,9 +46,29 @@ interface Env {
    * Shared with the API Worker (same namespace ID in wrangler.toml).
    */
   RECORD_CACHE?: KVNamespace
+  PROOF_MODE?: string  // "true" enables Bedrock storage proof mode (stub — returns 501)
 }
 
 // L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
+
+// ─── Proof mode stub (C2) ─────────────────────────────────────────────────────
+
+/**
+ * C2 stub: Bedrock storage proof generation not yet implemented.
+ * Production implementation will:
+ *   1. Decode callData to get the storage slot(s) being queried
+ *   2. Call eth_getProof on OP Sepolia/Mainnet for L2Records contract
+ *   3. Return ABI-encoded (bytes[] proof, bytes result) matching OPResolver.resolveWithProof()
+ */
+function handleProofMode(_callData: string, _resolverAddress: Hex): Response {
+  return new Response(
+    JSON.stringify({
+      error: 'proof_mode_not_implemented',
+      message: 'Bedrock storage proof mode is not yet implemented. Set PROOF_MODE=false or unset to use signature mode.',
+    }),
+    { status: 501, headers: { 'Content-Type': 'application/json' } },
+  )
+}
 
 // ─── Core resolution logic ────────────────────────────────────────────────────
 
@@ -214,6 +234,11 @@ export default {
           })
         }
         const resolverAddress: Hex = payload.sender
+
+        if (env.PROOF_MODE === 'true') {
+          return handleProofMode(calldata, resolverAddress)
+        }
+
         const result = await handleResolveSigned(calldata, resolverAddress, env)
 
         return new Response(JSON.stringify(result), {

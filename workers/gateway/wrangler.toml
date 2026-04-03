@@ -19,7 +19,7 @@ name = "cometens-gateway"
 NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
 ROOT_DOMAIN = "aastar.eth"
-# ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+# PROOF_MODE = "true"  # Uncomment to enable Bedrock storage proof mode (C2 stub, returns 501)
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
@@ -44,7 +44,7 @@ name = "cometens-gateway-production"
 NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
-# ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+# PROOF_MODE = "true"  # Uncomment to enable Bedrock storage proof mode (C2 stub, returns 501)
 
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"
