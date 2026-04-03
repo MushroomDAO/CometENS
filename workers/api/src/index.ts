@@ -31,6 +31,7 @@ import {
 import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { L2RecordsWriterV2 } from '../../../server/gateway/writer/L2RecordsWriterV2'
+import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 import {
   buildDomain,
   RegisterTypes,
@@ -69,21 +70,7 @@ export interface Env {
   RECORD_CACHE?: KVNamespace
 }
 
-// ─── ABI fragments (read-only calls) ─────────────────────────────────────────
-
-const OWNER_ABI = [
-  { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-] as const
-
-const READ_ABI = [
-  { type: 'function', name: 'subnodeOwner', stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'primaryNode', stateMutability: 'view',
-    inputs: [{ name: 'addr_', type: 'address' }], outputs: [{ type: 'bytes32' }] },
-  { type: 'function', name: 'isRegistrar', stateMutability: 'view',
-    inputs: [{ name: 'parentNode', type: 'bytes32' }, { name: 'addr', type: 'address' }],
-    outputs: [{ type: 'bool' }] },
-] as const
+// L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
 
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
@@ -134,7 +121,7 @@ async function handleCheckLabel(url: URL, env: Env): Promise<Response> {
   const l2Addr = env.L2_RECORDS_ADDRESS as Address
 
   const owner = await pub.readContract({
-    address: l2Addr, abi: READ_ABI, functionName: 'subnodeOwner', args: [node],
+    address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
   })
   const taken = owner !== '0x0000000000000000000000000000000000000000'
   return json({ available: !taken, owner: taken ? owner : null })
@@ -147,7 +134,7 @@ async function handleCheckOwner(url: URL, env: Env): Promise<Response> {
   if (!contract || !isAddress(contract)) return jsonError('Missing or invalid contract param', 400)
 
   const pub = makePublicClient(env)
-  const owner = await pub.readContract({ address: contract, abi: OWNER_ABI, functionName: 'owner' })
+  const owner = await pub.readContract({ address: contract, abi: L2RecordsV2ABI, functionName: 'owner' })
   return json({ owner })
 }
 
@@ -167,7 +154,7 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
     const pub = makePublicClient(env)
     const l2Addr = env.L2_RECORDS_ADDRESS as Address
     const existingNode = await pub.readContract({
-      address: l2Addr, abi: READ_ABI, functionName: 'primaryNode', args: [address as Address],
+      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [address as Address],
     })
     if (existingNode === '0x0000000000000000000000000000000000000000000000000000000000000000') {
       if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
@@ -246,7 +233,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
     // Authorization: recovered signer must be subdomain owner
-    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'subnodeOwner', args: [message.node] })
+    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
@@ -289,8 +276,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // Authorization: verify signer is a registrar or the contract owner
     const parentNode = namehash(message.parent) as Hex
     const [contractOwner, isReg] = await Promise.all([
-      pub.readContract({ address: l2Addr, abi: OWNER_ABI, functionName: 'owner' }),
-      pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'isRegistrar', args: [parentNode, from as Address] }),
+      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' }),
+      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'isRegistrar', args: [parentNode, from as Address] }),
     ])
     if (
       (contractOwner as string).toLowerCase() !== from.toLowerCase() &&
@@ -302,12 +289,12 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const lh = labelhash(message.label) as Hex
     const node = namehash(`${message.label}.${message.parent}`) as Hex
 
-    const existingOwner = await pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'subnodeOwner', args: [node] })
+    const existingOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node] })
     if ((existingOwner as string) !== '0x0000000000000000000000000000000000000000') {
       return jsonError(`Label "${message.label}" is already registered`, 409, 'LABEL_TAKEN')
     }
 
-    const existingPrimary = await pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'primaryNode', args: [from as Address] })
+    const existingPrimary = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [from as Address] })
     if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
     }
@@ -345,7 +332,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'subnodeOwner', args: [message.node] })
+    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
@@ -383,7 +370,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: READ_ABI, functionName: 'subnodeOwner', args: [message.node] })
+    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
@@ -423,7 +410,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    const contractOwner = await pub.readContract({ address: l2Addr, abi: OWNER_ABI, functionName: 'owner' })
+    const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
@@ -450,7 +437,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    const contractOwner = await pub.readContract({ address: l2Addr, abi: OWNER_ABI, functionName: 'owner' })
+    const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }

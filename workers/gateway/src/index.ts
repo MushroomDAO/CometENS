@@ -28,6 +28,7 @@ import {
 import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { namehash, labelhash } from 'viem/ens'
+import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,120 +48,7 @@ interface Env {
   RECORD_CACHE?: KVNamespace
 }
 
-// ─── ABIs ─────────────────────────────────────────────────────────────────────
-
-const RESOLVE_ABI = [
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'text',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'key', type: 'string' },
-    ],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'contenthash',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-] as const
-
-const L2_RECORDS_ABI = [
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'text',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'key', type: 'string' },
-    ],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'contenthash',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'registerSubnode',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'labelhash', type: 'bytes32' },
-      { name: 'newOwner', type: 'address' },
-      { name: 'label', type: 'string' },
-      { name: 'addrBytes', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'subnodeOwner',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-] as const
-
-// Per-function ABIs
-const ADDR_SINGLE_ABI = [{
-  type: 'function', name: 'addr', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }],
-  outputs: [{ name: '', type: 'address' }],
-}] as const
-
-const ADDR_MULTI_ABI = [{
-  type: 'function', name: 'addr', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-  outputs: [{ name: '', type: 'bytes' }],
-}] as const
-
-const TEXT_ABI = [{
-  type: 'function', name: 'text', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }],
-  outputs: [{ name: '', type: 'string' }],
-}] as const
-
-const CONTENTHASH_ABI = [{
-  type: 'function', name: 'contenthash', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }],
-  outputs: [{ name: '', type: 'bytes' }],
-}] as const
+// L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
 
 // ─── Core resolution logic ────────────────────────────────────────────────────
 
@@ -195,7 +83,7 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
   const contractAddress = env.L2_RECORDS_ADDRESS as Hex
   const kv = env.RECORD_CACHE
 
-  const { functionName, args } = decodeFunctionData({ abi: RESOLVE_ABI, data: calldata })
+  const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data: calldata })
 
   if (functionName === 'addr') {
     if (args.length === 2) {
@@ -203,48 +91,48 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
       const [node, coinType] = args as [Hex, bigint]
       const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
       const value = await client.readContract({
-        address: contractAddress, abi: ADDR_MULTI_ABI, functionName: 'addr', args: [node, coinType],
+        address: contractAddress, abi: L2RecordsV2ABI, functionName: 'addr', args: [node, coinType],
       })
-      return encodeFunctionResult({ abi: ADDR_MULTI_ABI, functionName: 'addr', result: value as Hex })
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: value as Hex })
     }
 
     // ETH addr — KV first
     const [node] = args as [Hex]
     const cached = await kvGetAddr(kv, node)
     if (cached) {
-      return encodeFunctionResult({ abi: ADDR_SINGLE_ABI, functionName: 'addr', result: cached })
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: cached })
     }
     const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: ADDR_SINGLE_ABI, functionName: 'addr', args: [node],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'addr', args: [node],
     })
-    return encodeFunctionResult({ abi: ADDR_SINGLE_ABI, functionName: 'addr', result: value as `0x${string}` })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: value as `0x${string}` })
   }
 
   if (functionName === 'text') {
     const [node, key] = args as [Hex, string]
     const cached = await kvGetText(kv, node, key)
     if (cached !== null) {
-      return encodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', result: cached })
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'text', result: cached })
     }
     const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: TEXT_ABI, functionName: 'text', args: [node, key],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'text', args: [node, key],
     })
-    return encodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', result: value as string })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'text', result: value as string })
   }
 
   if (functionName === 'contenthash') {
     const [node] = args as [Hex]
     const cached = await kvGetContenthash(kv, node)
     if (cached) {
-      return encodeFunctionResult({ abi: CONTENTHASH_ABI, functionName: 'contenthash', result: cached })
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'contenthash', result: cached })
     }
     const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: CONTENTHASH_ABI, functionName: 'contenthash', args: [node],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'contenthash', args: [node],
     })
-    return encodeFunctionResult({ abi: CONTENTHASH_ABI, functionName: 'contenthash', result: value as Hex })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'contenthash', result: value as Hex })
   }
 
   throw new Error('Unsupported selector')

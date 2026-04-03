@@ -12,46 +12,9 @@ import {
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
 import { config, isTestnet } from './config'
 import { buildDomain, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes } from '../server/gateway/manage/schemas'
+import { L2RecordsV2ABI } from '../server/gateway/abi'
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
-
-const L2_RECORDS_ABI = [
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'text',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'contenthash',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'getRegistrarInfo',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'registrar', type: 'address' },
-    ],
-    outputs: [
-      { name: 'isActive', type: 'bool' },
-      { name: 'remainingQuota', type: 'uint256' },
-      { name: 'expiry', type: 'uint256' },
-    ],
-  },
-] as const
 
 const PUBLIC_RESOLVER_ABI = [
   {
@@ -174,7 +137,7 @@ async function queryAddr(): Promise<void> {
     const node = toNode(name)
     const value = await l2Client.readContract({
       address: CONTRACT,
-      abi: L2_RECORDS_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'addr',
       args: [node],
     })
@@ -203,7 +166,7 @@ async function queryText(): Promise<void> {
     const node = toNode(name)
     const value = await l2Client.readContract({
       address: CONTRACT,
-      abi: L2_RECORDS_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'text',
       args: [node, key],
     })
@@ -238,7 +201,7 @@ async function queryContenthash(): Promise<void> {
     const node = toNode(name)
     const value = await l2Client.readContract({
       address: CONTRACT,
-      abi: L2_RECORDS_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'contenthash',
       args: [node],
     })
@@ -524,7 +487,7 @@ async function queryRegistrarInfo(): Promise<void> {
     const parentNode = namehash(parentDomain) as Hex
     const result = await l2Client.readContract({
       address: CONTRACT,
-      abi: L2_RECORDS_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'getRegistrarInfo',
       args: [parentNode, registrar],
     })
