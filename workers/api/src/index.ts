@@ -201,12 +201,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   const signature = payload.signature as Hex | undefined
   if (!signature || !isHex(signature)) throw badReq('Missing or invalid signature')
 
-  const verifyingContract = (
-    payload.domain?.verifyingContract ??
-    payload.verifyingContract ??
-    env.L2_RECORDS_ADDRESS
-  ) as Address
-  if (!isAddress(verifyingContract)) throw badReq('Invalid verifyingContract')
+  // Always use the server-side contract address — never trust the client's verifyingContract.
+  const verifyingContract = env.L2_RECORDS_ADDRESS as Address
 
   const chainId = getChainId(env)
   const domain = buildDomain(chainId, verifyingContract)
@@ -231,6 +227,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     // Authorization: recovered signer must be subdomain owner
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -272,6 +269,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     // Authorization: verify signer is a registrar or the contract owner
     const parentNode = namehash(message.parent) as Hex
@@ -294,7 +292,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       return jsonError(`Label "${message.label}" is already registered`, 409, 'LABEL_TAKEN')
     }
 
-    const existingPrimary = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [from as Address] })
+    // Check the owner's primary node, not the registrar's (signer != owner in registrar flow)
+    const existingPrimary = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [message.owner] })
     if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
     }
@@ -331,6 +330,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -369,6 +369,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -409,6 +410,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -436,6 +438,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -487,6 +490,20 @@ function asBigInt(value: unknown): bigint {
 function checkDeadline(deadline: bigint): void {
   const now = BigInt(Math.floor(Date.now() / 1000))
   if (deadline < now) throw Object.assign(new Error('Request deadline expired'), { status: 400 })
+}
+
+/**
+ * Prevent signature replay: store the nonce in KV with TTL = (deadline - now).
+ * Throws 409 if the nonce was already used within its validity window.
+ * No-ops gracefully if RECORD_CACHE is not bound (dev/test environments).
+ */
+async function consumeNonce(kv: KVNamespace | undefined, from: string, nonce: bigint, deadline: bigint): Promise<void> {
+  if (!kv) return
+  const key = `nonce:${from.toLowerCase()}:${nonce}`
+  const existing = await kv.get(key)
+  if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
+  const ttl = Math.max(60, Number(deadline) - Math.floor(Date.now() / 1000))
+  await kv.put(key, '1', { expirationTtl: ttl })
 }
 
 function badReq(msg: string): Error {
