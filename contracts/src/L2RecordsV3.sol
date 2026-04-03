@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "./IRegistrarPlugin.sol";
 
 /// @title L2Records V3
@@ -41,6 +42,11 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     /// @notice parentNode => active IRegistrarPlugin (address(0) = no plugin, use registrar auth)
     mapping(bytes32 => IRegistrarPlugin) public registrarPlugin;
 
+    /// @notice Pull-payment escrow: address => claimable ETH from plugin fees.
+    ///         Using pull-payment prevents non-payable parentOwner contracts from
+    ///         bricking registrations (push ETH would revert the whole tx).
+    mapping(address => uint256) public pendingFees;
+
     // ─── Events ────────────────────────────────────────────────────────────────
 
     event AddrSet(bytes32 indexed node, uint256 coinType, bytes addr);
@@ -53,6 +59,8 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     event RegistrarRemoved(bytes32 indexed parentNode, address indexed registrar);
     event RegistrarQuotaUpdated(bytes32 indexed parentNode, address indexed registrar, uint256 newQuota);
     event PluginSet(bytes32 indexed parentNode, address indexed plugin);
+    event FeeAccrued(address indexed recipient, uint256 amount);
+    event FeeWithdrawn(address indexed recipient, uint256 amount);
 
     // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +106,19 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         if (newOwner == address(0)) revert ZeroAddress();
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
+    }
+
+    // ─── Pull-payment fee withdrawal ──────────────────────────────────────────
+
+    /// @notice Withdraw accrued plugin fees for msg.sender.
+    ///         Called by parentNode NFT owners after registrations with a fee plugin.
+    function withdrawFees() external {
+        uint256 amount = pendingFees[msg.sender];
+        if (amount == 0) return;
+        pendingFees[msg.sender] = 0;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "withdraw failed");
+        emit FeeWithdrawn(msg.sender, amount);
     }
 
     // ─── V2: Registrar Management (Owner Only) ──────────────────────────────────
@@ -175,12 +196,20 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
             address parentOwner = _ownerOf(uint256(parentNode));
             if (parentOwner == address(0) || parentOwner != msg.sender) revert Unauthorized();
         }
-        // If a non-zero plugin address is provided, verify it has deployed code.
-        // Setting an EOA as plugin would brick all future registrations under parentNode.
+        // If a non-zero plugin address is provided, verify it implements IRegistrarPlugin.
+        // Code-size check guards against EOAs; the ERC-165 call guards against incompatible contracts.
         if (address(plugin) != address(0)) {
             uint256 codeSize;
             assembly { codeSize := extcodesize(plugin) }
             if (codeSize == 0) revert InvalidPlugin();
+            // IRegistrarPlugin interfaceId = bytes4(keccak256("canRegister(bytes32,string,address)")) ^
+            //                                bytes4(keccak256("registrationFee(bytes32,string,address)"))
+            bytes4 ifaceId = IRegistrarPlugin.canRegister.selector ^ IRegistrarPlugin.registrationFee.selector;
+            try IERC165(address(plugin)).supportsInterface(ifaceId) returns (bool supported) {
+                if (!supported) revert InvalidPlugin();
+            } catch {
+                revert InvalidPlugin();
+            }
         }
         registrarPlugin[parentNode] = plugin;
         emit PluginSet(parentNode, address(plugin));
@@ -258,22 +287,19 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
             return;
         }
         if (msg.value < fee) revert InsufficientFee();
-        // Forward fee to the parentNode NFT owner.
-        // parentOwner == address(0) means the parentNode is unminted (root domain managed
-        // by contract owner). In that case fee goes to address(0), which burns it — acceptable
-        // since root domains don't have an NFT owner. Production deployments should ensure
-        // root-domain parentNodes are either minted or have no fee plugin attached.
+        // Pull-payment: accrue fee to the parentNode NFT owner rather than pushing ETH.
+        // This avoids reverting when the parentOwner is a non-payable contract, which would
+        // otherwise brick all registrations under that domain permanently.
         address parentOwner = _ownerOf(uint256(parentNode));
         if (parentOwner != address(0)) {
-            // CEI: state already updated by _checkRegistrarQuota before this call.
-            // ReentrancyGuard on the caller prevents cross-function reentrancy.
-            (bool ok,) = parentOwner.call{value: fee}("");
-            require(ok, "fee transfer failed");
+            pendingFees[parentOwner] += fee;
+            emit FeeAccrued(parentOwner, fee);
         }
+        // Refund excess ETH to the caller immediately.
         uint256 excess = msg.value - fee;
         if (excess > 0) {
-            (bool ok2,) = msg.sender.call{value: excess}("");
-            require(ok2, "refund failed");
+            (bool ok,) = msg.sender.call{value: excess}("");
+            require(ok, "refund failed");
         }
     }
 

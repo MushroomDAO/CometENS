@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+
 /// @notice Called by L2RecordsV3 before minting a subdomain.
-/// @dev Implementations may enforce pricing, whitelists, token gating, etc.
-interface IRegistrarPlugin {
+/// @dev Implementations MUST implement ERC-165 and return true for the
+///      IRegistrarPlugin interfaceId (canRegister.selector ^ registrationFee.selector).
+interface IRegistrarPlugin is IERC165 {
     /// @notice Returns true if `requester` is allowed to register `label` under `parentNode`.
     ///         Reverts with a descriptive reason to block registration.
     /// @param parentNode The namehash of the parent domain.

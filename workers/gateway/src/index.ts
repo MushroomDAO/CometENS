@@ -235,7 +235,9 @@ export default {
         }
         const resolverAddress: Hex = payload.sender
 
-        if (env.PROOF_MODE === 'true') {
+        // PROOF_MODE is disabled on op-mainnet even if the var is set, to prevent
+        // accidental production outage. It is a C2 development stub only.
+        if (env.PROOF_MODE === 'true' && env.NETWORK !== 'op-mainnet') {
           return handleProofMode(calldata, resolverAddress)
         }
 

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import "../src/L2RecordsV3.sol";
 import "../src/IRegistrarPlugin.sol";
 import "../src/plugins/FreePlugin.sol";
@@ -9,11 +10,14 @@ import "../src/plugins/WhitelistPlugin.sol";
 import "../src/plugins/FlatFeePlugin.sol";
 
 /// @dev A helper plugin that always rejects — for negative canRegister testing.
-contract RejectPlugin is IRegistrarPlugin {
+contract RejectPlugin is ERC165, IRegistrarPlugin {
+    function supportsInterface(bytes4 interfaceId) public view override(ERC165, IERC165) returns (bool) {
+        bytes4 ifaceId = IRegistrarPlugin.canRegister.selector ^ IRegistrarPlugin.registrationFee.selector;
+        return interfaceId == ifaceId || super.supportsInterface(interfaceId);
+    }
     function canRegister(bytes32, string calldata, address) external pure returns (bool) {
         revert("rejected");
     }
-
     function registrationFee(bytes32, string calldata, address) external pure returns (uint256) {
         return 0;
     }
@@ -250,15 +254,21 @@ contract L2RecordsV3PluginTest is Test {
         address charlie = makeAddr("charlie");
 
         vm.deal(alice, 1 ether);
-        uint256 bobBefore = bob.balance;
 
         vm.prank(alice);
         records.registerSubnode{value: FEE}(
             NODE_BOB, LABEL_SUB, charlie, "sub", abi.encodePacked(charlie)
         );
 
-        // bob (parentNode NFT owner) received the fee
+        // Pull-payment: fee is accrued in pendingFees[bob], not pushed directly.
+        assertEq(records.pendingFees(bob), FEE);
+
+        // bob withdraws and receives the fee.
+        uint256 bobBefore = bob.balance;
+        vm.prank(bob);
+        records.withdrawFees();
         assertEq(bob.balance, bobBefore + FEE);
+        assertEq(records.pendingFees(bob), 0);
     }
 
     function test_flatFeePlugin_canRegisterIsAlwaysTrue() public {
