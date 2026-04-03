@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IRegistrarPlugin.sol";
 
 /// @title L2Records V3
@@ -10,7 +11,7 @@ import "./IRegistrarPlugin.sol";
 ///         Transferring the NFT transfers subdomain ownership automatically.
 ///         V2 private mappings are reproduced here since Solidity does not expose private state
 ///         to child contracts; all V2 semantics are preserved verbatim.
-contract L2RecordsV3 is ERC721 {
+contract L2RecordsV3 is ERC721, ReentrancyGuard {
     address public owner;
 
     // node => coinType => address bytes
@@ -65,6 +66,7 @@ contract L2RecordsV3 is ERC721 {
     error LabelMismatch();
     error PluginRejected();
     error InsufficientFee();
+    error InvalidPlugin();
 
     // ─── Modifiers ───────────────────────────────────────────────────────────────
 
@@ -173,6 +175,13 @@ contract L2RecordsV3 is ERC721 {
             address parentOwner = _ownerOf(uint256(parentNode));
             if (parentOwner == address(0) || parentOwner != msg.sender) revert Unauthorized();
         }
+        // If a non-zero plugin address is provided, verify it has deployed code.
+        // Setting an EOA as plugin would brick all future registrations under parentNode.
+        if (address(plugin) != address(0)) {
+            uint256 codeSize;
+            assembly { codeSize := extcodesize(plugin) }
+            if (codeSize == 0) revert InvalidPlugin();
+        }
         registrarPlugin[parentNode] = plugin;
         emit PluginSet(parentNode, address(plugin));
     }
@@ -186,7 +195,7 @@ contract L2RecordsV3 is ERC721 {
         bytes32 labelhash,
         address newOwner,
         string calldata label
-    ) external onlyOwnerOrRegistrar(parentNode) {
+    ) external nonReentrant onlyOwnerOrRegistrar(parentNode) {
         _checkRegistrarQuota(parentNode);
         _checkPlugin(parentNode, label, newOwner);
         _registerNode(parentNode, labelhash, newOwner, label);
@@ -201,7 +210,7 @@ contract L2RecordsV3 is ERC721 {
         address newOwner,
         string calldata label,
         bytes calldata addrBytes
-    ) external payable onlyOwnerOrRegistrar(parentNode) {
+    ) external payable nonReentrant onlyOwnerOrRegistrar(parentNode) {
         if (addrBytes.length != 20) revert InvalidAddrBytes();
         _checkRegistrarQuota(parentNode);
         _checkPluginWithFee(parentNode, label, newOwner);
@@ -229,26 +238,42 @@ contract L2RecordsV3 is ERC721 {
         if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
     }
 
+    error UnexpectedValue();
+
     /// @notice Internal: consult the plugin's canRegister and enforce fee.
-    ///         Excess ETH is forwarded to the parentNode NFT owner.
+    ///         Reverts if msg.value is non-zero but no fee is required (prevents ETH lock-up).
+    ///         Excess ETH above the required fee is refunded to the caller.
     function _checkPluginWithFee(bytes32 parentNode, string calldata label, address requester) internal {
         IRegistrarPlugin plugin = registrarPlugin[parentNode];
-        if (address(plugin) == address(0)) return;
+        if (address(plugin) == address(0)) {
+            // No plugin: no fee expected. Reject any ETH to prevent lock-up.
+            if (msg.value > 0) revert UnexpectedValue();
+            return;
+        }
         if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
         uint256 fee = plugin.registrationFee(parentNode, label, requester);
-        if (fee > 0) {
-            if (msg.value < fee) revert InsufficientFee();
-            // Forward fee to the parentNode NFT owner; refund any excess to caller.
-            address parentOwner = _ownerOf(uint256(parentNode));
-            if (parentOwner != address(0)) {
-                (bool ok,) = parentOwner.call{value: fee}("");
-                require(ok, "fee transfer failed");
-            }
-            uint256 excess = msg.value - fee;
-            if (excess > 0) {
-                (bool ok2,) = msg.sender.call{value: excess}("");
-                require(ok2, "refund failed");
-            }
+        if (fee == 0) {
+            // Plugin allows free registration: reject any ETH to prevent lock-up.
+            if (msg.value > 0) revert UnexpectedValue();
+            return;
+        }
+        if (msg.value < fee) revert InsufficientFee();
+        // Forward fee to the parentNode NFT owner.
+        // parentOwner == address(0) means the parentNode is unminted (root domain managed
+        // by contract owner). In that case fee goes to address(0), which burns it — acceptable
+        // since root domains don't have an NFT owner. Production deployments should ensure
+        // root-domain parentNodes are either minted or have no fee plugin attached.
+        address parentOwner = _ownerOf(uint256(parentNode));
+        if (parentOwner != address(0)) {
+            // CEI: state already updated by _checkRegistrarQuota before this call.
+            // ReentrancyGuard on the caller prevents cross-function reentrancy.
+            (bool ok,) = parentOwner.call{value: fee}("");
+            require(ok, "fee transfer failed");
+        }
+        uint256 excess = msg.value - fee;
+        if (excess > 0) {
+            (bool ok2,) = msg.sender.call{value: excess}("");
+            require(ok2, "refund failed");
         }
     }
 

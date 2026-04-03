@@ -33,23 +33,31 @@ export class NonceStore {
       }
 
       const { key, ttl } = body
-      if (!key || typeof ttl !== 'number') {
-        return new Response(JSON.stringify({ error: 'Missing key or ttl' }), {
+      if (!key || typeof key !== 'string' || key.length > 512) {
+        return new Response(JSON.stringify({ error: 'Missing or invalid key' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (typeof ttl !== 'number' || !Number.isFinite(ttl) || ttl < 60 || ttl > 86_400) {
+        return new Response(JSON.stringify({ error: 'ttl must be a finite number between 60 and 86400' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         })
       }
 
-      // Atomic check-and-insert using DO storage (strongly consistent).
-      const existing = await this.state.storage.get<number>(key)
-      if (existing !== undefined) {
-        return new Response(JSON.stringify({ ok: false }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
+      // Use blockConcurrencyWhile to make check-and-insert atomic.
+      // CF DO input gate already serializes requests, but this makes the intent
+      // explicit and prevents any future concurrency model changes from introducing
+      // a TOCTOU window.
+      const ok = await this.state.blockConcurrencyWhile(async () => {
+        const existing = await this.state.storage.get<number>(key)
+        if (existing !== undefined) return false
+        await this.state.storage.put(key, 1, { expirationTtl: ttl })
+        return true
+      })
 
-      await this.state.storage.put(key, 1, { expirationTtl: ttl })
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(JSON.stringify({ ok }), {
         headers: { 'Content-Type': 'application/json' },
       })
     }

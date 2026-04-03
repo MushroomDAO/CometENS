@@ -549,7 +549,10 @@ async function consumeNonce(
   doNamespace?: DurableObjectNamespace,
 ): Promise<void> {
   const key = `nonce:${from.toLowerCase()}:${nonce}`
-  const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(deadline) - Math.floor(Date.now() / 1000)))
+  // Use BigInt arithmetic to avoid precision loss on large deadline values.
+  const nowSecs = BigInt(Math.floor(Date.now() / 1000))
+  const remaining = deadline > nowSecs ? deadline - nowSecs : 0n
+  const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(remaining)))
 
   if (doNamespace) {
     // Strongly-consistent path: Durable Object guarantees atomicity.
@@ -560,16 +563,24 @@ async function consumeNonce(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, ttl }),
     })
-    const json = await res.json() as { ok: boolean }
-    if (!json.ok) throw Object.assign(new Error('Nonce already used'), { status: 409 })
+    const result = await res.json() as { ok: boolean }
+    if (!result.ok) throw Object.assign(new Error('Nonce already used'), { status: 409 })
     return
   }
 
   // Eventually-consistent fallback: KV (dev/test without NONCE_STORE bound).
-  if (!kv) return
-  const existing = await kv.get(key)
-  if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
-  await kv.put(key, '1', { expirationTtl: ttl })
+  // WARNING: KV is not atomic — use only in dev/test environments. Production
+  // deployments must bind NONCE_STORE (Durable Object) to prevent TOCTOU replay.
+  if (kv) {
+    const existing = await kv.get(key)
+    if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
+    await kv.put(key, '1', { expirationTtl: ttl })
+    return
+  }
+
+  // Neither DO nor KV bound — fail closed. Allowing nonces to pass without
+  // deduplication would make replay protection entirely ineffective.
+  throw Object.assign(new Error('Nonce storage not configured on server'), { status: 503 })
 }
 
 /**

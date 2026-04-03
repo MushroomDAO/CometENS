@@ -287,12 +287,47 @@ contract L2RecordsV3PluginTest is Test {
         assertEq(records.subnodeOwner(NODE_ALICE), alice);
     }
 
-    function test_noPlugin_registrarSubnodePayable() public {
-        // registerSubnode with no plugin should accept 0 ETH fine.
+    function test_noPlugin_registrarSubnodePayable_zeroValue() public {
+        // registerSubnode with no plugin + 0 value is fine.
         records.addRegistrar(ROOT_NODE, registrar, 0, 0);
         vm.prank(registrar);
         records.registerSubnode{value: 0}(ROOT_NODE, LABEL_ALICE, alice, "alice", abi.encodePacked(alice));
         assertEq(records.addr(NODE_ALICE), alice);
+    }
+
+    function test_noPlugin_unexpectedValue_reverts() public {
+        // Sending ETH when no plugin is attached should revert to prevent ETH lock-up.
+        records.addRegistrar(ROOT_NODE, registrar, 0, 0);
+        vm.deal(registrar, 1 ether);
+        vm.prank(registrar);
+        vm.expectRevert(L2RecordsV3.UnexpectedValue.selector);
+        records.registerSubnode{value: 0.01 ether}(ROOT_NODE, LABEL_ALICE, alice, "alice", abi.encodePacked(alice));
+    }
+
+    function test_freePlugin_unexpectedValue_reverts() public {
+        // FreePlugin has fee=0 — sending ETH should revert.
+        FreePlugin fp = new FreePlugin();
+        records.setPlugin(ROOT_NODE, IRegistrarPlugin(address(fp)));
+        records.addRegistrar(ROOT_NODE, registrar, 0, 0);
+        vm.deal(registrar, 1 ether);
+        vm.prank(registrar);
+        vm.expectRevert(L2RecordsV3.UnexpectedValue.selector);
+        records.registerSubnode{value: 0.01 ether}(ROOT_NODE, LABEL_ALICE, alice, "alice", abi.encodePacked(alice));
+    }
+
+    function test_setPlugin_EOA_reverts() public {
+        // Setting an EOA as plugin should revert — would brick registrations.
+        address eoa = makeAddr("notAContract");
+        vm.expectRevert(L2RecordsV3.InvalidPlugin.selector);
+        records.setPlugin(ROOT_NODE, IRegistrarPlugin(eoa));
+    }
+
+    function test_setPlugin_zero_removes() public {
+        FreePlugin fp = new FreePlugin();
+        records.setPlugin(ROOT_NODE, IRegistrarPlugin(address(fp)));
+        // Remove plugin by setting to address(0) — should succeed (no code-size check for zero)
+        records.setPlugin(ROOT_NODE, IRegistrarPlugin(address(0)));
+        assertEq(address(records.registrarPlugin(ROOT_NODE)), address(0));
     }
 
     // ─── Plugin removed: registration falls back to registrar auth ────────────
