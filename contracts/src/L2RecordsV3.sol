@@ -312,6 +312,20 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         return _ownerOf(uint256(node));
     }
 
+    /// @notice Transfer a subdomain NFT on behalf of its owner.
+    ///         Called by the contract owner (Worker EOA) after verifying an EIP-712
+    ///         TransferSubnode signature off-chain. Standard ERC-721 transferFrom
+    ///         requires msg.sender == owner or approved; this gateway path delegates
+    ///         that authority to the contract owner, who has verified the user's intent
+    ///         cryptographically before calling.
+    /// @param node The namehash (= tokenId) of the subdomain to transfer.
+    /// @param from Current owner — must match ownerOf(tokenId) or call reverts.
+    /// @param to   New owner.
+    function transferSubnodeByGateway(bytes32 node, address from, address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        _transfer(from, to, uint256(node));
+    }
+
     // ─── Label/name storage ─────────────────────────────────────────────────────
 
     function nameOf(bytes32 node) external view returns (bytes memory) {

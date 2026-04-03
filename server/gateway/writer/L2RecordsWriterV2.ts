@@ -11,16 +11,19 @@ import {
 } from 'viem'
 import { L2RecordsV2ABI } from '../abi'
 
-// Minimal inline ABI for ERC-721 transferFrom — not present in L2RecordsV2ABI.
-const TRANSFER_FROM_ABI = [
+// Minimal inline ABI for L2RecordsV3.transferSubnodeByGateway.
+// The gateway-callable function requires msg.sender == contract owner (Worker EOA),
+// bypassing the ERC-721 approval check after the gateway has verified the EIP-712 signature.
+// Using standard ERC-721 transferFrom would fail because the Worker EOA is not the NFT owner.
+const TRANSFER_SUBNODE_ABI = [
   {
     type: 'function',
-    name: 'transferFrom',
+    name: 'transferSubnodeByGateway',
     stateMutability: 'nonpayable',
     inputs: [
+      { name: 'node', type: 'bytes32' },
       { name: 'from', type: 'address' },
       { name: 'to', type: 'address' },
-      { name: 'tokenId', type: 'uint256' },
     ],
     outputs: [],
   },
@@ -125,12 +128,11 @@ export class L2RecordsWriterV2 {
   }
 
   async transferSubnode(node: Hex, from: Address, to: Address): Promise<Hex> {
-    const tokenId = BigInt(node)
     const { request } = await this.publicClient.simulateContract({
       address: this.contractAddress,
-      abi: TRANSFER_FROM_ABI,
-      functionName: 'transferFrom',
-      args: [from, to, tokenId],
+      abi: TRANSFER_SUBNODE_ABI,
+      functionName: 'transferSubnodeByGateway',
+      args: [node, from, to],
       account: this.account,
     })
     const hash = await this.wallet.writeContract(request)

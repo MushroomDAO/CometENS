@@ -523,6 +523,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const msg = payload.message ?? {}
     if (!isHex(msg.node)) throw badReq('Invalid node')
     if (!isAddress(msg.to)) throw badReq('Invalid to address')
+    if ((msg.to as string).toLowerCase() === '0x0000000000000000000000000000000000000000') {
+      throw badReq('Cannot transfer to zero address')
+    }
 
     const message = {
       node: msg.node as Hex,
@@ -532,17 +535,27 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
+    // Self-transfer is a no-op that wastes gas and burns the nonce — reject early.
+    if (message.to.toLowerCase() === from.toLowerCase()) {
+      throw badReq('Cannot transfer to self')
+    }
+
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    // Authorization: signer must be current NFT owner (check BEFORE consuming nonce)
+    // Authorization: verify on-chain ownership BEFORE consuming nonce.
+    // Uses subnodeOwner() which in V3 maps directly to ownerOf(uint256(node)).
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
+
+    // Verify writer is configured before consuming nonce — avoids burning nonce
+    // when WORKER_EOA_PRIVATE_KEY is missing (misconfiguration fail-fast).
+    const writer = requireWriter(env)
+
     await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
 
-    const writer = requireWriter(env)
     const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
 
     // Invalidate KV record cache for this node — owner changed

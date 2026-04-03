@@ -317,4 +317,35 @@ contract L2RecordsV3Test is Test {
         assertEq(records.name(), "L2RecordsV3 Subdomain");
         assertEq(records.symbol(), "L2R3");
     }
+
+    // ─── transferSubnodeByGateway ─────────────────────────────────────────────
+
+    function test_gatewayTransfer_succeeds() public {
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
+        assertEq(records.subnodeOwner(NODE_ALICE), alice);
+
+        // Contract owner (gateway) can transfer on behalf of alice.
+        records.transferSubnodeByGateway(NODE_ALICE, alice, bob);
+        assertEq(records.subnodeOwner(NODE_ALICE), bob);
+    }
+
+    function test_gatewayTransfer_wrongFromReverts() public {
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
+        // Passing wrong `from` should revert (ERC-721 enforces ownerOf == from).
+        vm.expectRevert();
+        records.transferSubnodeByGateway(NODE_ALICE, bob, bob);
+    }
+
+    function test_gatewayTransfer_zeroToReverts() public {
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
+        vm.expectRevert(L2RecordsV3.ZeroAddress.selector);
+        records.transferSubnodeByGateway(NODE_ALICE, alice, address(0));
+    }
+
+    function test_gatewayTransfer_nonOwnerReverts() public {
+        records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
+        vm.prank(stranger);
+        vm.expectRevert(L2RecordsV3.Unauthorized.selector);
+        records.transferSubnodeByGateway(NODE_ALICE, alice, bob);
+    }
 }
