@@ -112,7 +112,14 @@ export default {
 
       return jsonError('Not Found', 404)
     } catch (e: any) {
-      return jsonError(e?.message ?? String(e), e?.status ?? 500)
+      const status = e?.status ?? 500
+      if (status === 429) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'Retry-After': '60', ...corsHeaders() },
+        })
+      }
+      return jsonError(e?.message ?? String(e), status)
     }
   },
 }
@@ -183,6 +190,15 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
 
   const payload = await parseJson(request)
   const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
+
+  // Recover the signer early so we can rate-limit before doing any writes.
+  // handleV1Register() will re-verify and check the allowedSigners list.
+  if (payload.signature && payload.label && payload.owner && payload.timestamp) {
+    const message = `CometENS:register:${String(payload.label).trim().toLowerCase()}:${payload.owner}:${payload.timestamp}`
+    const signerAddress = await recoverMessageAddress({ message, signature: payload.signature as Hex })
+    await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)
+  }
+
   const writer = buildWriter(env)
 
   const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer)
@@ -205,6 +221,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   const from = payload.from as string | undefined
   if (!from || !isAddress(from)) throw badReq('Invalid from address')
+
+  await checkRateLimit(env.RECORD_CACHE, `rl:write:${from.toLowerCase()}`, 10, 60)
 
   const signature = payload.signature as Hex | undefined
   if (!signature || !isHex(signature)) throw badReq('Missing or invalid signature')
@@ -552,6 +570,38 @@ async function consumeNonce(
   const existing = await kv.get(key)
   if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
   await kv.put(key, '1', { expirationTtl: ttl })
+}
+
+/**
+ * KV sliding-window rate limiter.
+ *
+ * Divides time into fixed windows of `windowSecs` seconds. Within each window,
+ * counts requests per key. Throws 429 when the limit is exceeded.
+ *
+ * No-op when `kv` is undefined (dev/test without KV bound).
+ * Key prefix `rl:` does not collide with any existing KV keys.
+ */
+async function checkRateLimit(
+  kv: KVNamespace | undefined,
+  key: string,
+  limit: number,
+  windowSecs: number,
+): Promise<void> {
+  if (!kv) return
+
+  const now = Math.floor(Date.now() / 1000)
+  const windowKey = `${key}:${Math.floor(now / windowSecs)}`
+
+  const current = await kv.get(windowKey)
+  const count = current ? parseInt(current, 10) : 0
+
+  if (count >= limit) {
+    throw Object.assign(new Error('Rate limit exceeded'), { status: 429 })
+  }
+
+  // expirationTtl must be ≥ 60s per CF KV minimum — use windowSecs * 2 so
+  // the counter outlives the window (allows the window to drain naturally).
+  await kv.put(windowKey, String(count + 1), { expirationTtl: Math.max(60, windowSecs * 2) })
 }
 
 function badReq(msg: string): Error {
