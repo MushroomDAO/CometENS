@@ -77,9 +77,22 @@ export interface Env {
    * Optional: falls back to RECORD_CACHE KV when not bound (dev/test).
    */
   NONCE_STORE?: DurableObjectNamespace
+  /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
+  ANALYTICS?: AnalyticsEngineDataset
 }
 
 // L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
+
+// ─── Analytics helper ─────────────────────────────────────────────────────────
+
+function trackEvent(analytics: AnalyticsEngineDataset | undefined, event: string, status: number, labels: string[] = []): void {
+  if (!analytics) return
+  analytics.writeDataPoint({
+    blobs: [event, String(status), ...labels],
+    doubles: [Date.now()],
+    indexes: [event],
+  })
+}
 
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
@@ -93,28 +106,45 @@ export default {
     }
 
     try {
+      let response: Response
+
+      // ── Health check ──────────────────────────────────────────────────────
+      if (path === '/health' && request.method === 'GET') {
+        response = json({
+          status: 'ok',
+          network: env.NETWORK,
+          rootDomain: env.ROOT_DOMAIN,
+          version: 'v0.5.0',
+          timestamp: Math.floor(Date.now() / 1000),
+        })
+        trackEvent(env.ANALYTICS, path, response.status)
+        return response
+      }
+
       // ── Public GET endpoints ──────────────────────────────────────────────
       if (request.method === 'GET') {
-        if (path === '/check-label')  return handleCheckLabel(url, env)
-        if (path === '/check-owner')  return handleCheckOwner(url, env)
-        if (path === '/lookup')       return handleLookup(url, env)
+        if (path === '/check-label')  { response = await handleCheckLabel(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/check-owner')  { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/lookup')       { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
       if (request.method === 'POST') {
-        if (path === '/v1/register')    return handleV1RegisterEndpoint(request, env)
-        if (path === '/register')       return handleManage(request, env, path)
-        if (path === '/set-addr')       return handleManage(request, env, path)
-        if (path === '/set-text')       return handleManage(request, env, path)
-        if (path === '/set-contenthash') return handleManage(request, env, path)
-        if (path === '/add-registrar')  return handleManage(request, env, path)
-        if (path === '/remove-registrar') return handleManage(request, env, path)
-        if (path === '/transfer-subnode') return handleManage(request, env, path)
+        if (path === '/v1/register')     { response = await handleV1RegisterEndpoint(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/register')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/set-addr')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/set-text')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/set-contenthash') { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/add-registrar')   { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/remove-registrar'){ response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/transfer-subnode'){ response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
+      trackEvent(env.ANALYTICS, path, 404)
       return jsonError('Not Found', 404)
     } catch (e: any) {
       const status = e?.status ?? 500
+      trackEvent(env.ANALYTICS, path, status)
       if (status === 429) {
         return new Response(JSON.stringify({ error: e.message }), {
           status: 429,

@@ -27,6 +27,10 @@ ROOT_DOMAIN = "aastar.eth"
 binding = "RECORD_CACHE"
 id = "6147f1fe8d5141389e10475cab1f6647"
 
+[[env.testnet.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "cometens_gateway"
+
 # ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
 # Deploy: wrangler deploy --env production
 # URL:    https://cometens-gateway-production.jhfnetboy.workers.dev
@@ -49,6 +53,10 @@ ROOT_DOMAIN = "aastar.eth"
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"
 # id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
+
+[[env.production.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "cometens_gateway"
 
 # Uncomment after assigning a custom domain in the CF dashboard:
 # [[env.production.routes]]

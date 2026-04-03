@@ -39,6 +39,10 @@ id = "6147f1fe8d5141389e10475cab1f6647"
 name = "NONCE_STORE"
 class_name = "NonceStore"
 
+[[env.testnet.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "cometens_api"
+
 # ─── Production (OP Mainnet) ──────────────────────────────────────────────────
 # Deploy: wrangler deploy --env production
 #
@@ -56,3 +60,7 @@ ROOT_DOMAIN = "aastar.eth"
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"
 # id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
+
+[[env.production.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "cometens_api"

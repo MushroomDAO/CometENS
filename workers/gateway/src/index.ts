@@ -48,6 +48,8 @@ interface Env {
   RECORD_CACHE?: KVNamespace
   PROOF_MODE?: string  // "true" enables Bedrock storage proof mode — only active when DEV_MODE=true also set
   DEV_MODE?: string   // "true" required alongside PROOF_MODE to prevent accidental production activation
+  /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
+  ANALYTICS?: AnalyticsEngineDataset
 }
 
 // L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
@@ -279,6 +281,7 @@ export default {
         status: 'ok',
         network: env.NETWORK,
         rootDomain: env.ROOT_DOMAIN || 'not configured',
+        timestamp: Math.floor(Date.now() / 1000),
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
