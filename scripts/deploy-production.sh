@@ -61,6 +61,12 @@ if [[ -z "${WORKER_EOA_PRIVATE_KEY:-}" ]]; then
   echo "    Set it in .env.production and retry."
   exit 1
 fi
+if [[ -z "${UPSTREAM_ALLOWED_SIGNERS:-}" ]]; then
+  echo "  ✗ UPSTREAM_ALLOWED_SIGNERS is not set."
+  echo "    Comma-separated addresses allowed to sign upstream requests."
+  echo "    Set it in .env.production and retry."
+  exit 1
+fi
 
 # ── Step 1: Deploy L2RecordsV2 (OP Mainnet) ──────────────────────────────────
 echo ""
@@ -130,7 +136,7 @@ echo ""
 echo "  Setting API Worker secrets..."
 echo "${OP_MAINNET_RPC_URL}" | wrangler secret put OP_RPC_URL --env production
 echo "${WORKER_EOA_PRIVATE_KEY}" | wrangler secret put WORKER_EOA_PRIVATE_KEY --env production
-echo "${UPSTREAM_ALLOWED_SIGNERS:-$DEPLOYER_ADDRESS}" | wrangler secret put UPSTREAM_ALLOWED_SIGNERS --env production
+echo "${UPSTREAM_ALLOWED_SIGNERS}" | wrangler secret put UPSTREAM_ALLOWED_SIGNERS --env production
 
 wrangler deploy --env production
 

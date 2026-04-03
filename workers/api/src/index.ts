@@ -227,7 +227,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     // Authorization: recovered signer must be subdomain owner
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -269,7 +269,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     // Authorization: verify signer is a registrar or the contract owner
     const parentNode = namehash(message.parent) as Hex
@@ -330,7 +330,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -369,7 +369,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -410,12 +410,12 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -438,12 +438,12 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
-    await consumeNonce(env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
