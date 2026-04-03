@@ -187,6 +187,21 @@
     <div class="result-box hidden" id="setChResult"></div>
   </div>
 
+  <!-- ── Section 8: Transfer Subdomain ── -->
+  <div class="card">
+    <h3>Transfer Subdomain (NFT Owner)</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Transfer ownership of a subdomain NFT to another address</p>
+
+    <label for="transferSubdomain">Subdomain (e.g. alice.forest.aastar.eth)</label>
+    <input id="transferSubdomain" type="text" placeholder="alice.forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="transferSubdomainTo">New Owner Address (0x...)</label>
+    <input id="transferSubdomainTo" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <button class="btn-small" id="transferSubdomainBtn">Transfer</button>
+    <div class="result-box hidden" id="transferSubdomainResult"></div>
+  </div>
+
   <!-- ── Deployed Contracts ── -->
   <div class="card">
     <h3>Deployed Contracts</h3>

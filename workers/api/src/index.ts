@@ -42,6 +42,7 @@ import {
   SetContenthashTypes,
   AddRegistrarTypes,
   RemoveRegistrarTypes,
+  TransferSubnodeTypes,
 } from '../../../server/gateway/manage/schemas'
 import { handleV1Register } from '../../../server/gateway/v1/register'
 
@@ -108,6 +109,7 @@ export default {
         if (path === '/set-contenthash') return handleManage(request, env, path)
         if (path === '/add-registrar')  return handleManage(request, env, path)
         if (path === '/remove-registrar') return handleManage(request, env, path)
+        if (path === '/transfer-subnode') return handleManage(request, env, path)
       }
 
       return jsonError('Not Found', 404)
@@ -484,6 +486,41 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
     return json({ ok, action: 'remove-registrar', txHash })
+  }
+
+  // ── /transfer-subnode ─────────────────────────────────────────────────────
+  if (path === '/transfer-subnode') {
+    const msg = payload.message ?? {}
+    if (!isHex(msg.node)) throw badReq('Invalid node')
+    if (!isAddress(msg.to)) throw badReq('Invalid to address')
+
+    const message = {
+      node: msg.node as Hex,
+      to: msg.to as Address,
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
+    }
+    checkDeadline(message.deadline)
+
+    const ok = await verifyTypedData({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
+    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+
+    // Authorization: signer must be current NFT owner (check BEFORE consuming nonce)
+    const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
+    if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
+      throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
+    }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+
+    const writer = requireWriter(env)
+    const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
+
+    // Invalidate KV record cache for this node — owner changed
+    if (env.RECORD_CACHE) {
+      await env.RECORD_CACHE.delete(`addr60:${message.node}`)
+    }
+
+    return json({ ok, action: 'transfer-subnode', txHash })
   }
 
   return jsonError('Unknown endpoint', 404)

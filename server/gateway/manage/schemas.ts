@@ -111,6 +111,22 @@ export type RemoveRegistrarMessage = {
   deadline: bigint
 }
 
+export const TransferSubnodeTypes = {
+  TransferSubnode: [
+    { name: 'node', type: 'bytes32' },
+    { name: 'to', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const
+
+export type TransferSubnodeMessage = {
+  node: `0x${string}`
+  to: `0x${string}`
+  nonce: bigint
+  deadline: bigint
+}
+
 export function buildDomain(chainId: number, verifyingContract: `0x${string}`): Eip712Domain {
   return { name: 'CometENS', version: '1', chainId, verifyingContract }
 }

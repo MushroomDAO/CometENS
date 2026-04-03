@@ -6,9 +6,25 @@ import {
   type PublicClient,
   type Chain,
   type Hex,
+  type Address,
   type Account,
 } from 'viem'
 import { L2RecordsV2ABI } from '../abi'
+
+// Minimal inline ABI for ERC-721 transferFrom — not present in L2RecordsV2ABI.
+const TRANSFER_FROM_ABI = [
+  {
+    type: 'function',
+    name: 'transferFrom',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const
 
 export class L2RecordsWriterV2 {
   private wallet: WalletClient
@@ -104,6 +120,20 @@ export class L2RecordsWriterV2 {
       account: this.account,
       chain: this.wallet.chain!,
     })
+    await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
+    return hash
+  }
+
+  async transferSubnode(node: Hex, from: Address, to: Address): Promise<Hex> {
+    const tokenId = BigInt(node)
+    const { request } = await this.publicClient.simulateContract({
+      address: this.contractAddress,
+      abi: TRANSFER_FROM_ABI,
+      functionName: 'transferFrom',
+      args: [from, to, tokenId],
+      account: this.account,
+    })
+    const hash = await this.wallet.writeContract(request)
     await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
     return hash
   }

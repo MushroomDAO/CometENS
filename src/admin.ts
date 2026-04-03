@@ -11,7 +11,7 @@ import {
 } from 'viem'
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
 import { config, isTestnet } from './config'
-import { buildDomain, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes } from '../server/gateway/manage/schemas'
+import { buildDomain, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
 import { L2RecordsV2ABI } from '../server/gateway/abi'
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -652,6 +652,74 @@ async function signAndSubmitSetContenthash(): Promise<void> {
   }
 }
 
+// ─── Transfer Subdomain ───────────────────────────────────────────────────────
+
+async function signAndSubmitTransferSubnode(): Promise<void> {
+  clearResult('transferSubdomainResult')
+
+  const subdomainEl = byId<HTMLInputElement>('transferSubdomain')
+  const toEl = byId<HTMLInputElement>('transferSubdomainTo')
+
+  const subdomain = subdomainEl?.value.trim() ?? ''
+  const toAddr = (toEl?.value.trim() ?? '') as `0x${string}`
+
+  if (!subdomain) { showResult('transferSubdomainResult', 'Please enter a subdomain.', 'error'); return }
+  if (!isAddress(toAddr)) { showResult('transferSubdomainResult', 'Please enter a valid new owner address.', 'error'); return }
+
+  const transferBtn = byId<HTMLButtonElement>('transferSubdomainBtn')
+  try {
+    if (transferBtn) { transferBtn.disabled = true; transferBtn.textContent = 'Signing…' }
+
+    const from = await ensureConnected()
+    const chain = getL2Chain()
+    const wallet = createWalletClient({ chain, transport: custom(getEthereum()) })
+
+    const node = namehash(subdomain) as Hex
+    const now = Math.floor(Date.now() / 1000)
+    const nonce = BigInt(Date.now())
+    const deadline = BigInt(now + 600)
+
+    const domain = buildDomain(chain.id, CONTRACT)
+    const message = { node, to: toAddr, nonce, deadline }
+
+    const signature = await wallet.signTypedData({
+      account: from,
+      domain,
+      primaryType: 'TransferSubnode',
+      types: TransferSubnodeTypes as any,
+      message: message as any,
+    })
+
+    if (transferBtn) transferBtn.textContent = 'Submitting…'
+
+    const response = await fetch(`${config.apiUrl}/transfer-subnode`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        signature,
+        domain: { verifyingContract: CONTRACT },
+        message: {
+          node: message.node,
+          to: message.to,
+          nonce: nonce.toString(),
+          deadline: deadline.toString(),
+        },
+      }),
+    })
+
+    const json = await response.json()
+    if (!response.ok) throw new Error(json.error ?? `Server error ${response.status}`)
+
+    const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
+    showResult('transferSubdomainResult', `Subdomain ${subdomain} transferred to ${toAddr}${txInfo}`, 'success')
+  } catch (e) {
+    showResult('transferSubdomainResult', (e as Error)?.message ?? String(e), 'error')
+  } finally {
+    if (transferBtn) { transferBtn.disabled = false; transferBtn.textContent = 'Transfer' }
+  }
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -693,4 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Set contenthash
   byId<HTMLButtonElement>('setChBtn')?.addEventListener('click', signAndSubmitSetContenthash)
+
+  // Transfer subdomain
+  byId<HTMLButtonElement>('transferSubdomainBtn')?.addEventListener('click', signAndSubmitTransferSubnode)
 })
