@@ -1,15 +1,17 @@
 # CometENS 开发路线图
 
-## 当前状态（2026-04-04 / v0.5.1）
+## 当前状态（2026-04-04 / v0.6.0）
 
 | 里程碑 | 名称 | 状态 | Tag |
 |--------|------|------|-----|
 | **A** | 可信签名 MVP | ✅ **已完成** | v0.3.0 |
 | **A+** | Production API Server + Security Hardening | ✅ **已完成** | v0.4.0 |
 | **B** | Name Wrapper + NFT 子域（B1/B4） | ✅ **已完成** | v0.5.0 |
-| **C** | 状态证明（ENS V2 标准） | 🟡 **脚手架完成（C1/C2）** | v0.5.0 |
+| **C** | 状态证明（ENS V2 标准） | ✅ **C3/C4 完成（37 tests）** | v0.6.0 |
 | **D** | 生产强化 | 🟡 **进行中（D3 ✅，D4 待做）** | v0.5.0 |
 | E | .box 写路径 | ⏳ 待官方开放 | — |
+
+**ENS V2 影响评估（2026-04）**：ENS V2 = 纯 L1 registry 重写（Namechain 已取消）。CCIP-Read/ERC-3668/IExtendedResolver 接口**完全不变**。CometENS 的 OPResolver + Gateway 零修改可运行，上线后再跟进 V2 subregistry 迁移（可选、一笔交易）。详见 [docs/ensv2-impact-analysis.md](ensv2-impact-analysis.md)。
 
 **注**：B2（插件架构）已删除 — 开源免费项目，单一职责原则，根域名管理足够控制访问。D1（Durable Objects）已删除 — 链上唯一性保证足够。D2（Rate Limiting）已关闭 — EIP-712 鉴权是真正的门卫。
 
@@ -81,7 +83,7 @@
 
 ---
 
-## 里程碑 C：状态证明（ENS V2 标准路径）🟡 脚手架完成
+## 里程碑 C：状态证明（ENS V2 标准路径）✅ v0.6.0
 
 **目标**：用 Bedrock 状态证明替代 Gateway 签名，实现信任最小化。
 
@@ -89,12 +91,30 @@
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| C1 | OPResolver 合约（替代 OffchainResolver，`verifyProofs` flag） | 🔴 P0 | ✅ 完成（脚手架） |
-| C2 | Gateway Worker 支持证明模式（PROOF_MODE + DEV_MODE 双 guard，返回 501 stub） | 🔴 P0 | ✅ 完成（stub） |
-| C3 | L1 链上验证 OP 状态根（Bedrock Merkle proof 实际验证）| 🟡 P1 | 📋 待实现 |
-| C4 | Gateway 实际返回 eth_getProof 结果，OPResolver 链上验证 | 🟡 P1 | 📋 待实现 |
+| C1 | OPResolver 合约（C1 脚手架 → C3 实际实现） | 🔴 P0 | ✅ 完成 |
+| C2 | Gateway Worker 支持证明模式（C2 stub → C4 真实实现） | 🔴 P0 | ✅ 完成 |
+| C3 | OPResolver + unruggable-gateways v1.3.5：GatewayFetchTarget + OPFaultVerifier | 🟡 P1 | ✅ 完成，37 tests |
+| C4 | Gateway GET /{sender}/{data}：OPFaultRollup 证明，module-level 单例，sender 白名单 | 🟡 P1 | ✅ 完成 |
 
-**参考**：`vendor/unruggable-gateways/`、`eval/unruggable-gateways/`
+**已部署依赖**：
+- `contracts/lib/unruggable-gateways` Foundry library (v1.3.5)
+- `workers/gateway`: `@unruggable/gateways: 1.3.5` + `ethers: ^6.0.0`
+- OP Sepolia AnchorStateRegistry: `0x218CD9489199F321E1177b56385d333c7876e1d3`
+
+**待部署（测试网）**：
+```bash
+# 1. Set secrets
+wrangler secret put ETH_RPC_URL --env testnet   # L1 Sepolia RPC
+# 2. Deploy OPResolver stack to Ethereum Sepolia
+DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/{sender}/{data} \
+  L2_RECORDS_ADDRESS=0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e \
+  ANCHOR_STATE_REGISTRY=0x218CD9489199F321E1177b56385d333c7876e1d3 \
+  forge script contracts/script/DeployOPResolver.s.sol --broadcast --rpc-url $ETH_RPC_URL
+# 3. Set aastar.eth resolver = deployed OPResolver address
+# 4. Set ALLOWED_SENDERS = deployed OPResolver address in wrangler.toml
+```
+
+**参考**：`docs/ensv2-impact-analysis.md`
 
 ---
 
@@ -129,12 +149,11 @@
 
 ```
 🔴 P0 — 主网上线阻塞
-  D4  主网部署（OP Mainnet L2RecordsV3 + OffchainResolver + ENS resolver 更新）
+  D4  主网部署（OP Mainnet L2RecordsV3 + OPResolver + ENS resolver 更新）
+  C3' 测试网部署验证 OPResolver（DeployOPResolver.s.sol + ETH_RPC_URL secret）
 
 🟡 P1 — 近期
-  D6  多根域名支持（forest.aastar.eth 等，提升优先级）
-  C3  Bedrock 状态证明实际实现（跟随 ENS V2 规范进度）
-  C4  Gateway 返回真实 eth_getProof + OPResolver 链上验证
+  D6  多根域名支持（forest.aastar.eth 等，API primaryNode 限制解除）
 
 🟢 P2 — 有时间再做
   D5  Worker EOA 密钥轮换
@@ -147,12 +166,13 @@
 ## 主网最短路径
 
 ```
-v0.5.1（当前，合约 21KB 可部署）
+v0.6.0（当前：C3/C4 实现 + 37 tests 通过）
+   │
+   ├── C3': 测试网部署验证 OPResolver（ETH_RPC_URL + 链上测试）
    │
    └── D4: 主网部署 ──→ 上线
          │
-         ├── D6: 多根域名（上线后迭代）
-         └── C3/C4: 状态证明（跟进 ENS V2）
+         └── D6: 多根域名（上线后迭代）
 ```
 
 ---
@@ -176,5 +196,5 @@ ERC-721 子域 (里程碑B) ───▶  Per-name Registry
 |--------|---------|---------|-----|-------------|----------|
 | A / A+ | ✅ 109 | ✅ 21 | ✅ 16 | ✅ 8 | ✅ 3轮 Codex |
 | B (B1/B4) | ✅ 40 | ✅ 16 | ✅ 4 | — | ✅ Codex |
-| C (C1/C2) | ✅ 20 | — | — | — | — |
+| C (C3/C4) | ✅ 37 | — | — | — | ✅ 2轮 Codex |
 | D (D3) | — | — | — | — | — |
