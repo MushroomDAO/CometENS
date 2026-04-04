@@ -101,17 +101,42 @@
 - `workers/gateway`: `@unruggable/gateways: 1.3.5` + `ethers: ^6.0.0`
 - OP Sepolia AnchorStateRegistry: `0x218CD9489199F321E1177b56385d333c7876e1d3`
 
-**待部署（测试网）**：
+**已部署合约（Ethereum Sepolia，2026-04-04 C3' redeploy）**：
+
+| 合约 | 地址 |
+|---|---|
+| EthVerifierHooks | `0x68E526600e89aDD227B0912b075E02B394a23DCf` |
+| OPFaultGameFinder | `0x21e35d3Ef6511B34C6c0D1e6893c587e8d4420d2` |
+| OPFaultVerifier | `0x0954FD2908c06182127b6bed0A964e9eEA41a7EA` |
+| OPResolver | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
+
+`aastar.eth` 和 `forest.aastar.eth` resolver 均已指向 OPResolver。
+
+**⚠️ 经验教训 — AnchorStateRegistry 地址必须从库里读**：
 ```bash
+# 在部署前，先查 @unruggable/gateways 库实际使用的 ASR 地址：
+grep "sepoliaConfig" -A5 \
+  workers/gateway/node_modules/@unruggable/gateways/dist/cjs/op/OPFaultRollup.cjs \
+  | grep AnchorStateRegistry
+# 当前值：0xa1Cec548926eb5d69aa3B7B57d371EdBdD03e64b
+# 不要从文档/roadmap 里复制旧地址 — OP Stack 升级后地址会变
+# Gateway 的 sepoliaConfig 和 OPFaultVerifier 必须使用同一个 ASR，否则证明永远验证失败
+```
+
+**部署步骤（以后参考）**：
+```bash
+# 0. 查 ASR 地址（必须）
+ASR=$(grep -A5 "sepoliaConfig" workers/gateway/node_modules/@unruggable/gateways/dist/cjs/op/OPFaultRollup.cjs | grep AnchorStateRegistry | grep -o '0x[0-9a-fA-F]*')
 # 1. Set secrets
 wrangler secret put ETH_RPC_URL --env testnet   # L1 Sepolia RPC
 # 2. Deploy OPResolver stack to Ethereum Sepolia
 DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/{sender}/{data} \
   L2_RECORDS_ADDRESS=0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e \
-  ANCHOR_STATE_REGISTRY=0x218CD9489199F321E1177b56385d333c7876e1d3 \
+  ANCHOR_STATE_REGISTRY=$ASR \
   forge script contracts/script/DeployOPResolver.s.sol --broadcast --rpc-url $ETH_RPC_URL
-# 3. Set aastar.eth resolver = deployed OPResolver address
+# 3. Set aastar.eth + forest.aastar.eth resolver = deployed OPResolver address (on Sepolia ENS)
 # 4. Set ALLOWED_SENDERS = deployed OPResolver address in wrangler.toml
+# 5. wrangler deploy --env testnet (gateway worker)
 ```
 
 **参考**：`docs/ensv2-impact-analysis.md`
