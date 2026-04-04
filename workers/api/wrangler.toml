@@ -31,9 +31,10 @@ id = "a8ec4846317c430d81c5fd7816bac4d6"
 binding = "RECORD_CACHE"
 id = "6147f1fe8d5141389e10475cab1f6647"
 
-[[env.testnet.analytics_engine_datasets]]
-binding = "ANALYTICS"
-dataset = "cometens_api"
+# [[env.testnet.analytics_engine_datasets]]
+# binding = "ANALYTICS"
+# dataset = "cometens_api"
+# NOTE: Enable Analytics Engine in CF Dashboard before uncommenting
 
 # ─── Production (OP Mainnet) ──────────────────────────────────────────────────
 # Deploy: wrangler deploy --env production
