@@ -77,11 +77,18 @@ contract DeployOPResolver is Script {
         console.log("EthVerifierHooks:", address(hooks));
         console.log("OPFaultGameFinder:", address(gameFinder));
         console.log("OPFaultVerifier: ", address(faultVerifier));
+        console.log("  AnchorStateRegistry used:", asrAddr);
         console.log("OPResolver:      ", address(resolver));
         console.log("  owner:         ", resolver.owner());
         console.log("  verifier:      ", address(resolver.verifier()));
         console.log("  l2Records:     ", resolver.l2RecordsAddress());
         console.log("");
-        console.log("Next: set aastar.eth resolver to", address(resolver), "on L1 Sepolia");
+        console.log("IMPORTANT: Verify AnchorStateRegistry matches @unruggable/gateways sepoliaConfig:");
+        console.log("  Run: grep -A5 sepoliaConfig workers/gateway/node_modules/@unruggable/gateways/dist/cjs/op/OPFaultRollup.cjs | grep AnchorStateRegistry");
+        console.log("  The address above MUST match. If not, redeploy with the correct address.");
+        console.log("");
+        console.log("Next steps:");
+        console.log("  1. set aastar.eth resolver to", address(resolver), "on L1 Sepolia");
+        console.log("  2. set ALLOWED_SENDERS =", address(resolver), "in workers/gateway/wrangler.toml");
     }
 }
