@@ -16,10 +16,10 @@ compatibility_flags = ["nodejs_compat"]
 name = "cometens-gateway"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
+L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
 ROOT_DOMAIN = "aastar.eth"
-PROOF_MODE = "true"  # C4: Bedrock storage proof mode — requires ETH_RPC_URL secret
-ALLOWED_SENDERS = "0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083"  # OPResolver on Eth Sepolia (C3' redeploy 2026-04-04)
+PROOF_MODE = "false"  # Temporarily switched to signature mode for testing
+ALLOWED_SENDERS = "0xe138Ec90E6a793F69455a45cF78494c7baFd1A1b,0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083"  # Both resolvers
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.

@@ -20,8 +20,9 @@ compatibility_flags = ["nodejs_compat"]
 name = "cometens-api"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
+L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
 ROOT_DOMAIN = "forest.aastar.eth"
+GATEWAY_URL = "https://cometens-gateway.jhfnetboy.workers.dev"
 
 [[env.testnet.kv_namespaces]]
 binding = "REGISTRY"
@@ -45,6 +46,7 @@ name = "cometens-api-production"
 NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
+GATEWAY_URL = "https://cometens-gateway-production.jhfnetboy.workers.dev"
 
 # [[env.production.kv_namespaces]]
 # binding = "REGISTRY"

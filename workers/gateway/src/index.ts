@@ -41,6 +41,15 @@ import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Challenge period by network (seconds). Used to estimate when proofs become available. */
+const CHALLENGE_PERIOD: Record<string, number> = {
+  'op-mainnet': 302_400,   // 3.5 days (post-Granite)
+  'op-sepolia': 302_400,   // same parameter on testnet
+}
+
+/** Approximate OP block time in seconds */
+const OP_BLOCK_TIME = 2
+
 interface Env {
   OP_RPC_URL: string
   ETH_RPC_URL?: string        // L1 Sepolia/Mainnet — required for proof mode
@@ -110,6 +119,23 @@ async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gate
 }
 
 /**
+ * Query the rollup's latest finalized commit (anchor state).
+ * Returns the L2 block number that proofs are generated against.
+ */
+async function getAnchorL2Block(env: Env): Promise<{ l2Block: bigint; index: bigint } | null> {
+  try {
+    const gateway = await getGateway(env)
+    const commit = await gateway.rollup.fetchLatestCommit()
+    // OPFaultCommit has game.l2BlockNumber — the L2 block covered by the finalized dispute game
+    const l2Block = (commit as any).game?.l2BlockNumber as bigint | undefined
+    if (l2Block === undefined) return null
+    return { l2Block, index: commit.index }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Serve an EIP-3668 CCIP-Read proof request using @unruggable/gateways.
  *
  * Called when PROOF_MODE=true and the request matches GET /{sender}/{data}.
@@ -136,6 +162,46 @@ async function handleProofMode(
   }
 
   const gateway = await getGateway(env)
+
+  // Pre-check: is the anchor state recent enough to cover L2 data?
+  // If the latest finalized L2 block is far behind the current L2 head,
+  // proofs will verify against stale state where records may not exist yet.
+  const anchor = await getAnchorL2Block(env)
+  if (anchor) {
+    // Query current L2 block to calculate staleness
+    try {
+      const { JsonRpcProvider } = await import('ethers')
+      const l2Provider = new JsonRpcProvider(env.OP_RPC_URL)
+      const currentL2Block = BigInt(await l2Provider.getBlockNumber())
+      const blocksBehind = currentL2Block - anchor.l2Block
+
+      // If anchor is more than 1800 blocks (~1 hour) behind, proofs for recent
+      // state changes will fail. Return 503 with diagnostic info.
+      if (blocksBehind > 1800n) {
+        const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+        const estimatedCatchUpSec = Number(blocksBehind) * OP_BLOCK_TIME
+        const retryAfter = Math.min(estimatedCatchUpSec, challengePeriod)
+
+        return new Response(JSON.stringify({
+          error: 'Proof not yet available — anchor state is behind',
+          anchorL2Block: anchor.l2Block.toString(),
+          currentL2Block: currentL2Block.toString(),
+          blocksBehind: blocksBehind.toString(),
+          estimatedRetrySeconds: retryAfter,
+          detail: `The L1 anchor covers L2 block ${anchor.l2Block}. Current L2 head is ${currentL2Block}. Records written after block ${anchor.l2Block} cannot be proven yet.`,
+        }), {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': String(retryAfter),
+            ...corsHeaders,
+          },
+        })
+      }
+    } catch {
+      // L2 RPC unreachable — proceed with proof generation (let it fail naturally if stale)
+    }
+  }
 
   // "raw" protocol: return proof bytes directly — no CCIP signing wrapper.
   const { data } = await gateway.handleRead(sender, calldata, { protocol: 'raw' })
@@ -377,6 +443,69 @@ export default {
         const message = e instanceof Error ? e.message : String(e)
         return new Response(JSON.stringify({ error: message }), {
           status: 400,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
+    }
+
+    // ─── Proof status: GET /proof-status ─────────────────────────────────────
+    // Returns the current anchor L2 block and estimated proof availability.
+    // Frontend uses this to show "ENS App will resolve in ~X hours" countdown.
+    if (path === '/proof-status' && request.method === 'GET') {
+      if (env.PROOF_MODE !== 'true' || !env.ETH_RPC_URL) {
+        return new Response(JSON.stringify({
+          proofMode: false,
+          detail: 'Proof mode is not enabled on this gateway',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
+
+      try {
+        const anchor = await getAnchorL2Block(env)
+        const { JsonRpcProvider } = await import('ethers')
+        const l2Provider = new JsonRpcProvider(env.OP_RPC_URL)
+        const currentL2Block = BigInt(await l2Provider.getBlockNumber())
+        const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+
+        if (!anchor) {
+          return new Response(JSON.stringify({
+            proofMode: true,
+            error: 'Could not fetch anchor state',
+            currentL2Block: currentL2Block.toString(),
+            challengePeriodSeconds: challengePeriod,
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+
+        const blocksBehind = currentL2Block - anchor.l2Block
+        const estimatedDelaySec = Number(blocksBehind) * OP_BLOCK_TIME
+
+        return new Response(JSON.stringify({
+          proofMode: true,
+          network: env.NETWORK,
+          anchorL2Block: anchor.l2Block.toString(),
+          currentL2Block: currentL2Block.toString(),
+          blocksBehind: blocksBehind.toString(),
+          challengePeriodSeconds: challengePeriod,
+          estimatedProofDelaySec: Math.max(0, estimatedDelaySec),
+          // For a record just written at currentL2Block, this is when it becomes provable:
+          // challengePeriod covers the dispute window for the next game that includes currentL2Block.
+          estimatedNewRecordDelaySec: challengePeriod,
+          timestamp: Math.floor(Date.now() / 1000),
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      } catch (e) {
+        return new Response(JSON.stringify({
+          proofMode: true,
+          error: 'Failed to query proof status',
+        }), {
+          status: 500,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       }

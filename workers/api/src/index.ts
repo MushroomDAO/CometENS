@@ -46,6 +46,12 @@ import { handleV1Register } from '../../../server/gateway/v1/register'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
+/** Challenge period by network (seconds). */
+const CHALLENGE_PERIOD: Record<string, number> = {
+  'op-mainnet': 302_400,   // 3.5 days (post-Granite)
+  'op-sepolia': 302_400,   // same parameter on testnet
+}
+
 export interface Env {
   /** 'op-sepolia' | 'op-mainnet' */
   NETWORK: string
@@ -59,6 +65,8 @@ export interface Env {
   WORKER_EOA_PRIVATE_KEY?: string
   /** Comma-separated addresses allowed to call /v1/register */
   UPSTREAM_ALLOWED_SIGNERS?: string
+  /** Gateway Worker URL (used by /resolve-status to query proof status) */
+  GATEWAY_URL?: string
   /** CF KV namespace for address→label registry */
   REGISTRY?: KVNamespace
   /**
@@ -115,9 +123,10 @@ export default {
 
       // ── Public GET endpoints ──────────────────────────────────────────────
       if (request.method === 'GET') {
-        if (path === '/check-label')  { response = await handleCheckLabel(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
-        if (path === '/check-owner')  { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
-        if (path === '/lookup')       { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/check-label')    { response = await handleCheckLabel(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/check-owner')    { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/lookup')         { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/resolve-status') { response = await handleResolveStatus(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
@@ -210,6 +219,162 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
   return json({ found: true, name: fullName })
 }
 
+// ─── GET /resolve-status?name=alice.forest.aastar.eth ────────────────────
+// Returns whether the name is currently resolvable via ENS App (L1 proof mode)
+// and an estimated countdown if not.
+
+async function handleResolveStatus(url: URL, env: Env): Promise<Response> {
+  const name = url.searchParams.get('name')?.trim()
+  if (!name) return jsonError('Missing name param', 400)
+
+  const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+
+  // 1. Check if the name exists on L2
+  const pub = makePublicClient(env)
+  const l2Addr = env.L2_RECORDS_ADDRESS as Address
+  const node = namehash(name) as Hex
+
+  let l2Registered = false
+  try {
+    const owner = await pub.readContract({
+      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
+    })
+    l2Registered = (owner as string) !== '0x0000000000000000000000000000000000000000'
+  } catch {
+    return jsonError('L2 RPC unreachable', 503)
+  }
+
+  if (!l2Registered) {
+    return json({ name, registered: false, l1Resolvable: false })
+  }
+
+  // 2. Query gateway /proof-status for anchor state
+  const gatewayUrl = env.GATEWAY_URL
+  if (!gatewayUrl) {
+    // No gateway configured — return basic info with default estimate
+    const nowSec = Math.floor(Date.now() / 1000)
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: 'unknown',
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + challengePeriod,
+      detail: 'GATEWAY_URL not configured — cannot query anchor state',
+    })
+  }
+
+  try {
+    const proofRes = await fetch(`${gatewayUrl.replace(/\/$/, '')}/proof-status`)
+    if (!proofRes.ok) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      return json({
+        name,
+        registered: true,
+        l1Resolvable: false,
+        challengePeriodSeconds: challengePeriod,
+        estimatedResolvableAt: nowSec + challengePeriod,
+        detail: 'Gateway proof status unavailable',
+      })
+    }
+
+    const proof = await proofRes.json() as {
+      anchorL2Block?: string
+      currentL2Block?: string
+      blocksBehind?: string
+      challengePeriodSeconds?: number
+      proofMode?: boolean
+    }
+
+    if (!proof.proofMode) {
+      // Signature mode — always resolvable (no proof delay)
+      return json({ name, registered: true, l1Resolvable: true, mode: 'signature' })
+    }
+
+    const anchorBlock = BigInt(proof.anchorL2Block ?? '0')
+    const currentBlock = BigInt(proof.currentL2Block ?? '0')
+    const blocksBehind = currentBlock - anchorBlock
+
+    // If anchor is reasonably current (within ~1 hour / 1800 blocks), proofs work
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (blocksBehind <= 1800n) {
+      return json({
+        name,
+        registered: true,
+        l1Resolvable: true,
+        mode: 'proof',
+        anchorL2Block: anchorBlock.toString(),
+      })
+    }
+
+    // Anchor is stale — estimate when it will catch up
+    // For new records: challengePeriod from now (next game needs to include current block)
+    // For stale anchor: could be dispute game infrastructure issues
+    const estimatedDelaySec = Math.min(Number(blocksBehind) * 2, challengePeriod)
+
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: false,
+      mode: 'proof',
+      anchorL2Block: anchorBlock.toString(),
+      currentL2Block: currentBlock.toString(),
+      blocksBehind: blocksBehind.toString(),
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + estimatedDelaySec,
+      estimatedDelaySeconds: estimatedDelaySec,
+      detail: `Anchor covers L2 block ${anchorBlock}; current head is ${currentBlock}. Records written after block ${anchorBlock} are not yet provable on L1.`,
+    })
+  } catch {
+    const nowSec = Math.floor(Date.now() / 1000)
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: 'unknown',
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + challengePeriod,
+      detail: 'Could not reach gateway for proof status',
+    })
+  }
+}
+
+/**
+ * Build resolve time estimate for write operation responses.
+ * Returns partial JSON to merge into the response body.
+ */
+async function buildResolveEstimate(env: Env): Promise<Record<string, unknown>> {
+  const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  // Default: challengePeriod from now
+  const base = {
+    challengePeriodSeconds: challengePeriod,
+    estimatedL1ResolvableAt: nowSec + challengePeriod,
+  }
+
+  const gatewayUrl = env.GATEWAY_URL
+  if (!gatewayUrl) return base
+
+  try {
+    const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/proof-status`)
+    if (!res.ok) return base
+    const proof = await res.json() as { proofMode?: boolean; anchorL2Block?: string; currentL2Block?: string }
+    if (!proof.proofMode) return { estimatedL1ResolvableAt: nowSec, l1Mode: 'signature' }
+
+    const blocksBehind = BigInt(proof.currentL2Block ?? '0') - BigInt(proof.anchorL2Block ?? '0')
+    const delaySec = blocksBehind > 1800n
+      ? Math.min(Number(blocksBehind) * 2, challengePeriod)
+      : challengePeriod
+
+    return {
+      challengePeriodSeconds: challengePeriod,
+      estimatedL1ResolvableAt: nowSec + delaySec,
+      anchorL2Block: proof.anchorL2Block,
+    }
+  } catch {
+    return base
+  }
+}
+
 // ─── POST /v1/register — Upstream App (personal_sign) ────────────────────────
 
 async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Response> {
@@ -238,6 +403,10 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
     if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, result.name)
   }
 
+  if (result.ok) {
+    const resolveEstimate = await buildResolveEstimate(env)
+    return json({ ...result, ...resolveEstimate })
+  }
   return json(result)
 }
 
@@ -371,7 +540,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
     await Promise.all(kvWrites)
 
-    return json({ ok, action: 'register', txHash })
+    // Include estimated L1 resolve time so frontend can show countdown
+    const resolveEstimate = await buildResolveEstimate(env)
+    return json({ ok, action: 'register', txHash, ...resolveEstimate })
   }
 
   // ── /set-text ─────────────────────────────────────────────────────────────
