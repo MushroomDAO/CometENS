@@ -2,9 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import "./IRegistrarPlugin.sol";
 
 /// @title L2Records V3
 /// @notice Extends V2 functionality with ERC-721 subdomain ownership.
@@ -12,7 +9,7 @@ import "./IRegistrarPlugin.sol";
 ///         Transferring the NFT transfers subdomain ownership automatically.
 ///         V2 private mappings are reproduced here since Solidity does not expose private state
 ///         to child contracts; all V2 semantics are preserved verbatim.
-contract L2RecordsV3 is ERC721, ReentrancyGuard {
+contract L2RecordsV3 is ERC721 {
     address public owner;
 
     // node => coinType => address bytes
@@ -37,16 +34,6 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     /// @notice parentNode => registrar address => expiry timestamp (0 = no expiry)
     mapping(bytes32 => mapping(address => uint256)) public registrarExpiry;
 
-    // ─── V3: Plugin model ───────────────────────────────────────────────────────
-
-    /// @notice parentNode => active IRegistrarPlugin (address(0) = no plugin, use registrar auth)
-    mapping(bytes32 => IRegistrarPlugin) public registrarPlugin;
-
-    /// @notice Pull-payment escrow: address => claimable ETH from plugin fees.
-    ///         Using pull-payment prevents non-payable parentOwner contracts from
-    ///         bricking registrations (push ETH would revert the whole tx).
-    mapping(address => uint256) public pendingFees;
-
     // ─── Events ────────────────────────────────────────────────────────────────
 
     event AddrSet(bytes32 indexed node, uint256 coinType, bytes addr);
@@ -58,9 +45,6 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     event RegistrarAdded(bytes32 indexed parentNode, address indexed registrar, uint256 quota, uint256 expiry);
     event RegistrarRemoved(bytes32 indexed parentNode, address indexed registrar);
     event RegistrarQuotaUpdated(bytes32 indexed parentNode, address indexed registrar, uint256 newQuota);
-    event PluginSet(bytes32 indexed parentNode, address indexed plugin);
-    event FeeAccrued(address indexed recipient, uint256 amount);
-    event FeeWithdrawn(address indexed recipient, uint256 amount);
 
     // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -72,9 +56,6 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     error QuotaExceeded();
     error RegistrarExpired();
     error LabelMismatch();
-    error PluginRejected();
-    error InsufficientFee();
-    error InvalidPlugin();
 
     // ─── Modifiers ───────────────────────────────────────────────────────────────
 
@@ -106,19 +87,6 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         if (newOwner == address(0)) revert ZeroAddress();
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
-    }
-
-    // ─── Pull-payment fee withdrawal ──────────────────────────────────────────
-
-    /// @notice Withdraw accrued plugin fees for msg.sender.
-    ///         Called by parentNode NFT owners after registrations with a fee plugin.
-    function withdrawFees() external {
-        uint256 amount = pendingFees[msg.sender];
-        if (amount == 0) return;
-        pendingFees[msg.sender] = 0;
-        (bool ok,) = msg.sender.call{value: amount}("");
-        require(ok, "withdraw failed");
-        emit FeeWithdrawn(msg.sender, amount);
     }
 
     // ─── V2: Registrar Management (Owner Only) ──────────────────────────────────
@@ -182,68 +150,29 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         if (expiry != 0 && block.timestamp > expiry) isActive = false;
     }
 
-    // ─── V3: Plugin Management ──────────────────────────────────────────────────
-
-    /// @notice Attach a registrar plugin to a parent domain.
-    ///         Only the parent domain's NFT owner (or the contract owner) may call this.
-    ///         Pass plugin=address(0) to remove an existing plugin.
-    /// @param parentNode The namehash of the parent domain.
-    /// @param plugin     The IRegistrarPlugin implementation to attach.
-    function setPlugin(bytes32 parentNode, IRegistrarPlugin plugin) external {
-        // Contract owner may set a plugin on any parentNode.
-        // Otherwise, the caller must own the parentNode NFT.
-        if (msg.sender != owner) {
-            address parentOwner = _ownerOf(uint256(parentNode));
-            if (parentOwner == address(0) || parentOwner != msg.sender) revert Unauthorized();
-        }
-        // If a non-zero plugin address is provided, verify it implements IRegistrarPlugin.
-        // Code-size check guards against EOAs; the ERC-165 call guards against incompatible contracts.
-        // Using type(IRegistrarPlugin).interfaceId is the canonical Solidity approach — it equals
-        // the XOR of selectors defined directly in IRegistrarPlugin (canRegister ^ registrationFee),
-        // excluding inherited IERC165 functions. This avoids manual XOR and is consistent with
-        // how plugin implementations should compute their own interfaceId.
-        if (address(plugin) != address(0)) {
-            uint256 codeSize;
-            assembly { codeSize := extcodesize(plugin) }
-            if (codeSize == 0) revert InvalidPlugin();
-            try IERC165(address(plugin)).supportsInterface(type(IRegistrarPlugin).interfaceId) returns (bool supported) {
-                if (!supported) revert InvalidPlugin();
-            } catch {
-                revert InvalidPlugin();
-            }
-        }
-        registrarPlugin[parentNode] = plugin;
-        emit PluginSet(parentNode, address(plugin));
-    }
-
     // ─── Subdomain Registration ─────────────────────────────────────────────────
 
     /// @notice Register a subdomain (Owner or authorized Registrar).
-    ///         If a plugin is set on parentNode, the plugin's canRegister() is consulted.
     function setSubnodeOwner(
         bytes32 parentNode,
         bytes32 labelhash,
         address newOwner,
         string calldata label
-    ) external nonReentrant onlyOwnerOrRegistrar(parentNode) {
+    ) external onlyOwnerOrRegistrar(parentNode) {
         _checkRegistrarQuota(parentNode);
-        _checkPlugin(parentNode, label, newOwner);
         _registerNode(parentNode, labelhash, newOwner, label);
     }
 
     /// @notice Atomically register a subdomain and set its ETH address record.
-    ///         If a plugin is set on parentNode, plugin fees and canRegister() are enforced.
-    ///         Any ETH in excess of the plugin fee is forwarded to the parentNode NFT owner.
     function registerSubnode(
         bytes32 parentNode,
         bytes32 labelhash,
         address newOwner,
         string calldata label,
         bytes calldata addrBytes
-    ) external payable nonReentrant onlyOwnerOrRegistrar(parentNode) {
+    ) external onlyOwnerOrRegistrar(parentNode) {
         if (addrBytes.length != 20) revert InvalidAddrBytes();
         _checkRegistrarQuota(parentNode);
-        _checkPluginWithFee(parentNode, label, newOwner);
         bytes32 node = _registerNode(parentNode, labelhash, newOwner, label);
         _addrs[node][60] = addrBytes;
         emit AddrSet(node, 60, addrBytes);
@@ -257,50 +186,6 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
                 if (quota == 0) revert QuotaExceeded();
                 registrarQuota[parentNode][msg.sender] = quota - 1;
             }
-        }
-    }
-
-    /// @notice Internal: consult the plugin's canRegister (no fee enforcement).
-    ///         Used by setSubnodeOwner where msg.value is not available.
-    function _checkPlugin(bytes32 parentNode, string calldata label, address requester) internal view {
-        IRegistrarPlugin plugin = registrarPlugin[parentNode];
-        if (address(plugin) == address(0)) return;
-        if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
-    }
-
-    error UnexpectedValue();
-
-    /// @notice Internal: consult the plugin's canRegister and enforce fee.
-    ///         Reverts if msg.value is non-zero but no fee is required (prevents ETH lock-up).
-    ///         Excess ETH above the required fee is refunded to the caller.
-    function _checkPluginWithFee(bytes32 parentNode, string calldata label, address requester) internal {
-        IRegistrarPlugin plugin = registrarPlugin[parentNode];
-        if (address(plugin) == address(0)) {
-            // No plugin: no fee expected. Reject any ETH to prevent lock-up.
-            if (msg.value > 0) revert UnexpectedValue();
-            return;
-        }
-        if (!plugin.canRegister(parentNode, label, requester)) revert PluginRejected();
-        uint256 fee = plugin.registrationFee(parentNode, label, requester);
-        if (fee == 0) {
-            // Plugin allows free registration: reject any ETH to prevent lock-up.
-            if (msg.value > 0) revert UnexpectedValue();
-            return;
-        }
-        if (msg.value < fee) revert InsufficientFee();
-        // Pull-payment: accrue fee to the parentNode NFT owner rather than pushing ETH.
-        // This avoids reverting when the parentOwner is a non-payable contract, which would
-        // otherwise brick all registrations under that domain permanently.
-        address parentOwner = _ownerOf(uint256(parentNode));
-        if (parentOwner != address(0)) {
-            pendingFees[parentOwner] += fee;
-            emit FeeAccrued(parentOwner, fee);
-        }
-        // Refund excess ETH to the caller immediately.
-        uint256 excess = msg.value - fee;
-        if (excess > 0) {
-            (bool ok,) = msg.sender.call{value: excess}("");
-            require(ok, "refund failed");
         }
     }
 
@@ -321,7 +206,7 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
     /// @param node The namehash (= tokenId) of the subdomain to transfer.
     /// @param from Current owner — must match ownerOf(tokenId) or call reverts.
     /// @param to   New owner.
-    function transferSubnodeByGateway(bytes32 node, address from, address to) external onlyOwner nonReentrant {
+    function transferSubnodeByGateway(bytes32 node, address from, address to) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         _transfer(from, to, uint256(node));
     }

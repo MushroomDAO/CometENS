@@ -3,10 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-[[migrations]]
-tag = "v1"
-new_classes = ["NonceStore"]
-
 # ─── Testnet (OP Sepolia) ─────────────────────────────────────────────────────
 # Deploy: wrangler deploy --env testnet
 # URL:    https://cometens-api.jhfnetboy.workers.dev
@@ -34,10 +30,6 @@ id = "a8ec4846317c430d81c5fd7816bac4d6"
 [[env.testnet.kv_namespaces]]
 binding = "RECORD_CACHE"
 id = "6147f1fe8d5141389e10475cab1f6647"
-
-[[env.testnet.durable_objects.bindings]]
-name = "NONCE_STORE"
-class_name = "NonceStore"
 
 [[env.testnet.analytics_engine_datasets]]
 binding = "ANALYTICS"
