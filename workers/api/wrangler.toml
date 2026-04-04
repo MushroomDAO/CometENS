@@ -21,7 +21,7 @@ name = "cometens-api"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
-ROOT_DOMAIN = "aastar.eth"
+ROOT_DOMAIN = "forest.aastar.eth"
 
 [[env.testnet.kv_namespaces]]
 binding = "REGISTRY"

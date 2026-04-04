@@ -339,18 +339,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    // Authorization: verify signer is a registrar or the contract owner (check BEFORE consuming nonce)
+    // Self-service model: any wallet can register their own subdomain.
+    // The Worker EOA (WORKER_EOA_PRIVATE_KEY) is the on-chain registrar and
+    // submits the L2 tx — the signer just proves intent via EIP-712.
     const parentNode = namehash(message.parent) as Hex
-    const [contractOwner, isReg] = await Promise.all([
-      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' }),
-      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'isRegistrar', args: [parentNode, from as Address] }),
-    ])
-    if (
-      (contractOwner as string).toLowerCase() !== from.toLowerCase() &&
-      !isReg
-    ) {
-      throw Object.assign(new Error('Signer is not a registrar or contract owner'), { status: 403 })
-    }
 
     const lh = labelhash(message.label) as Hex
     const node = namehash(`${message.label}.${message.parent}`) as Hex

@@ -302,15 +302,18 @@ async function register(): Promise<void> {
     registerBtn.textContent = 'Checking…'
   }
 
+  const parentEl = byId<HTMLInputElement>('parentInput')
+  const parent = (parentEl?.value.trim() || config.rootDomain).toLowerCase()
+
   try {
     // Pre-flight: check availability before asking MetaMask to sign
     const checkRes = await fetch(
-      `${config.apiUrl}/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(config.rootDomain)}`
+      `${config.apiUrl}/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(parent)}`
     )
     if (checkRes.ok) {
       const checkJson = await checkRes.json() as { available: boolean; owner?: string }
       if (!checkJson.available) {
-        throw new Error(`"${label}.${config.rootDomain}" is already registered to ${checkJson.owner ?? 'another address'}.`)
+        throw new Error(`"${label}.${parent}" is already registered to ${checkJson.owner ?? 'another address'}.`)
       }
     }
 
@@ -326,7 +329,7 @@ async function register(): Promise<void> {
 
     const domain = buildDomain(chain.id, config.l2RecordsAddress)
     const message = {
-      parent: config.rootDomain,
+      parent,
       label,
       owner: connectedAddress,
       nonce,
@@ -363,15 +366,10 @@ async function register(): Promise<void> {
     const json = await response.json()
 
     if (!response.ok) {
-      if (json.code === 'ALREADY_REGISTERED' && connectedAddress) {
-        const existing = getRegistrationFor(connectedAddress)
-        const name = existing?.fullName ?? `a subdomain under ${config.rootDomain}`
-        throw new Error(`This wallet already has ${name}. Use the manage page to update records.`)
-      }
       throw new Error(json.error ?? `Server error ${response.status}`)
     }
 
-    const fullName = `${label}.${config.rootDomain}`
+    const fullName = `${label}.${parent}`
     const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
     saveRegistration(connectedAddress!, label, fullName)
     setResult(`Registered: ${fullName}${txInfo}`, 'success')
@@ -545,15 +543,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })
 
-  // Live preview
+  // Initialise parent input default
+  const parentInputEl = byId<HTMLInputElement>('parentInput')
+  if (parentInputEl && !parentInputEl.value) {
+    parentInputEl.value = config.rootDomain
+  }
+
+  // Live preview — update when label or parent changes
   const labelInput = byId<HTMLInputElement>('labelInput')
   const previewEl = byId('preview')
-  labelInput?.addEventListener('input', () => {
-    const val = labelInput.value.trim()
-    if (previewEl) {
-      previewEl.textContent = val ? `${val}.${config.rootDomain}` : '\u00a0'
-    }
-  })
+  function refreshPreview() {
+    const val = labelInput?.value.trim() ?? ''
+    const par = parentInputEl?.value.trim() || config.rootDomain
+    if (previewEl) previewEl.textContent = val ? `${val}.${par}` : '\u00a0'
+  }
+  labelInput?.addEventListener('input', refreshPreview)
+  parentInputEl?.addEventListener('input', refreshPreview)
 
   // Connect button
   const connectBtn = byId<HTMLButtonElement>('connectBtn')
