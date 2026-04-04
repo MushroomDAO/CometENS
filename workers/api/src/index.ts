@@ -184,25 +184,30 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
   if (!address || !isAddress(address)) return jsonError('Missing or invalid address param', 400)
 
   const kvKey = `reg:${address}`
-  const label = env.REGISTRY ? await env.REGISTRY.get(kvKey) : null
+  // Value is the full qualified name (e.g. "alice.forest.aastar.eth")
+  // Legacy entries stored only label — detect by absence of a '.' and reconstruct with ROOT_DOMAIN.
+  const stored = env.REGISTRY ? await env.REGISTRY.get(kvKey) : null
 
-  if (!label) return json({ found: false })
+  if (!stored) return json({ found: false })
 
-  // Verify the cached entry still exists on-chain (guards against stale cache)
+  const fullName = stored.includes('.') ? stored : `${stored}.${env.ROOT_DOMAIN}`
+
+  // Verify the cached entry still exists on-chain using subnodeOwner(node).
+  // This replaces the old primaryNode check and works for any parent domain.
   try {
     const pub = makePublicClient(env)
     const l2Addr = env.L2_RECORDS_ADDRESS as Address
-    const existingNode = await pub.readContract({
-      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [address as Address],
+    const node = namehash(fullName) as Hex
+    const existingOwner = await pub.readContract({
+      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
     })
-    if (existingNode === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    if ((existingOwner as string) === '0x0000000000000000000000000000000000000000') {
       if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
       return json({ found: false })
     }
   } catch { /* chain unreachable — fall through to return cached value */ }
 
-  const fullName = `${label}.${env.ROOT_DOMAIN}`
-  return json({ found: true, label, fullName })
+  return json({ found: true, name: fullName })
 }
 
 // ─── POST /v1/register — Upstream App (personal_sign) ────────────────────────
@@ -227,11 +232,10 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
 
   const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer)
 
-  // Persist to KV registry on success
+  // Persist full qualified name to KV registry on success
   if (result.ok && result.name && env.REGISTRY) {
-    const label = result.name.split('.')[0]
     const ownerAddr = (payload.owner as string ?? '').toLowerCase()
-    if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, label)
+    if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, result.name)
   }
 
   return json(result)
@@ -308,7 +312,14 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (typeof msg.label !== 'string' || !msg.label) throw badReq('Invalid label')
     if (!isAddress(msg.owner)) throw badReq('Invalid owner')
 
-    // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤64 chars).
+    // Validate parent is a well-formed ENS name: dot-separated lowercase labels, each 1–63 chars.
+    // Required because parent is stored in KV and returned verbatim by /lookup — unvalidated input
+    // could store XSS/injection payloads that are returned to clients.
+    const parent = msg.parent as string
+    if (parent.length > 253) throw badReq('parent too long')
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
+
+    // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤63 chars).
     // Reject if not normalized — prevents signature mismatch from server-side normalization.
     const label = msg.label as string
     const normalizedLabel = label.trim().toLowerCase()
@@ -317,7 +328,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
 
     const message = {
-      parent: msg.parent as string,
+      parent,
       label: normalizedLabel,
       owner: msg.owner as Address,
       nonce: asBigInt(msg.nonce, 'nonce'),
@@ -349,21 +360,22 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       return jsonError(`Label "${message.label}" is already registered`, 409, 'LABEL_TAKEN')
     }
 
-    // Check the owner's primary node, not the registrar's (signer != owner in registrar flow)
-    const existingPrimary = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [message.owner] })
-    if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-      return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
-    }
+    // D6: No per-wallet primaryNode limit — a wallet may hold subdomains under
+    // multiple parent domains (forest.aastar.eth, game.aastar.eth, etc.).
+    // Chain-level uniqueness (subnodeOwner check above) is the real guard.
+
     await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
     const txHash = await writer.registerSubnode(parentNode, lh, message.owner, message.label, addrBytes)
 
-    // Persist to KV caches (fire-and-forget; don't block response)
+    // Persist to KV caches (fire-and-forget; don't block response).
+    // Store the full qualified name so /lookup works across multi-root domains.
     const ownerLower = message.owner.toLowerCase()
+    const fullName = `${message.label}.${message.parent}`
     const kvWrites: Promise<void>[] = []
-    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, message.label))
+    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, fullName))
     if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
     await Promise.all(kvWrites)
 
