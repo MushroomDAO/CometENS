@@ -8,10 +8,9 @@ compatibility_flags = ["nodejs_compat"]
 # URL:    https://cometens-gateway.jhfnetboy.workers.dev
 # 
 # Secrets (per-env, use `wrangler secret put`):
-#   OP_RPC_URL                 — Optimism RPC endpoint
-#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
-#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
-#   REGISTRATION_SECRET        — Password for registration auth
+#   OP_RPC_URL                 — Optimism RPC endpoint (OP Sepolia)
+#   ETH_RPC_URL                — Ethereum L1 RPC (Sepolia) — required for proof mode
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses (signature mode only)
 #
 [env.testnet]
 name = "cometens-gateway"
@@ -19,7 +18,8 @@ name = "cometens-gateway"
 NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
 ROOT_DOMAIN = "aastar.eth"
-# PROOF_MODE = "true"  # C2 stub — ALSO requires DEV_MODE=true; both must be set to activate
+PROOF_MODE = "true"  # C4: Bedrock storage proof mode — requires ETH_RPC_URL secret
+# ALLOWED_SENDERS = "0x..."  # Optional: comma-separated OPResolver addresses; rejects other senders
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
@@ -37,10 +37,9 @@ dataset = "cometens_gateway"
 #         (or custom domain — uncomment routes below)
 # 
 # Secrets (per-env, use `wrangler secret put`):
-#   OP_RPC_URL                 — Optimism RPC endpoint
-#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
-#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
-#   REGISTRATION_SECRET        — Password for registration auth
+#   OP_RPC_URL                 — Optimism RPC endpoint (OP Mainnet)
+#   ETH_RPC_URL                — Ethereum L1 RPC (Mainnet) — required for proof mode
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses (signature mode only)
 #
 [env.production]
 name = "cometens-gateway-production"
@@ -48,7 +47,7 @@ name = "cometens-gateway-production"
 NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
-# PROOF_MODE = "true"  # C2 stub — ALSO requires DEV_MODE=true; both must be set to activate
+# PROOF_MODE = "true"  # enable after mainnet OPResolver deployment
 
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"
