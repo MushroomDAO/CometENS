@@ -1,14 +1,14 @@
 # CometENS 开发路线图
 
-## 当前状态（2026-04-03 / v0.4.0）
+## 当前状态（2026-04-04 / v0.5.0）
 
 | 里程碑 | 名称 | 状态 | Tag |
 |--------|------|------|-----|
 | **A** | 可信签名 MVP | ✅ **已完成** | v0.3.0 |
 | **A+** | Production API Server + Security Hardening | ✅ **已完成** | v0.4.0 |
-| B | Name Wrapper + NFT 子域 | 🟡 进行中 | — |
-| C | 状态证明（ENS V2 标准） | 📋 计划中 | — |
-| D | 生产强化与治理 | 📋 计划中 | — |
+| **B** | Name Wrapper + NFT 子域 | ✅ **已完成（B1/B2/B4）** | v0.5.0 |
+| **C** | 状态证明（ENS V2 标准） | 🟡 **脚手架完成（C1/C2）** | v0.5.0 |
+| **D** | 生产强化与治理 | 🟡 **进行中（D1/D2/D3 ✅，D4 deferred）** | v0.5.0 |
 | E | .box 写路径 | ⏳ 待官方开放 | — |
 
 ---
@@ -66,47 +66,54 @@
 
 ---
 
-## 里程碑 B：Name Wrapper + NFT 子域（进行中）
+## 里程碑 B：Name Wrapper + NFT 子域 ✅（v0.5.0）
 
 **目标**：子域名成为真正的 ERC-721 NFT，可转让、可交易；Registrar 可插拔插件架构。
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| B1 | L2RecordsV3 合约：ERC-721 子域所有权（tokenId = uint256(node)） | 🔴 P0 | pending |
-| B2 | Registrar 插件接口：IRegistrarPlugin（定价/白名单/Token Gate） | 🔴 P0 | pending |
-| B4 | 前端适配：NFT 展示 + 转让 UI + /transfer-subnode API 端点 | 🟡 P1 | pending |
+| B1 | L2RecordsV3 合约：ERC-721 子域所有权（tokenId = uint256(node)） | 🔴 P0 | ✅ 完成 |
+| B2 | Registrar 插件接口：IRegistrarPlugin + FreePlugin/WhitelistPlugin/FlatFeePlugin | 🔴 P0 | ✅ 完成 |
+| B4 | 前端适配：NFT 转让 UI + /transfer-subnode API 端点 | 🟡 P1 | ✅ 完成 |
+
+**已完成合约**：`contracts/src/L2RecordsV3.sol`、`contracts/src/IRegistrarPlugin.sol`、`contracts/src/plugins/`
+
+**遗留**：
+- B3（L2Records → V3 数据迁移脚本）— 未实现，主网部署前需要
+- NFT marketplace 集成、链上 metadata — 未计划
 
 ---
 
-## 里程碑 C：状态证明（ENS V2 标准路径）
+## 里程碑 C：状态证明（ENS V2 标准路径）🟡 脚手架完成
 
 **目标**：用 Bedrock 状态证明替代 Gateway 签名，实现信任最小化。
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| C1 | OPResolver 合约（替代 OffchainResolver，实现 EVMFetcher 接口） | 🔴 P0 | pending |
-| C2 | Gateway Worker 支持证明模式（返回 Merkle storage proof） | 🔴 P0 | pending |
-| C3 | L1 链上验证 OP 状态根（无需信任 Gateway 私钥）| 🟡 P1 | pending |
-| C4 | 签名模式与证明模式并存（PROOF_MODE env 切换）| 🟡 P1 | pending |
+| C1 | OPResolver 合约（替代 OffchainResolver，`verifyProofs` flag） | 🔴 P0 | ✅ 完成（脚手架） |
+| C2 | Gateway Worker 支持证明模式（PROOF_MODE + DEV_MODE 双 guard，返回 501 stub） | 🔴 P0 | ✅ 完成（stub） |
+| C3 | L1 链上验证 OP 状态根（Bedrock Merkle proof 实际验证）| 🟡 P1 | 📋 待实现 |
+| C4 | Gateway 实际返回 eth_getProof 结果，OPResolver 链上验证 | 🟡 P1 | 📋 待实现 |
 
 **参考**：`vendor/unruggable-gateways/`、`eval/unruggable-gateways/`
 
-**背景**：签名模式需信任 Gateway 私钥；证明模式任何人可独立验证，是 ENS V2 的标准方向。
+**背景**：C1/C2 脚手架已就位，PROOF_MODE 可安全切换；C3/C4 是真正的去信任化实现，是 ENS V2 的标准方向。
 
 ---
 
-## 里程碑 D：生产强化与治理
+## 里程碑 D：生产强化与治理 🟡 进行中
 
 **目标**：达到生产级安全与可运维标准，解决 v0.4.0 遗留问题。
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| D1 | Durable Objects nonce store（替代 KV TOCTOU 竞态）| 🔴 P0 | pending |
-| D2 | Rate limiting（CF Rate Limiting API，按 IP + from 地址）| 🔴 P0 | pending |
-| D3 | 监控告警（CF Analytics Engine + 错误率告警）| 🟡 P1 | pending |
-| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| 🔴 P0 | pending |
-| D5 | Worker EOA 密钥轮换方案 | 🟡 P1 | pending |
-| D6 | 多实例 / 多根域名支持 | 🟢 P2 | pending |
+| D1 | Durable Objects nonce store（消除 KV TOCTOU 竞态，`blockConcurrencyWhile` 原子化）| 🔴 P0 | ✅ 完成 |
+| D2 | Rate limiting（KV 滑动窗口，写 10/min，v1 60/min，best-effort）| 🔴 P0 | ✅ 完成（best-effort） |
+| D3 | 监控告警（CF Analytics Engine + `/health` timestamp）| 🟡 P1 | ✅ 完成 |
+| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| 🔴 P0 | ⏳ deferred |
+| D5 | Worker EOA 密钥轮换方案 | 🟡 P1 | 📋 待实现 |
+| D6 | 多实例 / 多根域名支持 | 🟢 P2 | 📋 待实现 |
+| D7 | Rate limiting 升级（CF 原生 Rate Limiting 或 DO per key，解决多 PoP 并发绕过）| 🟡 P1 | 📋 待实现 |
 
 ---
 
