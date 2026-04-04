@@ -34,6 +34,7 @@ const OP_RPC     = process.env.OP_SEPOLIA_RPC_URL ?? ''
 const L2_ADDR    = (process.env.OP_L2_RECORDS_ADDRESS ?? '') as Address
 const L1_RPC     = process.env.SEPOLIA_RPC_URL ?? ''
 const L1_ADDR    = (process.env.L1_OFFCHAIN_RESOLVER_ADDRESS ?? '') as Address
+const L1_OP_RESOLVER = (process.env.L1_OP_RESOLVER_ADDRESS ?? '') as Address
 const PRIVATE_KEY = (process.env.PRIVATE_KEY_JASON ?? '') as Hex
 const SIGNER_PK   = (process.env.PRIVATE_KEY_SUPPLIER ?? PRIVATE_KEY) as Hex
 
@@ -237,10 +238,12 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
-  it('aastar.eth resolver on Sepolia is set to our OffchainResolver', async () => {
+  it('aastar.eth resolver on Sepolia is set to our OPResolver (C3)', async () => {
     const resolver = await l1Pub.getEnsResolver({ name: ENS_NAME })
     console.log('aastar.eth resolver:', resolver)
-    expect(resolver?.toLowerCase()).toBe(L1_ADDR.toLowerCase())
+    // C3': resolver was updated to OPResolver on 2026-04-04
+    const expected = L1_OP_RESOLVER || L1_ADDR
+    expect(resolver?.toLowerCase()).toBe(expected.toLowerCase())
   }, 30_000)
 
   it('sets ETH addr record for aastar.eth node on L2Records', async () => {
@@ -301,4 +304,19 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     console.log('resolveWithProof for aastar.eth:', decoded)
     expect((decoded as string).toLowerCase()).toBe(deployer.address.toLowerCase())
   }, 60_000)
+})
+
+// ─── D6: forest.aastar.eth setup ─────────────────────────────────────────────
+
+describe.skipIf(!L1_RPC || !L1_OP_RESOLVER)('Integration: forest.aastar.eth setup', () => {
+  let l1Pub: ReturnType<typeof createPublicClient>
+
+  beforeAll(() => {
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
+  })
+
+  it('forest.aastar.eth resolver on Sepolia is set to OPResolver', async () => {
+    const resolver = await l1Pub.getEnsResolver({ name: 'forest.aastar.eth' })
+    expect(resolver?.toLowerCase()).toBe(L1_OP_RESOLVER.toLowerCase())
+  }, 30_000)
 })
