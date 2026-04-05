@@ -65,8 +65,10 @@ export interface Env {
   NETWORK: string
   /** L2RecordsV2 contract address */
   L2_RECORDS_ADDRESS: string
-  /** e.g. 'aastar.eth' */
+  /** Primary root domain, e.g. 'forest.aastar.eth' */
   ROOT_DOMAIN: string
+  /** Comma-separated list of all supported root domains, e.g. 'forest.aastar.eth,game.aastar.eth' */
+  ROOT_DOMAINS?: string
   /** Optimism RPC URL */
   OP_RPC_URL: string
   /** EOA private key that submits L2 transactions (wrangler secret) */
@@ -122,7 +124,8 @@ export default {
           status: 'ok',
           network: env.NETWORK,
           rootDomain: env.ROOT_DOMAIN,
-          version: 'v0.5.0',
+          rootDomains: getRootDomains(env),
+          version: 'v0.6.1',
           timestamp: Math.floor(Date.now() / 1000),
         })
         trackEvent(env.ANALYTICS, path, response.status)
@@ -135,6 +138,7 @@ export default {
         if (path === '/check-owner')    { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/lookup')         { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/resolve-status') { response = await handleResolveStatus(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/root-domains')   { response = json({ domains: getRootDomains(env) }); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
@@ -195,36 +199,63 @@ async function handleCheckOwner(url: URL, env: Env): Promise<Response> {
 }
 
 // ─── GET /lookup?address=0x... ───────────────────────────────────────────────
+// Returns all registered names for a given address across all root domains.
+// KV stores: reg:{address} → JSON array of full names (e.g. ["alice.forest.aastar.eth","alice.game.aastar.eth"])
+// Legacy entries (single string) are auto-migrated on read.
 
 async function handleLookup(url: URL, env: Env): Promise<Response> {
   const address = url.searchParams.get('address')?.toLowerCase()
   if (!address || !isAddress(address)) return jsonError('Missing or invalid address param', 400)
 
   const kvKey = `reg:${address}`
-  // Value is the full qualified name (e.g. "alice.forest.aastar.eth")
-  // Legacy entries stored only label — detect by absence of a '.' and reconstruct with ROOT_DOMAIN.
   const stored = env.REGISTRY ? await env.REGISTRY.get(kvKey) : null
 
-  if (!stored) return json({ found: false })
+  if (!stored) return json({ found: false, names: [] })
 
-  const fullName = stored.includes('.') ? stored : `${stored}.${env.ROOT_DOMAIN}`
-
-  // Verify the cached entry still exists on-chain using subnodeOwner(node).
-  // This replaces the old primaryNode check and works for any parent domain.
+  // Parse stored value: JSON array (new format) or plain string (legacy format)
+  let names: string[]
   try {
-    const pub = makePublicClient(env)
-    const l2Addr = env.L2_RECORDS_ADDRESS as Address
-    const node = namehash(fullName) as Hex
-    const existingOwner = await pub.readContract({
-      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
-    })
-    if ((existingOwner as string) === '0x0000000000000000000000000000000000000000') {
-      if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
-      return json({ found: false })
-    }
-  } catch { /* chain unreachable — fall through to return cached value */ }
+    const parsed = JSON.parse(stored)
+    names = Array.isArray(parsed) ? parsed : [stored]
+  } catch {
+    // Legacy: plain string — either "alice.forest.aastar.eth" or just "alice"
+    const fullName = stored.includes('.') ? stored : `${stored}.${env.ROOT_DOMAIN}`
+    names = [fullName]
+  }
 
-  return json({ found: true, name: fullName })
+  // Verify each name on-chain; remove stale entries
+  const pub = makePublicClient(env)
+  const l2Addr = env.L2_RECORDS_ADDRESS as Address
+  const verified: string[] = []
+
+  for (const name of names) {
+    try {
+      const node = namehash(name) as Hex
+      const owner = await pub.readContract({
+        address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
+      })
+      if ((owner as string) !== '0x0000000000000000000000000000000000000000') {
+        verified.push(name)
+      }
+    } catch {
+      // Chain unreachable — keep cached entry
+      verified.push(name)
+    }
+  }
+
+  // Update KV if stale entries were removed
+  if (verified.length !== names.length && env.REGISTRY) {
+    if (verified.length === 0) {
+      await env.REGISTRY.delete(kvKey)
+    } else {
+      await env.REGISTRY.put(kvKey, JSON.stringify(verified))
+    }
+  }
+
+  if (verified.length === 0) return json({ found: false, names: [] })
+
+  // Backward compatible: `name` = first entry, `names` = all entries
+  return json({ found: true, name: verified[0], names: verified })
 }
 
 // ─── GET /resolve-status?name=alice.forest.aastar.eth ────────────────────
@@ -408,7 +439,7 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
   // Persist full qualified name to KV registry on success
   if (result.ok && result.name && env.REGISTRY) {
     const ownerAddr = (payload.owner as string ?? '').toLowerCase()
-    if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, result.name)
+    if (ownerAddr) await registryAppendName(env.REGISTRY, ownerAddr, result.name)
   }
 
   if (result.ok) {
@@ -544,7 +575,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ownerLower = message.owner.toLowerCase()
     const fullName = `${message.label}.${message.parent}`
     const kvWrites: Promise<void>[] = []
-    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, fullName))
+    if (env.REGISTRY) kvWrites.push(registryAppendName(env.REGISTRY, ownerLower, fullName))
     if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner, { expirationTtl: RECORD_CACHE_TTL }))
     await Promise.all(kvWrites)
 
@@ -745,6 +776,43 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Append a registered name to the KV registry for a given address.
+ * Stores as JSON array to support multiple names per address.
+ */
+async function registryAppendName(kv: KVNamespace, address: string, fullName: string): Promise<void> {
+  const key = `reg:${address.toLowerCase()}`
+  const existing = await kv.get(key)
+
+  let names: string[]
+  if (!existing) {
+    names = []
+  } else {
+    try {
+      const parsed = JSON.parse(existing)
+      names = Array.isArray(parsed) ? parsed : [existing]
+    } catch {
+      // Legacy plain string
+      names = [existing]
+    }
+  }
+
+  // Don't add duplicates
+  if (!names.includes(fullName)) {
+    names.push(fullName)
+  }
+
+  await kv.put(key, JSON.stringify(names))
+}
+
+/** Returns all configured root domains. Falls back to ROOT_DOMAIN if ROOT_DOMAINS is not set. */
+function getRootDomains(env: Env): string[] {
+  if (env.ROOT_DOMAINS) {
+    return env.ROOT_DOMAINS.split(',').map(d => d.trim()).filter(Boolean)
+  }
+  return env.ROOT_DOMAIN ? [env.ROOT_DOMAIN] : []
+}
 
 function getChain(env: Env) {
   return env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia

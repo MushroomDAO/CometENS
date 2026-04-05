@@ -22,6 +22,7 @@ name = "cometens-api"
 NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
 ROOT_DOMAIN = "forest.aastar.eth"
+ROOT_DOMAINS = "forest.aastar.eth,game.aastar.eth"
 GATEWAY_URL = "https://cometens-gateway.jhfnetboy.workers.dev"
 
 [[env.testnet.kv_namespaces]]

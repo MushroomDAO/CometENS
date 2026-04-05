@@ -302,7 +302,7 @@ async function register(): Promise<void> {
     registerBtn.textContent = 'Checking…'
   }
 
-  const parentEl = byId<HTMLInputElement>('parentInput')
+  const parentEl = byId<HTMLSelectElement>('parentSelect')
   const parent = (parentEl?.value.trim() || config.rootDomain).toLowerCase()
 
   try {
@@ -654,22 +654,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })
 
-  // Initialise parent input default
-  const parentInputEl = byId<HTMLInputElement>('parentInput')
-  if (parentInputEl && !parentInputEl.value) {
-    parentInputEl.value = config.rootDomain
+  // Populate parent domain dropdown
+  const parentSelectEl = byId<HTMLSelectElement>('parentSelect')
+  async function loadRootDomains() {
+    if (!parentSelectEl) return
+    try {
+      const res = await fetch(`${config.apiUrl}/root-domains`)
+      if (res.ok) {
+        const data = await res.json() as { domains: string[] }
+        if (data.domains?.length) {
+          parentSelectEl.innerHTML = ''
+          for (const d of data.domains) {
+            const opt = document.createElement('option')
+            opt.value = d
+            opt.textContent = d
+            parentSelectEl.appendChild(opt)
+          }
+          refreshPreview()
+          return
+        }
+      }
+    } catch { /* fall through */ }
+    // Fallback: use config.rootDomain
+    parentSelectEl.innerHTML = ''
+    const opt = document.createElement('option')
+    opt.value = config.rootDomain
+    opt.textContent = config.rootDomain
+    parentSelectEl.appendChild(opt)
+    refreshPreview()
   }
+  loadRootDomains()
 
   // Live preview — update when label or parent changes
   const labelInput = byId<HTMLInputElement>('labelInput')
   const previewEl = byId('preview')
   function refreshPreview() {
     const val = labelInput?.value.trim() ?? ''
-    const par = parentInputEl?.value.trim() || config.rootDomain
+    const par = parentSelectEl?.value.trim() || config.rootDomain
     if (previewEl) previewEl.textContent = val ? `${val}.${par}` : '\u00a0'
   }
   labelInput?.addEventListener('input', refreshPreview)
-  parentInputEl?.addEventListener('input', refreshPreview)
+  parentSelectEl?.addEventListener('change', refreshPreview)
 
   // Connect button
   const connectBtn = byId<HTMLButtonElement>('connectBtn')
