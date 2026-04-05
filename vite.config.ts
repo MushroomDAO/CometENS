@@ -17,4 +17,15 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main:     'index.html',
+        register: 'register.html',
+        admin:    'admin.html',
+        box:      'box.html',
+        apidocs:  'api-docs.html',
+      },
+    },
+  },
 })

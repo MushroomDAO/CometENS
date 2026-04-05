@@ -302,15 +302,18 @@ async function register(): Promise<void> {
     registerBtn.textContent = 'Checking…'
   }
 
+  const parentEl = byId<HTMLInputElement>('parentInput')
+  const parent = (parentEl?.value.trim() || config.rootDomain).toLowerCase()
+
   try {
     // Pre-flight: check availability before asking MetaMask to sign
     const checkRes = await fetch(
-      `${config.apiUrl}/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(config.rootDomain)}`
+      `${config.apiUrl}/check-label?label=${encodeURIComponent(label)}&parent=${encodeURIComponent(parent)}`
     )
     if (checkRes.ok) {
       const checkJson = await checkRes.json() as { available: boolean; owner?: string }
       if (!checkJson.available) {
-        throw new Error(`"${label}.${config.rootDomain}" is already registered to ${checkJson.owner ?? 'another address'}.`)
+        throw new Error(`"${label}.${parent}" is already registered to ${checkJson.owner ?? 'another address'}.`)
       }
     }
 
@@ -326,7 +329,7 @@ async function register(): Promise<void> {
 
     const domain = buildDomain(chain.id, config.l2RecordsAddress)
     const message = {
-      parent: config.rootDomain,
+      parent,
       label,
       owner: connectedAddress,
       nonce,
@@ -363,19 +366,19 @@ async function register(): Promise<void> {
     const json = await response.json()
 
     if (!response.ok) {
-      if (json.code === 'ALREADY_REGISTERED' && connectedAddress) {
-        const existing = getRegistrationFor(connectedAddress)
-        const name = existing?.fullName ?? `a subdomain under ${config.rootDomain}`
-        throw new Error(`This wallet already has ${name}. Use the manage page to update records.`)
-      }
       throw new Error(json.error ?? `Server error ${response.status}`)
     }
 
-    const fullName = `${label}.${config.rootDomain}`
+    const fullName = `${label}.${parent}`
     const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
     saveRegistration(connectedAddress!, label, fullName)
     setResult(`Registered: ${fullName}${txInfo}`, 'success')
     showVerifyCard(fullName, connectedAddress!)
+
+    // Show ENS App resolution countdown if the server returned an estimate
+    if (json.estimatedL1ResolvableAt) {
+      showResolveCountdown(fullName, json.estimatedL1ResolvableAt, json.challengePeriodSeconds)
+    }
   } catch (e) {
     setResult((e as Error)?.message ?? String(e), 'error')
   } finally {
@@ -437,6 +440,9 @@ function showVerifyCard(fullName: string, owner: `0x${string}`) {
   if (btn) {
     btn.onclick = () => verifyResolution(fullName, owner)
   }
+
+  // Check L1 resolve status and show countdown if needed
+  checkAndShowResolveStatus(fullName)
 }
 
 async function verifyResolution(fullName: string, expectedOwner: `0x${string}`) {
@@ -506,6 +512,109 @@ async function verifyResolution(fullName: string, expectedOwner: `0x${string}`) 
   }
 }
 
+// ─── ENS App Resolution Countdown ────────────────────────────────────────
+
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+function showResolveCountdown(fullName: string, estimatedAt: number, challengePeriodSec?: number) {
+  // Clean up any existing timer
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+
+  let container = byId('resolveCountdown')
+  if (!container) {
+    container = document.createElement('div')
+    container.id = 'resolveCountdown'
+    container.className = 'resolve-countdown'
+    // Insert after verifyCard
+    const verifyCard = byId('verifyCard')
+    if (verifyCard) {
+      verifyCard.parentElement?.insertBefore(container, verifyCard.nextSibling)
+    } else {
+      document.body.appendChild(container)
+    }
+  }
+
+  const challengeHours = challengePeriodSec ? Math.round(challengePeriodSec / 3600) : 84
+
+  function update() {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const remaining = estimatedAt - nowSec
+
+    if (remaining <= 0) {
+      container!.innerHTML = ''
+      const icon = document.createElement('span')
+      icon.textContent = '\u2705 '
+      const text = document.createElement('span')
+      text.textContent = `${fullName} should now be resolvable via `
+      const link = document.createElement('a')
+      const isTestnet = config.network === 'op-sepolia'
+      link.href = isTestnet
+        ? `https://sepolia.app.ens.domains/${fullName}`
+        : `https://app.ens.domains/${fullName}`
+      link.target = '_blank'
+      link.textContent = 'ENS App'
+      const refreshHint = document.createElement('span')
+      refreshHint.textContent = '. Click to check!'
+      container!.append(icon, text, link, refreshHint)
+      container!.className = 'resolve-countdown ready'
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+      return
+    }
+
+    const hours = Math.floor(remaining / 3600)
+    const mins = Math.floor((remaining % 3600) / 60)
+    const secs = remaining % 60
+
+    const timeStr = hours > 0
+      ? `${hours}h ${mins}m ${secs}s`
+      : mins > 0
+        ? `${mins}m ${secs}s`
+        : `${secs}s`
+
+    container!.innerHTML = ''
+    const icon = document.createElement('span')
+    icon.textContent = '\u23F3 '
+    const title = document.createElement('strong')
+    title.textContent = 'ENS App Resolution: '
+    const countdown = document.createElement('span')
+    countdown.className = 'countdown-timer'
+    countdown.textContent = timeStr
+    const explain = document.createElement('div')
+    explain.className = 'countdown-explain'
+    explain.textContent = `L2 registration is confirmed. L1 proof needs the OP dispute game to finalize (~${challengeHours}h challenge period). ENS App will resolve after that.`
+    container!.append(icon, title, countdown, explain)
+    container!.className = 'resolve-countdown pending'
+  }
+
+  update()
+  countdownTimer = setInterval(update, 1000)
+}
+
+// Also check resolve status when showing verify card for existing registrations
+async function checkAndShowResolveStatus(fullName: string) {
+  try {
+    const res = await fetch(`${config.apiUrl}/resolve-status?name=${encodeURIComponent(fullName)}`)
+    if (!res.ok) return
+    const data = await res.json() as {
+      registered?: boolean
+      l1Resolvable?: boolean | string
+      estimatedResolvableAt?: number
+      challengePeriodSeconds?: number
+      mode?: string
+    }
+    if (!data.registered) return
+
+    if (data.l1Resolvable === true) {
+      // Already resolvable — show green status
+      showResolveCountdown(fullName, 0, data.challengePeriodSeconds)
+    } else if (data.estimatedResolvableAt) {
+      showResolveCountdown(fullName, data.estimatedResolvableAt, data.challengePeriodSeconds)
+    }
+  } catch {
+    // Silently fail — countdown is informational
+  }
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -545,15 +654,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })
 
-  // Live preview
+  // Initialise parent input default
+  const parentInputEl = byId<HTMLInputElement>('parentInput')
+  if (parentInputEl && !parentInputEl.value) {
+    parentInputEl.value = config.rootDomain
+  }
+
+  // Live preview — update when label or parent changes
   const labelInput = byId<HTMLInputElement>('labelInput')
   const previewEl = byId('preview')
-  labelInput?.addEventListener('input', () => {
-    const val = labelInput.value.trim()
-    if (previewEl) {
-      previewEl.textContent = val ? `${val}.${config.rootDomain}` : '\u00a0'
-    }
-  })
+  function refreshPreview() {
+    const val = labelInput?.value.trim() ?? ''
+    const par = parentInputEl?.value.trim() || config.rootDomain
+    if (previewEl) previewEl.textContent = val ? `${val}.${par}` : '\u00a0'
+  }
+  labelInput?.addEventListener('input', refreshPreview)
+  parentInputEl?.addEventListener('input', refreshPreview)
 
   // Connect button
   const connectBtn = byId<HTMLButtonElement>('connectBtn')

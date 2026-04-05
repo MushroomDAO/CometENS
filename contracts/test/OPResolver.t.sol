@@ -1,245 +1,152 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.23;
 
 import "forge-std/Test.sol";
 import "../src/OPResolver.sol";
+import {IGatewayVerifier} from "@unruggable/contracts/IGatewayVerifier.sol";
 
+/// @notice Unit tests for the new OPResolver (C3 — storage proof mode).
+///         Proof-path integration tests require a live OP Sepolia fork and are
+///         covered in test/e2e/op-resolver.test.ts.
 contract OPResolverTest is Test {
     OPResolver public resolver;
     address public contractOwner;
     address public alice;
 
-    uint256 signer1PrivateKey = 0xA11CE;
-    uint256 signer2PrivateKey = 0xB0B;
-    address signer1Addr;
-    address signer2Addr;
+    // Minimal mock: satisfies IGatewayVerifier interface
+    address constant MOCK_VERIFIER = address(0x1111111111111111111111111111111111111111);
+    address constant MOCK_L2RECORDS = address(0x2222222222222222222222222222222222222222);
 
-    string constant GATEWAY = "https://gateway.example.com/{sender}/{data}.json";
-
-    bytes constant CALL_DATA = hex"3b3b57deabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab";
-    bytes constant NAME_BYTES = bytes("alice.test.eth");
+    // addr(bytes32 node) calldata — node = keccak256("alice.aastar.eth")
+    bytes32 constant NODE = keccak256("alice.aastar.eth");
+    bytes constant ADDR_CALL = abi.encodeWithSelector(bytes4(0x3b3b57de), NODE);
+    bytes constant NAME_BYTES = bytes("alice.aastar.eth");
 
     function setUp() public {
         contractOwner = address(this);
         alice = makeAddr("alice");
-        signer1Addr = vm.addr(signer1PrivateKey);
-        signer2Addr = vm.addr(signer2PrivateKey);
 
-        address[] memory initialSigners = new address[](2);
-        initialSigners[0] = signer1Addr;
-        initialSigners[1] = signer2Addr;
-        // Deploy in signature mode (verifyProofs = false)
-        resolver = new OPResolver(contractOwner, initialSigners, GATEWAY, false);
-    }
-
-    // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    /// @dev Builds a valid EIP-3668 gateway response using the given private key.
-    function _buildSignatureResponse(
-        bytes memory result,
-        uint64 expires,
-        bytes memory callData,
-        uint256 privateKey
-    ) internal view returns (bytes memory response) {
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                hex"1900",
-                address(resolver),
-                expires,
-                keccak256(callData),
-                keccak256(result)
-            )
+        // Deploy with mock verifier (unit tests don't need real proof verification)
+        vm.etch(MOCK_VERIFIER, hex"00"); // give it some code so address checks pass
+        resolver = new OPResolver(
+            contractOwner,
+            IGatewayVerifier(MOCK_VERIFIER),
+            MOCK_L2RECORDS
         );
-        bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, ethHash);
-        bytes memory sig = abi.encodePacked(r, s, v);
-        response = abi.encode(result, expires, sig);
-    }
-
-    function _buildSignatureResponse(bytes memory result, uint64 expires, bytes memory callData)
-        internal
-        view
-        returns (bytes memory)
-    {
-        return _buildSignatureResponse(result, expires, callData, signer1PrivateKey);
-    }
-
-    function _extraData() internal pure returns (bytes memory) {
-        return abi.encode(NAME_BYTES, CALL_DATA);
-    }
-
-    /// @dev Builds a minimal proof-mode response (stateRoot + empty storageProof).
-    function _buildProofResponse(bytes memory result) internal pure returns (bytes memory) {
-        bytes32 stateRoot = keccak256("dummy-state-root");
-        bytes[] memory storageProof = new bytes[](0);
-        bytes memory proof = abi.encode(stateRoot, storageProof);
-        return abi.encode(result, proof);
     }
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    function test_ownerSignersAndFlagSet() public view {
+    function test_constructorSetsOwner() public view {
         assertEq(resolver.owner(), contractOwner);
-        assertTrue(resolver.signers(signer1Addr));
-        assertTrue(resolver.signers(signer2Addr));
-        assertEq(resolver.gatewayUrl(), GATEWAY);
-        assertFalse(resolver.verifyProofs(), "should start in signature mode");
+    }
+
+    function test_constructorSetsVerifier() public view {
+        assertEq(address(resolver.verifier()), MOCK_VERIFIER);
+    }
+
+    function test_constructorSetsL2RecordsAddress() public view {
+        assertEq(resolver.l2RecordsAddress(), MOCK_L2RECORDS);
     }
 
     function test_revertZeroOwner() public {
-        address[] memory s = new address[](0);
         vm.expectRevert(OPResolver.ZeroAddress.selector);
-        new OPResolver(address(0), s, GATEWAY, false);
+        new OPResolver(address(0), IGatewayVerifier(MOCK_VERIFIER), MOCK_L2RECORDS);
     }
 
-    function test_revertZeroSigner() public {
-        address[] memory s = new address[](1);
-        s[0] = address(0);
+    function test_revertZeroVerifier() public {
         vm.expectRevert(OPResolver.ZeroAddress.selector);
-        new OPResolver(contractOwner, s, GATEWAY, false);
+        new OPResolver(contractOwner, IGatewayVerifier(address(0)), MOCK_L2RECORDS);
     }
 
-    // ─── resolve() always reverts with OffchainLookup ─────────────────────────
+    function test_revertZeroL2Records() public {
+        vm.expectRevert(OPResolver.ZeroAddress.selector);
+        new OPResolver(contractOwner, IGatewayVerifier(MOCK_VERIFIER), address(0));
+    }
 
-    function test_resolveRevertsWithOffchainLookup() public {
+    // ─── resolve() reverts with OffchainLookup ────────────────────────────────
+
+    function test_resolveAddrRevertsOffchainLookup() public {
+        // resolve() always reverts with OffchainLookup (triggers CCIP-Read client)
         vm.expectRevert();
-        resolver.resolve(NAME_BYTES, CALL_DATA);
+        resolver.resolve(NAME_BYTES, ADDR_CALL);
     }
 
-    function test_resolveRevertsInProofModeAlso() public {
-        resolver.setVerifyProofs(true);
-        vm.expectRevert();
-        resolver.resolve(NAME_BYTES, CALL_DATA);
+    function test_resolveUnsupportedSelectorReverts() public {
+        bytes memory badCall = abi.encodeWithSelector(bytes4(0xdeadbeef), NODE);
+        vm.expectRevert(abi.encodeWithSelector(OPResolver.UnsupportedSelector.selector, bytes4(0xdeadbeef)));
+        resolver.resolve(NAME_BYTES, badCall);
     }
 
-    // ─── resolveWithProof — signature mode ───────────────────────────────────
+    // ─── setVerifier ──────────────────────────────────────────────────────────
 
-    function test_resolveWithProofSignatureMode() public view {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildSignatureResponse(result, expires, CALL_DATA);
-
-        bytes memory returned = resolver.resolveWithProof(response, _extraData());
-        assertEq(abi.decode(returned, (address)), alice);
+    function test_ownerCanSetVerifier() public {
+        address newVerifier = address(0x3333333333333333333333333333333333333333);
+        vm.etch(newVerifier, hex"00");
+        resolver.setVerifier(IGatewayVerifier(newVerifier));
+        assertEq(address(resolver.verifier()), newVerifier);
     }
 
-    function test_resolveWithProofSigner2SignatureMode() public view {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildSignatureResponse(result, expires, CALL_DATA, signer2PrivateKey);
-
-        bytes memory returned = resolver.resolveWithProof(response, _extraData());
-        assertEq(abi.decode(returned, (address)), alice);
+    function test_setVerifierEmitsEvent() public {
+        address newVerifier = address(0x4444444444444444444444444444444444444444);
+        vm.etch(newVerifier, hex"00");
+        vm.expectEmit(true, true, false, false);
+        emit OPResolver.VerifierUpdated(MOCK_VERIFIER, newVerifier);
+        resolver.setVerifier(IGatewayVerifier(newVerifier));
     }
 
-    function test_revertExpiredSignature() public {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp - 1);
-        bytes memory response = _buildSignatureResponse(result, expires, CALL_DATA);
-
-        vm.expectRevert(OPResolver.SignatureExpired.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    function test_revertInvalidSigner() public {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildSignatureResponse(result, expires, CALL_DATA, 0xBAD);
-
-        vm.expectRevert(OPResolver.InvalidSigner.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    function test_revertInvalidSignatureLength() public {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory badSig = hex"1234";
-        bytes memory response = abi.encode(result, expires, badSig);
-
-        vm.expectRevert(OPResolver.InvalidSignatureLength.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    function test_revertSignatureCalldataBindingMismatch() public {
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory differentCallData = hex"deadbeef";
-        bytes memory response = _buildSignatureResponse(result, expires, differentCallData);
-
-        vm.expectRevert(OPResolver.InvalidSigner.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    function test_revertAfterSignerRemoved() public {
-        resolver.removeSigner(signer1Addr);
-
-        bytes memory result = abi.encode(alice);
-        uint64 expires = uint64(block.timestamp + 3600);
-        bytes memory response = _buildSignatureResponse(result, expires, CALL_DATA, signer1PrivateKey);
-
-        vm.expectRevert(OPResolver.InvalidSigner.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    // ─── resolveWithProof — proof mode (C2 stub) ─────────────────────────────
-
-    function test_resolveWithProofModeRevertsNotImplemented() public {
-        resolver.setVerifyProofs(true);
-
-        bytes memory result = abi.encode(alice);
-        bytes memory response = _buildProofResponse(result);
-
-        vm.expectRevert(OPResolver.ProofVerificationNotImplemented.selector);
-        resolver.resolveWithProof(response, _extraData());
-    }
-
-    // ─── setVerifyProofs — toggle ─────────────────────────────────────────────
-
-    function test_toggleVerifyProofs() public {
-        assertFalse(resolver.verifyProofs());
-
-        resolver.setVerifyProofs(true);
-        assertTrue(resolver.verifyProofs());
-
-        resolver.setVerifyProofs(false);
-        assertFalse(resolver.verifyProofs());
-    }
-
-    function test_toggleEmitsEvent() public {
-        vm.expectEmit(false, false, false, true);
-        emit OPResolver.VerifyProofsToggled(true);
-        resolver.setVerifyProofs(true);
-    }
-
-    function test_nonOwnerCannotToggle() public {
+    function test_nonOwnerCannotSetVerifier() public {
         vm.prank(alice);
         vm.expectRevert(OPResolver.Unauthorized.selector);
-        resolver.setVerifyProofs(true);
+        resolver.setVerifier(IGatewayVerifier(MOCK_VERIFIER));
     }
 
-    // ─── Admin helpers ────────────────────────────────────────────────────────
-
-    function test_addSigner() public {
-        address newSigner = makeAddr("newSigner");
-        resolver.addSigner(newSigner);
-        assertTrue(resolver.signers(newSigner));
+    function test_setVerifierRejectsZero() public {
+        vm.expectRevert(OPResolver.ZeroAddress.selector);
+        resolver.setVerifier(IGatewayVerifier(address(0)));
     }
 
-    function test_nonOwnerCannotAddSigner() public {
+    // ─── setL2RecordsAddress ──────────────────────────────────────────────────
+
+    function test_ownerCanSetL2Records() public {
+        address newAddr = address(0x5555555555555555555555555555555555555555);
+        resolver.setL2RecordsAddress(newAddr);
+        assertEq(resolver.l2RecordsAddress(), newAddr);
+    }
+
+    function test_nonOwnerCannotSetL2Records() public {
         vm.prank(alice);
         vm.expectRevert(OPResolver.Unauthorized.selector);
-        resolver.addSigner(alice);
+        resolver.setL2RecordsAddress(MOCK_L2RECORDS);
     }
 
-    function test_transferOwnership() public {
+    function test_setL2RecordsRejectsZero() public {
+        vm.expectRevert(OPResolver.ZeroAddress.selector);
+        resolver.setL2RecordsAddress(address(0));
+    }
+
+    // ─── transferOwnership ────────────────────────────────────────────────────
+
+    function test_ownerCanTransfer() public {
         resolver.transferOwnership(alice);
         assertEq(resolver.owner(), alice);
     }
 
-    function test_nonOwnerCannotTransferOwnership() public {
+    function test_transferOwnershipEmitsEvent() public {
+        vm.expectEmit(true, true, false, false);
+        emit OPResolver.OwnershipTransferred(contractOwner, alice);
+        resolver.transferOwnership(alice);
+    }
+
+    function test_nonOwnerCannotTransfer() public {
         vm.prank(alice);
         vm.expectRevert(OPResolver.Unauthorized.selector);
         resolver.transferOwnership(alice);
+    }
+
+    function test_transferOwnershipRejectsZero() public {
+        vm.expectRevert(OPResolver.ZeroAddress.selector);
+        resolver.transferOwnership(address(0));
     }
 
     // ─── supportsInterface ────────────────────────────────────────────────────
@@ -252,11 +159,125 @@ contract OPResolverTest is Test {
         assertTrue(resolver.supportsInterface(0x01ffc9a7));
     }
 
-    function test_supportsIERC7996() public view {
-        assertTrue(resolver.supportsInterface(0x582de3e7));
+    function test_doesNotSupportRandomInterface() public view {
+        assertFalse(resolver.supportsInterface(0xdeadbeef));
     }
 
-    function test_supportsFeatureReturnsFalse() public view {
-        assertFalse(resolver.supportsFeature(0x12345678));
+    function test_supportsAddrResolver() public view {
+        assertTrue(resolver.supportsInterface(0x3b3b57de)); // IAddrResolver
+    }
+
+    function test_supportsAddressResolver() public view {
+        assertTrue(resolver.supportsInterface(0xf1cb7e06)); // IAddressResolver
+    }
+
+    function test_supportsTextResolver() public view {
+        assertTrue(resolver.supportsInterface(0x59d1d43c)); // ITextResolver
+    }
+
+    function test_supportsContentHashResolver() public view {
+        assertTrue(resolver.supportsInterface(0xbc1c58d1)); // IContentHashResolver
+    }
+
+    // ─── resolve() short-calldata guard ──────────────────────────────────────
+
+    function test_resolveShortCalldataReverts() public {
+        bytes memory shortData = hex"aabbcc"; // 3 bytes < 4
+        vm.expectRevert();
+        resolver.resolve(NAME_BYTES, shortData);
+    }
+
+    // ─── addrCallback ─────────────────────────────────────────────────────────
+
+    function test_addrCallback_ETH_returns_correct_address() public view {
+        // ETH address stored as raw 20 bytes (left-aligned in memory)
+        address expected = address(0x1234567890AbcdEF1234567890aBcdef12345678);
+        bytes[] memory values = new bytes[](1);
+        values[0] = abi.encodePacked(expected); // 20 raw bytes
+
+        // carry = addr(bytes32 node) selector + node
+        bytes memory carry = abi.encodeWithSelector(bytes4(0x3b3b57de), NODE);
+        bytes memory result = resolver.addrCallback(values, 0, carry);
+        address decoded = abi.decode(result, (address));
+        assertEq(decoded, expected);
+    }
+
+    function test_addrCallback_ETH_zeroes_on_exitCode_nonzero() public view {
+        bytes[] memory values = new bytes[](1);
+        values[0] = abi.encodePacked(address(0x1234567890AbcdEF1234567890aBcdef12345678));
+        bytes memory carry = abi.encodeWithSelector(bytes4(0x3b3b57de), NODE);
+        bytes memory result = resolver.addrCallback(values, 1, carry);
+        address decoded = abi.decode(result, (address));
+        assertEq(decoded, address(0));
+    }
+
+    function test_addrCallback_ETH_zeroes_on_empty_values() public view {
+        bytes[] memory values = new bytes[](0); // empty values array
+        bytes memory carry = abi.encodeWithSelector(bytes4(0x3b3b57de), NODE);
+        bytes memory result = resolver.addrCallback(values, 0, carry);
+        address decoded = abi.decode(result, (address));
+        assertEq(decoded, address(0));
+    }
+
+    function test_addrCallback_multiCoin_returns_raw_bytes() public view {
+        bytes memory btcAddr = hex"deadbeefcafe";
+        bytes[] memory values = new bytes[](1);
+        values[0] = btcAddr;
+        // carry = addr(bytes32 node, uint256 coinType) selector
+        bytes memory carry = abi.encodeWithSelector(bytes4(0xf1cb7e06), NODE, uint256(0));
+        bytes memory result = resolver.addrCallback(values, 0, carry);
+        bytes memory decoded = abi.decode(result, (bytes));
+        assertEq(decoded, btcAddr);
+    }
+
+    // ─── textCallback ─────────────────────────────────────────────────────────
+
+    function test_textCallback_returns_string() public view {
+        bytes[] memory values = new bytes[](1);
+        values[0] = bytes("hello world");
+        bytes memory result = resolver.textCallback(values, 0, "");
+        string memory decoded = abi.decode(result, (string));
+        assertEq(decoded, "hello world");
+    }
+
+    function test_textCallback_empty_on_exitCode_nonzero() public view {
+        bytes[] memory values = new bytes[](1);
+        values[0] = bytes("ignored");
+        bytes memory result = resolver.textCallback(values, 1, "");
+        string memory decoded = abi.decode(result, (string));
+        assertEq(decoded, "");
+    }
+
+    function test_textCallback_empty_on_empty_values() public view {
+        bytes[] memory values = new bytes[](0);
+        bytes memory result = resolver.textCallback(values, 0, "");
+        string memory decoded = abi.decode(result, (string));
+        assertEq(decoded, "");
+    }
+
+    // ─── contenthashCallback ─────────────────────────────────────────────────
+
+    function test_contenthashCallback_returns_bytes() public view {
+        bytes memory ipfsHash = hex"e30101701220abcdef";
+        bytes[] memory values = new bytes[](1);
+        values[0] = ipfsHash;
+        bytes memory result = resolver.contenthashCallback(values, 0, "");
+        bytes memory decoded = abi.decode(result, (bytes));
+        assertEq(decoded, ipfsHash);
+    }
+
+    function test_contenthashCallback_empty_on_exitCode_nonzero() public view {
+        bytes[] memory values = new bytes[](1);
+        values[0] = hex"e30101701220abcdef";
+        bytes memory result = resolver.contenthashCallback(values, 1, "");
+        bytes memory decoded = abi.decode(result, (bytes));
+        assertEq(decoded.length, 0);
+    }
+
+    function test_contenthashCallback_empty_on_empty_values() public view {
+        bytes[] memory values = new bytes[](0);
+        bytes memory result = resolver.contenthashCallback(values, 0, "");
+        bytes memory decoded = abi.decode(result, (bytes));
+        assertEq(decoded.length, 0);
     }
 }

@@ -1,15 +1,19 @@
 # CometENS 开发路线图
 
-## 当前状态（2026-04-04 / v0.5.0）
+## 当前状态（2026-04-04 / v0.6.0）
 
 | 里程碑 | 名称 | 状态 | Tag |
 |--------|------|------|-----|
 | **A** | 可信签名 MVP | ✅ **已完成** | v0.3.0 |
 | **A+** | Production API Server + Security Hardening | ✅ **已完成** | v0.4.0 |
-| **B** | Name Wrapper + NFT 子域 | ✅ **已完成（B1/B2/B4）** | v0.5.0 |
-| **C** | 状态证明（ENS V2 标准） | 🟡 **脚手架完成（C1/C2）** | v0.5.0 |
-| **D** | 生产强化与治理 | 🟡 **进行中（D1/D2/D3 ✅，D4 deferred）** | v0.5.0 |
+| **B** | Name Wrapper + NFT 子域（B1/B4） | ✅ **已完成** | v0.5.0 |
+| **C** | 状态证明（ENS V2 标准） | ✅ **C3/C4 完成（37 tests）** | v0.6.0 |
+| **D** | 生产强化 | 🟡 **进行中（D3 ✅，D4 待做）** | v0.5.0 |
 | E | .box 写路径 | ⏳ 待官方开放 | — |
+
+**ENS V2 影响评估（2026-04）**：ENS V2 = 纯 L1 registry 重写（Namechain 已取消）。CCIP-Read/ERC-3668/IExtendedResolver 接口**完全不变**。CometENS 的 OPResolver + Gateway 零修改可运行，上线后再跟进 V2 subregistry 迁移（可选、一笔交易）。详见 [docs/ensv2-impact-analysis.md](ensv2-impact-analysis.md)。
+
+**注**：B2（插件架构）已删除 — 开源免费项目，单一职责原则，根域名管理足够控制访问。D1（Durable Objects）已删除 — 链上唯一性保证足够。D2（Rate Limiting）已关闭 — EIP-712 鉴权是真正的门卫。
 
 ---
 
@@ -60,60 +64,100 @@
 | A+7 | 测试：109 Foundry + 21 unit + 16 e2e + 8 integration | ✅ |
 | A+8 | aastar.eth Sepolia ENS resolver 更新 | ✅ |
 
-**遗留已知限制（Milestone D 解决）**：
-- KV nonce TOCTOU（需 Durable Objects）
-- nonce 在 tx 前消费（已知 UX 权衡）
-
 ---
 
 ## 里程碑 B：Name Wrapper + NFT 子域 ✅（v0.5.0）
 
-**目标**：子域名成为真正的 ERC-721 NFT，可转让、可交易；Registrar 可插拔插件架构。
+**目标**：子域名成为真正的 ERC-721 NFT，可转让、可交易。
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
 | B1 | L2RecordsV3 合约：ERC-721 子域所有权（tokenId = uint256(node)） | 🔴 P0 | ✅ 完成 |
-| B2 | Registrar 插件接口：IRegistrarPlugin + FreePlugin/WhitelistPlugin/FlatFeePlugin | 🔴 P0 | ✅ 完成 |
 | B4 | 前端适配：NFT 转让 UI + /transfer-subnode API 端点 | 🟡 P1 | ✅ 完成 |
 
-**已完成合约**：`contracts/src/L2RecordsV3.sol`、`contracts/src/IRegistrarPlugin.sol`、`contracts/src/plugins/`
+**已完成合约**：`contracts/src/L2RecordsV3.sol`（21KB，主网可部署）
 
-**遗留**：
-- B3（L2Records → V3 数据迁移脚本）— 未实现，主网部署前需要
-- NFT marketplace 集成、链上 metadata — 未计划
+**已删除**：
+- B2（插件架构）— 删除。开源免费，根域名管理即访问控制，无需插件。
+- B3（数据迁移脚本）— 取消。V2 无生产用户，V3 主网全新部署。
 
 ---
 
-## 里程碑 C：状态证明（ENS V2 标准路径）🟡 脚手架完成
+## 里程碑 C：状态证明（ENS V2 标准路径）✅ v0.6.0
 
 **目标**：用 Bedrock 状态证明替代 Gateway 签名，实现信任最小化。
 
+**背景**：当前系统信任 Gateway EOA 私钥。状态证明使 L1 合约直接验证 OP 链上数据的 Merkle 证明，完全去信任化，是 ENS V2 的设计方向。
+
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| C1 | OPResolver 合约（替代 OffchainResolver，`verifyProofs` flag） | 🔴 P0 | ✅ 完成（脚手架） |
-| C2 | Gateway Worker 支持证明模式（PROOF_MODE + DEV_MODE 双 guard，返回 501 stub） | 🔴 P0 | ✅ 完成（stub） |
-| C3 | L1 链上验证 OP 状态根（Bedrock Merkle proof 实际验证）| 🟡 P1 | 📋 待实现 |
-| C4 | Gateway 实际返回 eth_getProof 结果，OPResolver 链上验证 | 🟡 P1 | 📋 待实现 |
+| C1 | OPResolver 合约（C1 脚手架 → C3 实际实现） | 🔴 P0 | ✅ 完成 |
+| C2 | Gateway Worker 支持证明模式（C2 stub → C4 真实实现） | 🔴 P0 | ✅ 完成 |
+| C3 | OPResolver + unruggable-gateways v1.3.5：GatewayFetchTarget + OPFaultVerifier | 🟡 P1 | ✅ 完成，37 tests |
+| C4 | Gateway GET /{sender}/{data}：OPFaultRollup 证明，module-level 单例，sender 白名单 | 🟡 P1 | ✅ 完成 |
 
-**参考**：`vendor/unruggable-gateways/`、`eval/unruggable-gateways/`
+**已部署依赖**：
+- `contracts/lib/unruggable-gateways` Foundry library (v1.3.5)
+- `workers/gateway`: `@unruggable/gateways: 1.3.5` + `ethers: ^6.0.0`
+- OP Sepolia AnchorStateRegistry: `0x218CD9489199F321E1177b56385d333c7876e1d3`
 
-**背景**：C1/C2 脚手架已就位，PROOF_MODE 可安全切换；C3/C4 是真正的去信任化实现，是 ENS V2 的标准方向。
+**已部署合约（Ethereum Sepolia，2026-04-04 C3' redeploy）**：
+
+| 合约 | 地址 |
+|---|---|
+| EthVerifierHooks | `0x68E526600e89aDD227B0912b075E02B394a23DCf` |
+| OPFaultGameFinder | `0x21e35d3Ef6511B34C6c0D1e6893c587e8d4420d2` |
+| OPFaultVerifier | `0x0954FD2908c06182127b6bed0A964e9eEA41a7EA` |
+| OPResolver | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
+
+`aastar.eth` 和 `forest.aastar.eth` resolver 均已指向 OPResolver。
+
+**⚠️ 经验教训 — AnchorStateRegistry 地址必须从库里读**：
+```bash
+# 在部署前，先查 @unruggable/gateways 库实际使用的 ASR 地址：
+grep "sepoliaConfig" -A5 \
+  workers/gateway/node_modules/@unruggable/gateways/dist/cjs/op/OPFaultRollup.cjs \
+  | grep AnchorStateRegistry
+# 当前值：0xa1Cec548926eb5d69aa3B7B57d371EdBdD03e64b
+# 不要从文档/roadmap 里复制旧地址 — OP Stack 升级后地址会变
+# Gateway 的 sepoliaConfig 和 OPFaultVerifier 必须使用同一个 ASR，否则证明永远验证失败
+```
+
+**部署步骤（以后参考）**：
+```bash
+# 0. 查 ASR 地址（必须）
+ASR=$(grep -A5 "sepoliaConfig" workers/gateway/node_modules/@unruggable/gateways/dist/cjs/op/OPFaultRollup.cjs | grep AnchorStateRegistry | grep -o '0x[0-9a-fA-F]*')
+# 1. Set secrets
+wrangler secret put ETH_RPC_URL --env testnet   # L1 Sepolia RPC
+# 2. Deploy OPResolver stack to Ethereum Sepolia
+DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/{sender}/{data} \
+  L2_RECORDS_ADDRESS=0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e \
+  ANCHOR_STATE_REGISTRY=$ASR \
+  forge script contracts/script/DeployOPResolver.s.sol --broadcast --rpc-url $ETH_RPC_URL
+# 3. Set aastar.eth + forest.aastar.eth resolver = deployed OPResolver address (on Sepolia ENS)
+# 4. Set ALLOWED_SENDERS = deployed OPResolver address in wrangler.toml
+# 5. wrangler deploy --env testnet (gateway worker)
+```
+
+**参考**：`docs/ensv2-impact-analysis.md`
 
 ---
 
-## 里程碑 D：生产强化与治理 🟡 进行中
+## 里程碑 D：生产强化 🟡 进行中
 
-**目标**：达到生产级安全与可运维标准，解决 v0.4.0 遗留问题。
+**目标**：达到生产级安全与可运维标准。
 
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| D1 | Durable Objects nonce store（消除 KV TOCTOU 竞态，`blockConcurrencyWhile` 原子化）| 🔴 P0 | ✅ 完成 |
-| D2 | Rate limiting（KV 滑动窗口，写 10/min，v1 60/min，best-effort）| 🔴 P0 | ✅ 完成（best-effort） |
-| D3 | 监控告警（CF Analytics Engine + `/health` timestamp）| 🟡 P1 | ✅ 完成 |
-| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| 🔴 P0 | ⏳ deferred |
-| D5 | Worker EOA 密钥轮换方案 | 🟡 P1 | 📋 待实现 |
-| D6 | 多实例 / 多根域名支持 | 🟢 P2 | 📋 待实现 |
-| D7 | Rate limiting 升级（CF 原生 Rate Limiting 或 DO per key，解决多 PoP 并发绕过）| 🟡 P1 | 📋 待实现 |
+| D3 | 监控告警（CF Analytics Engine 可选 stub + `/health` timestamp）| 🟡 P1 | ✅ 完成 |
+| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| 🔴 P0 | 📋 待实现 |
+| D5 | Worker EOA 密钥轮换方案 | 🟢 P2 | 📋 待实现（上线前不急） |
+| D6 | 多根域名支持（forest.aastar.eth、game.aastar.eth 等） | 🟡 P1 | 📋 待实现 |
+| D7 | Rate Limiting（CF 原生或 DO per-key，多 PoP 正确性）| 🟢 P2 | 📋 待实现（实际滥用出现后再做） |
+
+**已删除/关闭**：
+- D1（Durable Objects nonce）— 删除。链上唯一性（AlreadyRegistered）是真正的保障，KV eventually-consistent 够用。
+- D2（KV 滑动窗口限速）— 关闭。EIP-712 鉴权是实际门卫。代码注释保留，D7 是正式入口。
 
 ---
 
@@ -126,31 +170,39 @@
 
 ---
 
-## 依赖关系与主网最短路径
+## 当前 TODO（优先级排序）
 
 ```
-v0.4.0（当前）
-   │
-   ├── Milestone D（D1+D2 可先做，不依赖 B/C）
-   │     D1: Durable Objects nonce  ──┐
-   │     D2: Rate limiting          ──┤→ D4: 主网部署
-   │
-   ├── Milestone B（NFT 子域，可与 D 并行）
-   │     B1（ERC-721合约）→ B2（插件架构）→ B4（前端）
-   │
-   └── Milestone C（状态证明，可与 B/D 并行研发）
-         C1（OPResolver）→ C2（Gateway proof）→ C3（L1验证）
+🔴 P0 — 主网上线阻塞
+  D4  主网部署（OP Mainnet L2RecordsV3 + OPResolver + ENS resolver 更新）
+  C3' 测试网部署验证 OPResolver（DeployOPResolver.s.sol + ETH_RPC_URL secret）
 
-主网上线最短路径：
-  v0.4.0 → D1 → D2 → D4（主网上线，B/C 主网后迭代）
+🟡 P1 — 近期
+  D6  多根域名支持（forest.aastar.eth 等，API primaryNode 限制解除）
 
-执行顺序（当前计划）：
-  D1 → D2 → B1 → B2 → C1 → C2
+🟢 P2 — 有时间再做
+  D5  Worker EOA 密钥轮换
+  D7  Rate Limiting 升级（有实际滥用问题再做）
+  NFT marketplace 集成（OpenSea metadata）
 ```
 
 ---
 
-## 参考：ENS V2 路径对应
+## 主网最短路径
+
+```
+v0.6.0（当前：C3/C4 实现 + 37 tests 通过）
+   │
+   ├── C3': 测试网部署验证 OPResolver（ETH_RPC_URL + 链上测试）
+   │
+   └── D4: 主网部署 ──→ 上线
+         │
+         └── D6: 多根域名（上线后迭代）
+```
+
+---
+
+## 依赖关系
 
 ```
 CometENS 路径                  ENS V2 对应
@@ -158,8 +210,7 @@ CometENS 路径                  ENS V2 对应
 L2Records (里程碑A) ──────▶  L2 存储验证
 OffchainResolver (里程碑A) ──▶  可信签名（过渡态）
 OPResolver (里程碑C) ─────▶  状态证明（V2 标准）
-Name Wrapper (里程碑B) ───▶  Per-name Registry
-Fuse 烧断 (里程碑D) ──────▶  不可变信任根
+ERC-721 子域 (里程碑B) ───▶  Per-name Registry
 ```
 
 ---
@@ -169,6 +220,6 @@ Fuse 烧断 (里程碑D) ──────▶  不可变信任根
 | 里程碑 | Foundry | TS Unit | E2E | Integration | 安全审计 |
 |--------|---------|---------|-----|-------------|----------|
 | A / A+ | ✅ 109 | ✅ 21 | ✅ 16 | ✅ 8 | ✅ 3轮 Codex |
-| B | 🔴 需补充 | 🟡 | 🟡 | — | — |
-| C | 🔴 需补充 | — | 🔴 | 🔴 | — |
-| D | — | 🟡 | — | 🟡 | — |
+| B (B1/B4) | ✅ 40 | ✅ 16 | ✅ 4 | — | ✅ Codex |
+| C (C3/C4) | ✅ 37 | — | — | — | ✅ 2轮 Codex |
+| D (D3) | — | — | — | — | — |

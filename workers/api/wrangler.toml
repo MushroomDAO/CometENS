@@ -3,10 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-[[migrations]]
-tag = "v1"
-new_classes = ["NonceStore"]
-
 # ─── Testnet (OP Sepolia) ─────────────────────────────────────────────────────
 # Deploy: wrangler deploy --env testnet
 # URL:    https://cometens-api.jhfnetboy.workers.dev
@@ -24,8 +20,9 @@ new_classes = ["NonceStore"]
 name = "cometens-api"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
-ROOT_DOMAIN = "aastar.eth"
+L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
+ROOT_DOMAIN = "forest.aastar.eth"
+GATEWAY_URL = "https://cometens-gateway.jhfnetboy.workers.dev"
 
 [[env.testnet.kv_namespaces]]
 binding = "REGISTRY"
@@ -35,13 +32,10 @@ id = "a8ec4846317c430d81c5fd7816bac4d6"
 binding = "RECORD_CACHE"
 id = "6147f1fe8d5141389e10475cab1f6647"
 
-[[env.testnet.durable_objects.bindings]]
-name = "NONCE_STORE"
-class_name = "NonceStore"
-
-[[env.testnet.analytics_engine_datasets]]
-binding = "ANALYTICS"
-dataset = "cometens_api"
+# [[env.testnet.analytics_engine_datasets]]
+# binding = "ANALYTICS"
+# dataset = "cometens_api"
+# NOTE: Enable Analytics Engine in CF Dashboard before uncommenting
 
 # ─── Production (OP Mainnet) ──────────────────────────────────────────────────
 # Deploy: wrangler deploy --env production
@@ -52,6 +46,7 @@ name = "cometens-api-production"
 NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
+GATEWAY_URL = "https://cometens-gateway-production.jhfnetboy.workers.dev"
 
 # [[env.production.kv_namespaces]]
 # binding = "REGISTRY"

@@ -8,18 +8,18 @@ compatibility_flags = ["nodejs_compat"]
 # URL:    https://cometens-gateway.jhfnetboy.workers.dev
 # 
 # Secrets (per-env, use `wrangler secret put`):
-#   OP_RPC_URL                 — Optimism RPC endpoint
-#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
-#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
-#   REGISTRATION_SECRET        — Password for registration auth
+#   OP_RPC_URL                 — Optimism RPC endpoint (OP Sepolia)
+#   ETH_RPC_URL                — Ethereum L1 RPC (Sepolia) — required for proof mode
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses (signature mode only)
 #
 [env.testnet]
 name = "cometens-gateway"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
+L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
 ROOT_DOMAIN = "aastar.eth"
-# PROOF_MODE = "true"  # C2 stub — ALSO requires DEV_MODE=true; both must be set to activate
+PROOF_MODE = "true"  # C4: Bedrock storage proof mode
+ALLOWED_SENDERS = "0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083"  # OPResolver on Eth Sepolia
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
@@ -27,9 +27,10 @@ ROOT_DOMAIN = "aastar.eth"
 binding = "RECORD_CACHE"
 id = "6147f1fe8d5141389e10475cab1f6647"
 
-[[env.testnet.analytics_engine_datasets]]
-binding = "ANALYTICS"
-dataset = "cometens_gateway"
+# [[env.testnet.analytics_engine_datasets]]
+# binding = "ANALYTICS"
+# dataset = "cometens_gateway"
+# NOTE: Enable Analytics Engine in CF Dashboard before uncommenting
 
 # ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
 # Deploy: wrangler deploy --env production
@@ -37,10 +38,9 @@ dataset = "cometens_gateway"
 #         (or custom domain — uncomment routes below)
 # 
 # Secrets (per-env, use `wrangler secret put`):
-#   OP_RPC_URL                 — Optimism RPC endpoint
-#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses
-#   WORKER_EOA_PRIVATE_KEY     — Key that submits L2 transactions (for registration)
-#   REGISTRATION_SECRET        — Password for registration auth
+#   OP_RPC_URL                 — Optimism RPC endpoint (OP Mainnet)
+#   ETH_RPC_URL                — Ethereum L1 RPC (Mainnet) — required for proof mode
+#   PRIVATE_KEY_SUPPLIER       — Key that signs CCIP responses (signature mode only)
 #
 [env.production]
 name = "cometens-gateway-production"
@@ -48,7 +48,7 @@ name = "cometens-gateway-production"
 NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
-# PROOF_MODE = "true"  # C2 stub — ALSO requires DEV_MODE=true; both must be set to activate
+# PROOF_MODE = "true"  # enable after mainnet OPResolver deployment
 
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"

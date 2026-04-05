@@ -1,88 +1,101 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.23;
 
-/// @title OPResolver
-/// @notice EIP-3668 CCIP-Read resolver for ENS names backed by Optimism Bedrock
-///         storage proofs (Milestone C1 scaffold).
+/// @title OPResolver — Bedrock Storage Proof Resolver (C3)
+/// @notice EIP-3668 CCIP-Read resolver that verifies ENS records stored in
+///         L2RecordsV3 on Optimism via Bedrock storage proofs on L1.
+///         Uses unruggable-gateways v1.3.5 OPFaultVerifier for trustless
+///         L2→L1 state verification — no gateway signing key required.
 ///
-///         When `verifyProofs` is false (default), the resolver behaves identically
-///         to OffchainResolver — it verifies a gateway signature (EIP-3668 §4.1).
+/// @dev Architecture:
+///   1. ENS Universal Resolver calls resolve(name, data)
+///   2. We build a GatewayFetcher request describing which L2RecordsV3 storage
+///      slots to prove and revert with OffchainLookup
+///   3. The CCIP-Read gateway fetches eth_getProof from OP node and returns proof
+///   4. fetchCallback() runs: OPFaultVerifier verifies proof against L1 rootClaim
+///   5. Callback decodes verified values and returns the ENS record
 ///
-///         When `verifyProofs` is true, `resolveWithProof` decodes a
-///         `(bytes result, bytes proof)` response and will verify the proof
-///         against the OP state root committed on L1 (TODO: C2 implementation).
+/// @dev L2RecordsV3 storage layout (relevant slots):
+///   slot 7: _addrs        mapping(bytes32 node => mapping(uint256 coinType => bytes))
+///   slot 8: _texts        mapping(bytes32 node => mapping(string key => string))
+///   slot 9: _contenthashes mapping(bytes32 node => bytes)
 ///
-///         This toggle lets C1 be deployed and exercised without breaking any
-///         existing flows; C2 will complete the proof-verification path.
-contract OPResolver {
+/// @dev Upgradeability: _verifier is mutable (setVerifier, onlyOwner).
+///   When OP Stack upgrades (e.g., OP Succinct ZK proofs), redeploy
+///   OPFaultVerifier + OPFaultGameFinder and call setVerifier().
+///   The resolver itself does not need to be redeployed.
+
+import {GatewayFetcher} from "@unruggable/contracts/GatewayFetcher.sol";
+import {GatewayFetchTarget, IGatewayVerifier} from "@unruggable/contracts/GatewayFetchTarget.sol";
+import {GatewayRequest} from "@unruggable/contracts/GatewayRequest.sol";
+
+contract OPResolver is GatewayFetchTarget {
+    using GatewayFetcher for GatewayRequest;
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+
+    /// @dev L2RecordsV3 storage slot for _addrs mapping
+    uint256 constant SLOT_ADDRS = 7;
+    /// @dev L2RecordsV3 storage slot for _texts mapping
+    uint256 constant SLOT_TEXTS = 8;
+    /// @dev L2RecordsV3 storage slot for _contenthashes mapping
+    uint256 constant SLOT_CONTENTHASH = 9;
+
+    /// @dev IAddrResolver.addr(bytes32) selector
+    bytes4 constant SEL_ADDR   = 0x3b3b57de;
+    /// @dev IAddressResolver.addr(bytes32,uint256) selector
+    bytes4 constant SEL_ADDR2  = 0xf1cb7e06;
+    /// @dev ITextResolver.text(bytes32,string) selector
+    bytes4 constant SEL_TEXT   = 0x59d1d43c;
+    /// @dev IContentHashResolver.contenthash(bytes32) selector
+    bytes4 constant SEL_CHASH  = 0xbc1c58d1;
+
+    // ─── State ────────────────────────────────────────────────────────────────
+
     address public owner;
-    mapping(address => bool) public signers;
-    string public gatewayUrl;
 
-    /// @notice When true, resolveWithProof expects a storage proof instead of
-    ///         a gateway signature.  Set to false at construction time so that
-    ///         the contract is fully functional from day one.
-    bool public verifyProofs;
+    /// @notice L2RecordsV3 contract address on Optimism
+    address public l2RecordsAddress;
 
-    // ─── Errors ───────────────────────────────────────────────────────────────
-
-    error OffchainLookup(
-        address sender,
-        string[] urls,
-        bytes callData,
-        bytes4 callbackFunction,
-        bytes extraData
-    );
-    error Unauthorized();
-    error InvalidSigner();
-    error InvalidSignatureLength();
-    error SignatureExpired();
-    error ZeroAddress();
-    /// @notice Raised when proof mode is enabled but proof verification is not
-    ///         yet implemented (C2 milestone).
-    error ProofVerificationNotImplemented();
+    /// @notice OPFaultVerifier — mutable to support future OP Stack upgrades
+    IGatewayVerifier public verifier;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
-    event SignerAdded(address indexed signer);
-    event SignerRemoved(address indexed signer);
-    event GatewayUrlUpdated(string previous, string next);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    event VerifyProofsToggled(bool enabled);
+    event VerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
+    event L2RecordsUpdated(address indexed previousAddr, address indexed newAddr);
 
-    // ─── Modifiers ────────────────────────────────────────────────────────────
+    // ─── Errors ───────────────────────────────────────────────────────────────
+
+    error Unauthorized();
+    error ZeroAddress();
+    error UnsupportedSelector(bytes4 selector);
+
+    // ─── Modifier ────────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
         _;
     }
 
-    // ─── Constructor ──────────────────────────────────────────────────────────
+    // ─── Constructor ─────────────────────────────────────────────────────────
 
-    /// @param _owner         Contract owner address
-    /// @param _signers       Initial set of authorized gateway signers (used in
-    ///                       signature mode)
-    /// @param _gatewayUrl    CCIP-Read gateway URL template
-    /// @param _verifyProofs  Start in proof-verification mode (use false for C1)
     constructor(
         address _owner,
-        address[] memory _signers,
-        string memory _gatewayUrl,
-        bool _verifyProofs
+        IGatewayVerifier _verifier,
+        address _l2RecordsAddress
     ) {
         if (_owner == address(0)) revert ZeroAddress();
+        if (address(_verifier) == address(0)) revert ZeroAddress();
+        if (_l2RecordsAddress == address(0)) revert ZeroAddress();
         owner = _owner;
-        gatewayUrl = _gatewayUrl;
-        verifyProofs = _verifyProofs;
+        verifier = _verifier;
+        l2RecordsAddress = _l2RecordsAddress;
         emit OwnershipTransferred(address(0), _owner);
-        for (uint256 i = 0; i < _signers.length; i++) {
-            if (_signers[i] == address(0)) revert ZeroAddress();
-            signers[_signers[i]] = true;
-            emit SignerAdded(_signers[i]);
-        }
     }
 
-    // ─── Admin ────────────────────────────────────────────────────────────────
+    // ─── Ownership & Admin ────────────────────────────────────────────────────
 
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
@@ -90,164 +103,180 @@ contract OPResolver {
         owner = newOwner;
     }
 
-    function addSigner(address signer) external onlyOwner {
-        if (signer == address(0)) revert ZeroAddress();
-        signers[signer] = true;
-        emit SignerAdded(signer);
+    /// @notice Update the verifier contract.
+    ///         Call this when OP Stack upgrades (e.g., new fault proof system).
+    function setVerifier(IGatewayVerifier _verifier) external onlyOwner {
+        if (address(_verifier) == address(0)) revert ZeroAddress();
+        emit VerifierUpdated(address(verifier), address(_verifier));
+        verifier = _verifier;
     }
 
-    function removeSigner(address signer) external onlyOwner {
-        signers[signer] = false;
-        emit SignerRemoved(signer);
+    /// @notice Update the L2RecordsV3 address (e.g., after mainnet migration).
+    function setL2RecordsAddress(address _addr) external onlyOwner {
+        if (_addr == address(0)) revert ZeroAddress();
+        emit L2RecordsUpdated(l2RecordsAddress, _addr);
+        l2RecordsAddress = _addr;
     }
 
-    function setGatewayUrl(string calldata newUrl) external onlyOwner {
-        emit GatewayUrlUpdated(gatewayUrl, newUrl);
-        gatewayUrl = newUrl;
+    // ─── ERC-165 ──────────────────────────────────────────────────────────────
+
+    function supportsInterface(bytes4 x) external pure returns (bool) {
+        return
+            x == 0x01ffc9a7 || // IERC165
+            x == 0x9061b923 || // IExtendedResolver (ENSIP-10)
+            x == 0x3b3b57de || // IAddrResolver.addr(bytes32)
+            x == 0xf1cb7e06 || // IAddressResolver.addr(bytes32,uint256)
+            x == 0x59d1d43c || // ITextResolver.text(bytes32,string)
+            x == 0xbc1c58d1;   // IContentHashResolver.contenthash(bytes32)
     }
 
-    /// @notice Toggle between signature-based and proof-based verification.
-    /// @param enabled If true, resolveWithProof will expect a storage proof
-    ///                (proof mode is a stub until C2).
-    function setVerifyProofs(bool enabled) external onlyOwner {
-        verifyProofs = enabled;
-        emit VerifyProofsToggled(enabled);
-    }
+    // ─── IExtendedResolver.resolve ────────────────────────────────────────────
 
-    // ─── EIP-3668 resolution ──────────────────────────────────────────────────
+    /// @notice Entry point for ENS resolution. Builds storage proof request for
+    ///         the requested record type and reverts with OffchainLookup.
+    /// @param  name DNS-encoded ENS name (not used directly — node from data)
+    /// @param  data ABI-encoded call: addr(node), text(node,key), etc.
+    function resolve(
+        bytes calldata name,
+        bytes calldata data
+    ) external view returns (bytes memory) {
+        if (data.length < 4) revert UnsupportedSelector(bytes4(0));
+        bytes4 sel = bytes4(data[:4]);
 
-    /// @notice Called by ENS clients. Always reverts with OffchainLookup to
-    ///         trigger the CCIP-Read flow.
-    function resolve(bytes calldata name, bytes calldata data) external view returns (bytes memory) {
-        string[] memory urls = new string[](1);
-        urls[0] = gatewayUrl;
-
-        revert OffchainLookup(
-            address(this),
-            urls,
-            data,
-            this.resolveWithProof.selector,
-            abi.encode(name, data)
-        );
-    }
-
-    /// @notice Callback after the client receives the gateway response.
-    ///
-    ///         Signature mode (verifyProofs == false):
-    ///           `response` is ABI-encoded (bytes result, uint64 expires, bytes signature).
-    ///           Verifies the EIP-3668 gateway signature exactly as OffchainResolver does.
-    ///
-    ///         Proof mode (verifyProofs == true):
-    ///           `response` is ABI-encoded (bytes result, bytes proof) where
-    ///           `proof` is ABI-encoded (bytes32 stateRoot, bytes[] storageProof).
-    ///           Placeholder types — exact format to be finalised in C2.
-    ///           Currently reverts with ProofVerificationNotImplemented().
-    ///
-    /// @param response   Gateway response (format depends on verifyProofs flag)
-    /// @param extraData  ABI-encoded (bytes name, bytes callData) from OffchainLookup
-    function resolveWithProof(bytes calldata response, bytes calldata extraData)
-        external
-        view
-        returns (bytes memory)
-    {
-        if (verifyProofs) {
-            return _resolveWithStorageProof(response, extraData);
+        if (sel == SEL_ADDR) {
+            // addr(bytes32 node) → ETH address (coinType 60)
+            bytes32 node = abi.decode(data[4:], (bytes32));
+            _fetchAddr(node, 60, data);
+        } else if (sel == SEL_ADDR2) {
+            // addr(bytes32 node, uint256 coinType)
+            (bytes32 node, uint256 coinType) = abi.decode(data[4:], (bytes32, uint256));
+            _fetchAddr(node, coinType, data);
+        } else if (sel == SEL_TEXT) {
+            // text(bytes32 node, string key)
+            (bytes32 node, string memory key) = abi.decode(data[4:], (bytes32, string));
+            _fetchText(node, key, data);
+        } else if (sel == SEL_CHASH) {
+            // contenthash(bytes32 node)
+            bytes32 node = abi.decode(data[4:], (bytes32));
+            _fetchContenthash(node, data);
         } else {
-            return _resolveWithSignature(response, extraData);
+            revert UnsupportedSelector(sel);
+        }
+
+        // unreachable: _fetch* always reverts via OffchainLookup
+        return "";
+    }
+
+    // ─── Fetch helpers ────────────────────────────────────────────────────────
+
+    /// @dev Read _addrs[node][coinType] from L2RecordsV3 (slot 7)
+    function _fetchAddr(bytes32 node, uint256 coinType, bytes calldata carry) private view {
+        GatewayRequest memory r = GatewayFetcher
+            .newRequest(1)
+            .setTarget(l2RecordsAddress)
+            .setSlot(SLOT_ADDRS)
+            .push(node)
+            .follow()
+            .push(coinType)
+            .follow()
+            .readBytes()
+            .setOutput(0);
+
+        fetch(verifier, r, this.addrCallback.selector, carry, new string[](0));
+    }
+
+    /// @dev Read _texts[node][key] from L2RecordsV3 (slot 8).
+    ///      GatewayVM's FOLLOW op computes keccak256(abi.encodePacked(key_bytes, slot)),
+    ///      which matches Solidity's mapping(string => ...) slot derivation.
+    ///      We must push the raw string bytes — NOT a pre-hashed value.
+    function _fetchText(bytes32 node, string memory key, bytes calldata carry) private view {
+        GatewayRequest memory r = GatewayFetcher
+            .newRequest(1)
+            .setTarget(l2RecordsAddress)
+            .setSlot(SLOT_TEXTS)
+            .push(node)
+            .follow()
+            .push(bytes(key))
+            .follow()
+            .readBytes()
+            .setOutput(0);
+
+        fetch(verifier, r, this.textCallback.selector, carry, new string[](0));
+    }
+
+    /// @dev Read _contenthashes[node] from L2RecordsV3 (slot 9)
+    function _fetchContenthash(bytes32 node, bytes calldata carry) private view {
+        GatewayRequest memory r = GatewayFetcher
+            .newRequest(1)
+            .setTarget(l2RecordsAddress)
+            .setSlot(SLOT_CONTENTHASH)
+            .push(node)
+            .follow()
+            .readBytes()
+            .setOutput(0);
+
+        fetch(verifier, r, this.contenthashCallback.selector, carry, new string[](0));
+    }
+
+    // ─── Callbacks ────────────────────────────────────────────────────────────
+
+    /// @notice Called by fetchCallback after proof verification for addr()
+    /// @param  values  Verified storage values: values[0] = raw bytes for the address
+    /// @param  exitCode 0 = success
+    /// @param  carry   Original resolve() calldata (to determine return ABI)
+    function addrCallback(
+        bytes[] calldata values,
+        uint8 exitCode,
+        bytes calldata carry
+    ) external pure returns (bytes memory) {
+        bytes4 sel = bytes4(carry[:4]);
+        if (exitCode != 0 || values.length == 0 || values[0].length == 0) {
+            // Record not found — return zero address / empty bytes
+            if (sel == SEL_ADDR2) return abi.encode(bytes(""));
+            return abi.encode(address(0));
+        }
+
+        if (sel == SEL_ADDR2) {
+            // addr(bytes32, uint256) → bytes (raw address bytes for the coin type)
+            return abi.encode(values[0]);
+        } else {
+            // addr(bytes32) → address (ETH, coinType=60, 20 bytes stored left-aligned)
+            // values[0] is 20 bytes of address data:
+            //   mem layout: [length_word_32B][addr_20B][zero_pad...]
+            //   mload(ptr+32) = [addr_20B][zero_12B] (left-aligned in 256-bit word)
+            //   shr(96) removes the 12-byte right-pad → address in low 20 bytes
+            bytes memory raw = values[0];
+            address result;
+            if (raw.length >= 20) {
+                assembly {
+                    result := shr(96, mload(add(raw, 32)))
+                }
+            }
+            return abi.encode(result);
         }
     }
 
-    // ─── Internal: signature path (C1 / OffchainResolver-compatible) ──────────
-
-    function _resolveWithSignature(bytes calldata response, bytes calldata extraData)
-        internal
-        view
-        returns (bytes memory)
-    {
-        (bytes memory result, uint64 expires, bytes memory sig) =
-            abi.decode(response, (bytes, uint64, bytes));
-
-        if (block.timestamp > expires) revert SignatureExpired();
-
-        // Recover original callData to bind the signature to the specific request.
-        (, bytes memory callData) = abi.decode(extraData, (bytes, bytes));
-
-        // EIP-3668 signing scheme:
-        // keccak256(hex"1900" ++ address(this) ++ expires ++ keccak256(callData) ++ keccak256(result))
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                hex"1900",
-                address(this),
-                expires,
-                keccak256(callData),
-                keccak256(result)
-            )
-        );
-        bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-
-        address recovered = _recover(ethHash, sig);
-        if (recovered == address(0)) revert InvalidSigner();
-        if (!signers[recovered]) revert InvalidSigner();
-
-        return result;
-    }
-
-    // ─── Internal: proof path (C2 TODO) ──────────────────────────────────────
-
-    /// @dev Proof format (placeholder — to be finalised in C2):
-    ///   response = abi.encode(bytes result, bytes proof)
-    ///   proof    = abi.encode(bytes32 stateRoot, bytes[] storageProof)
-    ///
-    ///   C2 will:
-    ///   1. Retrieve the OP L2OutputOracle contract on L1.
-    ///   2. Verify that stateRoot matches the committed output at a recent L2 block.
-    ///   3. Walk the MPT storage proof to confirm the slot value equals keccak256(result).
-    function _resolveWithStorageProof(bytes calldata response, bytes calldata /*extraData*/)
-        internal
-        pure
-        returns (bytes memory)
-    {
-        // Decode to validate structure (will panic on malformed input even in stub).
-        (bytes memory result, bytes memory proof) = abi.decode(response, (bytes, bytes));
-
-        // Decode proof shape to validate encoding (values unused until C2).
-        // solhint-disable-next-line no-unused-vars
-        (bytes32 stateRoot, bytes[] memory storageProof) = abi.decode(proof, (bytes32, bytes[]));
-
-        // Silence unused-variable warnings at the Solidity level.
-        (result, stateRoot, storageProof); // referenced but verification not yet done
-
-        // TODO(C2): verify stateRoot against L2OutputOracle on L1, then verify
-        //           storageProof against stateRoot using the Optimism Bedrock
-        //           MPT proof library.
-        revert ProofVerificationNotImplemented();
-    }
-
-    // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    function _recover(bytes32 hash, bytes memory sig) internal pure returns (address) {
-        if (sig.length != 65) revert InvalidSignatureLength();
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
+    /// @notice Called by fetchCallback after proof verification for text()
+    function textCallback(
+        bytes[] calldata values,
+        uint8 exitCode,
+        bytes calldata /* carry */
+    ) external pure returns (bytes memory) {
+        if (exitCode != 0 || values.length == 0 || values[0].length == 0) {
+            return abi.encode("");
         }
-        if (v < 27) v += 27;
-        return ecrecover(hash, v, r, s);
+        return abi.encode(string(values[0]));
     }
 
-    /// @notice EIP-165 supportsInterface
-    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
-        return interfaceId == 0x01ffc9a7 // EIP-165
-            || interfaceId == 0x9061b923 // IExtendedResolver
-            || interfaceId == 0x582de3e7; // IERC7996
-    }
-
-    /// @notice IERC7996 feature detection stub.
-    function supportsFeature(bytes4 /*featureId*/) external pure returns (bool) {
-        return false;
+    /// @notice Called by fetchCallback after proof verification for contenthash()
+    function contenthashCallback(
+        bytes[] calldata values,
+        uint8 exitCode,
+        bytes calldata /* carry */
+    ) external pure returns (bytes memory) {
+        if (exitCode != 0 || values.length == 0 || values[0].length == 0) {
+            return abi.encode(bytes(""));
+        }
+        return abi.encode(values[0]);
     }
 }

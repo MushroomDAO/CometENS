@@ -1,18 +1,28 @@
 /**
  * CometENS CCIP-Read Gateway — Cloudflare Worker
  *
- * Implements the EIP-3668 off-chain resolver gateway.
- * Receives calldata from the L1 OffchainResolver, reads records from
- * L2Records on OP Sepolia or OP Mainnet, signs the response, and returns it.
+ * Two operating modes:
  *
- * Required secrets (set via `wrangler secret put <NAME> --env <testnet|production>`):
+ * **Signature mode** (default, C2-era OffchainResolver)
+ *   POST /  or  POST /api/ccip  with JSON body { sender, data }
+ *   Reads records from L2Records on OP via viem, signs response with PRIVATE_KEY_SUPPLIER.
+ *
+ * **Proof mode** (C3/C4, OPResolver + OPFaultVerifier)
+ *   GET  /{sender}/{data}  — EIP-3668 standard URL template format
+ *   Uses @unruggable/gateways OPFaultRollup + Gateway to generate Bedrock storage proofs.
+ *   Requires: PROOF_MODE=true, ETH_RPC_URL (L1 Sepolia/Mainnet), OP_RPC_URL (L2).
+ *   No signing key needed — OPFaultVerifier on L1 verifies proofs trustlessly.
+ *
+ * Required secrets (wrangler secret put <NAME> --env <testnet|production>):
  *   OP_RPC_URL               — Optimism RPC endpoint (Sepolia or Mainnet)
- *   PRIVATE_KEY_SUPPLIER     — 0x-prefixed private key that signs CCIP responses
+ *   PRIVATE_KEY_SUPPLIER     — 0x-prefixed key that signs CCIP responses (signature mode)
+ *   ETH_RPC_URL              — Ethereum L1 RPC (Sepolia or Mainnet) — proof mode only
  *
  * Required vars (wrangler.toml [env.*].vars):
  *   NETWORK                  — "op-sepolia" | "op-mainnet"
  *   L2_RECORDS_ADDRESS       — deployed L2Records contract address
  *   ROOT_DOMAIN              — Root domain (e.g., "aastar.eth") [informational only]
+ *   PROOF_MODE               — "true" to enable Bedrock proof mode (GET /{sender}/{data})
  */
 
 import {
@@ -27,13 +37,22 @@ import {
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
-import { namehash, labelhash } from 'viem/ens'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Challenge period by network (seconds). Used to estimate when proofs become available. */
+const CHALLENGE_PERIOD: Record<string, number> = {
+  'op-mainnet': 302_400,   // 3.5 days (post-Granite)
+  'op-sepolia': 302_400,   // same parameter on testnet
+}
+
+/** Approximate OP block time in seconds */
+const OP_BLOCK_TIME = 2
+
 interface Env {
   OP_RPC_URL: string
+  ETH_RPC_URL?: string        // L1 Sepolia/Mainnet — required for proof mode
   PRIVATE_KEY_SUPPLIER: string
   L2_RECORDS_ADDRESS: string
   NETWORK: 'op-sepolia' | 'op-mainnet'
@@ -46,34 +65,152 @@ interface Env {
    * Shared with the API Worker (same namespace ID in wrangler.toml).
    */
   RECORD_CACHE?: KVNamespace
-  PROOF_MODE?: string  // "true" enables Bedrock storage proof mode — only active when DEV_MODE=true also set
-  DEV_MODE?: string   // "true" required alongside PROOF_MODE to prevent accidental production activation
+  /**
+   * Enable Bedrock storage proof mode.
+   * When "true", GET /{sender}/{data} serves OPFaultRollup storage proofs.
+   * Requires ETH_RPC_URL (L1 provider).
+   */
+  PROOF_MODE?: string
+  /**
+   * Optional comma-separated list of allowed sender (resolver) addresses for proof mode.
+   * When set, requests from any other sender are rejected with 403.
+   * In EIP-3668, sender = the L1 resolver contract address that emitted OffchainLookup.
+   * Example: "0xABC...123,0xDEF...456"
+   */
+  ALLOWED_SENDERS?: string
   /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
   ANALYTICS?: AnalyticsEngineDataset
 }
 
 // L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
 
-// ─── Proof mode stub (C2) ─────────────────────────────────────────────────────
+// ─── Proof mode (C4) ──────────────────────────────────────────────────────────
 
 /**
- * C2 stub: Bedrock storage proof generation not yet implemented.
- * Production implementation will:
- *   1. Decode callData to get the storage slot(s) being queried
- *   2. Call eth_getProof on OP Sepolia/Mainnet for L2Records contract
- *   3. Return ABI-encoded (bytes[] proof, bytes result) matching OPResolver.resolveWithProof()
+ * Module-level lazy singleton for the proof Gateway.
+ *
+ * CF Workers reuse the same isolate (and module scope) across many requests.
+ * Creating a new OPFaultRollup + Gateway per request would re-instantiate
+ * ethers providers and discard the latestCache / commitCacheMap on every call.
+ * The singleton is keyed on (eth_rpc, op_rpc, network) so if env vars differ
+ * between deployments, a new instance is created automatically.
  */
-function handleProofMode(_callData: string, _resolverAddress: Hex): Response {
-  return new Response(
-    JSON.stringify({
-      error: 'proof_mode_not_implemented',
-      message: 'Bedrock storage proof mode is not yet implemented. Set PROOF_MODE=false or unset to use signature mode.',
-    }),
-    { status: 501, headers: { 'Content-Type': 'application/json' } },
-  )
+let _gatewayKey = ''
+let _gatewayInstance: import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup> | null = null
+
+async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup>> {
+  const key = `${env.ETH_RPC_URL}|${env.OP_RPC_URL}|${env.NETWORK}`
+  if (_gatewayInstance && _gatewayKey === key) return _gatewayInstance
+
+  const { JsonRpcProvider } = await import('ethers')
+  const { OPFaultRollup, Gateway } = await import('@unruggable/gateways')
+
+  const provider1 = new JsonRpcProvider(env.ETH_RPC_URL!)  // L1 (Sepolia / Mainnet)
+  const provider2 = new JsonRpcProvider(env.OP_RPC_URL)     // L2 (OP Sepolia / Mainnet)
+
+  const config =
+    env.NETWORK === 'op-mainnet'
+      ? OPFaultRollup.mainnetConfig
+      : OPFaultRollup.sepoliaConfig
+
+  _gatewayInstance = new Gateway(new OPFaultRollup({ provider1, provider2 }, config))
+  _gatewayKey = key
+  return _gatewayInstance
 }
 
-// ─── Core resolution logic ────────────────────────────────────────────────────
+/**
+ * Query the rollup's latest finalized commit (anchor state).
+ * Returns the L2 block number that proofs are generated against.
+ */
+async function getAnchorL2Block(env: Env): Promise<{ l2Block: bigint; index: bigint } | null> {
+  try {
+    const gateway = await getGateway(env)
+    const commit = await gateway.rollup.fetchLatestCommit()
+    // OPFaultCommit has game.l2BlockNumber — the L2 block covered by the finalized dispute game
+    const l2Block = (commit as any).game?.l2BlockNumber as bigint | undefined
+    if (l2Block === undefined) return null
+    return { l2Block, index: commit.index }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Serve an EIP-3668 CCIP-Read proof request using @unruggable/gateways.
+ *
+ * Called when PROOF_MODE=true and the request matches GET /{sender}/{data}.
+ * Uses OPFaultRollup to fetch a Bedrock storage proof from the OP node, then
+ * encodes it as the witness expected by OPFaultVerifier on L1.
+ *
+ * Protocol "raw" means no additional CCIP signing layer — the OPFaultVerifier
+ * contract itself verifies the proof against the L1 rootClaim trustlessly.
+ *
+ * Note: nonzero GatewayVM exitCode is treated as "record not found" and
+ * returned to the client as empty data.  This matches ENS resolver conventions
+ * where unregistered names return zero/empty rather than reverting.
+ */
+async function handleProofMode(
+  calldata: Hex,
+  sender: Hex,
+  env: Env,
+): Promise<Response> {
+  if (!env.ETH_RPC_URL) {
+    return new Response(
+      JSON.stringify({ error: 'ETH_RPC_URL not configured — required for proof mode' }),
+      { status: 503, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
+    )
+  }
+
+  const gateway = await getGateway(env)
+
+  // Pre-check: is the anchor state recent enough to cover L2 data?
+  // If the latest finalized L2 block is far behind the current L2 head,
+  // proofs will verify against stale state where records may not exist yet.
+  const anchor = await getAnchorL2Block(env)
+  if (anchor) {
+    // Query current L2 block to calculate staleness
+    try {
+      const { JsonRpcProvider } = await import('ethers')
+      const l2Provider = new JsonRpcProvider(env.OP_RPC_URL)
+      const currentL2Block = BigInt(await l2Provider.getBlockNumber())
+      const blocksBehind = currentL2Block - anchor.l2Block
+
+      // If anchor is more than 1800 blocks (~1 hour) behind, proofs for recent
+      // state changes will fail. Return 503 with diagnostic info.
+      if (blocksBehind > 1800n) {
+        const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+        const estimatedCatchUpSec = Number(blocksBehind) * OP_BLOCK_TIME
+        const retryAfter = Math.min(estimatedCatchUpSec, challengePeriod)
+
+        return new Response(JSON.stringify({
+          error: 'Proof not yet available — anchor state is behind',
+          anchorL2Block: anchor.l2Block.toString(),
+          currentL2Block: currentL2Block.toString(),
+          blocksBehind: blocksBehind.toString(),
+          estimatedRetrySeconds: retryAfter,
+          detail: `The L1 anchor covers L2 block ${anchor.l2Block}. Current L2 head is ${currentL2Block}. Records written after block ${anchor.l2Block} cannot be proven yet.`,
+        }), {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': String(retryAfter),
+            ...corsHeaders,
+          },
+        })
+      }
+    } catch {
+      // L2 RPC unreachable — proceed with proof generation (let it fail naturally if stale)
+    }
+  }
+
+  // "raw" protocol: return proof bytes directly — no CCIP signing wrapper.
+  const { data } = await gateway.handleRead(sender, calldata, { protocol: 'raw' })
+
+  return new Response(JSON.stringify({ data }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  })
+}
 
 // ─── KV cache helpers ─────────────────────────────────────────────────────────
 
@@ -99,7 +236,7 @@ async function kvGetContenthash(kv: KVNamespace | undefined, node: Hex): Promise
   return val as Hex
 }
 
-// ─── Core resolution logic ────────────────────────────────────────────────────
+// ─── Signature mode (C2-era) ──────────────────────────────────────────────────
 
 async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
   const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
@@ -107,6 +244,7 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
   const kv = env.RECORD_CACHE
 
   const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data: calldata })
+  if (!args) throw new Error('Unsupported selector')
 
   if (functionName === 'addr') {
     if (args.length === 2) {
@@ -191,9 +329,14 @@ async function handleResolveSigned(
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 }
+
+// Matches EIP-3668 GET URL template: /{sender}/{data}
+// sender: 0x + 40 hex chars (address)
+// data:   0x + any hex (calldata)
+const PROOF_PATH_RE = /^\/(0x[0-9a-fA-F]{40})\/(0x[0-9a-fA-F]+)(?:\.json)?$/
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -205,8 +348,60 @@ export default {
       return new Response(null, { headers: corsHeaders })
     }
 
-    // ─── CCIP-Read endpoint ───────────────────────────────────────────────────
-    // Handles both root '/' (EIP-3668 standard, used by ENS app) and '/api/ccip'
+    // ─── Proof mode: GET /{sender}/{data} (EIP-3668 URL template) ────────────
+    // OPResolver emits OffchainLookup with gateway URLs containing {sender}/{data}
+    // placeholders.  The CCIP-Read client substitutes them and does a GET request.
+    if (request.method === 'GET' && env.PROOF_MODE === 'true') {
+      const m = path.match(PROOF_PATH_RE)
+      if (m) {
+        const [, sender, calldata] = m
+        // Validate sender against allowlist (if configured).
+        // sender = L1 resolver address that emitted OffchainLookup.
+        if (env.ALLOWED_SENDERS) {
+          const allowed = env.ALLOWED_SENDERS.split(',').map((s) => s.trim().toLowerCase())
+          if (!allowed.includes(sender.toLowerCase())) {
+            return new Response(JSON.stringify({ error: 'Sender not allowed' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            })
+          }
+        }
+
+        // Validate calldata format: must be valid hex, 4+ bytes (selector), ≤ 8KB.
+        const dataHex = calldata.slice(2) // strip 0x
+        if (dataHex.length % 2 !== 0) {
+          return new Response(JSON.stringify({ error: 'Invalid calldata: odd-length hex' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        if (dataHex.length < 8) { // minimum 4 bytes = function selector
+          return new Response(JSON.stringify({ error: 'Calldata too short' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        if (dataHex.length > 16384) { // 8KB max
+          return new Response(JSON.stringify({ error: 'Calldata too large' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        try {
+          return await handleProofMode(calldata as Hex, sender as Hex, env)
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          return new Response(JSON.stringify({ error: 'Proof generation failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+      }
+    }
+
+    // ─── Signature mode: POST /  or  POST /api/ccip ───────────────────────────
+    // Legacy C2-era OffchainResolver path.  Reads from L2 via viem and signs
+    // the response with PRIVATE_KEY_SUPPLIER.
     if (path === '/' || path === '/api/ccip') {
       if (request.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
@@ -238,13 +433,6 @@ export default {
         }
         const resolverAddress: Hex = payload.sender
 
-        // PROOF_MODE is a C2 development stub (returns 501). It requires BOTH
-        // PROOF_MODE=true AND DEV_MODE=true to activate, preventing accidental
-        // enablement in any deployed environment (testnet or mainnet).
-        if (env.PROOF_MODE === 'true' && env.DEV_MODE === 'true') {
-          return handleProofMode(calldata, resolverAddress)
-        }
-
         const result = await handleResolveSigned(calldata, resolverAddress, env)
 
         return new Response(JSON.stringify(result), {
@@ -260,19 +448,67 @@ export default {
       }
     }
 
-    // ─── Registration endpoint ────────────────────────────────────────────────
-    if (path === '/api/register') {
-      if (request.method !== 'POST') {
-        return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-          status: 405,
+    // ─── Proof status: GET /proof-status ─────────────────────────────────────
+    // Returns the current anchor L2 block and estimated proof availability.
+    // Frontend uses this to show "ENS App will resolve in ~X hours" countdown.
+    if (path === '/proof-status' && request.method === 'GET') {
+      if (env.PROOF_MODE !== 'true' || !env.ETH_RPC_URL) {
+        return new Response(JSON.stringify({
+          proofMode: false,
+          detail: 'Proof mode is not enabled on this gateway',
+        }), {
+          status: 200,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       }
 
-      return new Response(JSON.stringify({ error: 'Registration is not implemented on the worker yet.' }), {
-        status: 501,
-        headers: { 'Content-Type': 'application/json', ...corsHeaders },
-      })
+      try {
+        const anchor = await getAnchorL2Block(env)
+        const { JsonRpcProvider } = await import('ethers')
+        const l2Provider = new JsonRpcProvider(env.OP_RPC_URL)
+        const currentL2Block = BigInt(await l2Provider.getBlockNumber())
+        const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+
+        if (!anchor) {
+          return new Response(JSON.stringify({
+            proofMode: true,
+            error: 'Could not fetch anchor state',
+            currentL2Block: currentL2Block.toString(),
+            challengePeriodSeconds: challengePeriod,
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+
+        const blocksBehind = currentL2Block - anchor.l2Block
+        const estimatedDelaySec = Number(blocksBehind) * OP_BLOCK_TIME
+
+        return new Response(JSON.stringify({
+          proofMode: true,
+          network: env.NETWORK,
+          anchorL2Block: anchor.l2Block.toString(),
+          currentL2Block: currentL2Block.toString(),
+          blocksBehind: blocksBehind.toString(),
+          challengePeriodSeconds: challengePeriod,
+          estimatedProofDelaySec: Math.max(0, estimatedDelaySec),
+          // For a record just written at currentL2Block, this is when it becomes provable:
+          // challengePeriod covers the dispute window for the next game that includes currentL2Block.
+          estimatedNewRecordDelaySec: challengePeriod,
+          timestamp: Math.floor(Date.now() / 1000),
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      } catch (e) {
+        return new Response(JSON.stringify({
+          proofMode: true,
+          error: 'Failed to query proof status',
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
     }
 
     // ─── Health check ─────────────────────────────────────────────────────────
@@ -281,6 +517,7 @@ export default {
         status: 'ok',
         network: env.NETWORK,
         rootDomain: env.ROOT_DOMAIN || 'not configured',
+        proofMode: env.PROOF_MODE === 'true',
         timestamp: Math.floor(Date.now() / 1000),
       }), {
         status: 200,

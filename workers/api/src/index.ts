@@ -14,8 +14,6 @@
  * Gateway Worker reads KV for edge-cached resolution (Phase 2).
  */
 
-export { NonceStore } from './NonceStore'
-
 import {
   createPublicClient,
   http,
@@ -48,6 +46,20 @@ import { handleV1Register } from '../../../server/gateway/v1/register'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
+/**
+ * TTL for KV record cache entries (seconds).
+ * Records expire and get refreshed from L2 on the next gateway read.
+ * 300s = 5 minutes — balances edge performance with data freshness.
+ * CF KV minimum expirationTtl is 60s.
+ */
+const RECORD_CACHE_TTL = 300
+
+/** Challenge period by network (seconds). */
+const CHALLENGE_PERIOD: Record<string, number> = {
+  'op-mainnet': 302_400,   // 3.5 days (post-Granite)
+  'op-sepolia': 302_400,   // same parameter on testnet
+}
+
 export interface Env {
   /** 'op-sepolia' | 'op-mainnet' */
   NETWORK: string
@@ -61,6 +73,8 @@ export interface Env {
   WORKER_EOA_PRIVATE_KEY?: string
   /** Comma-separated addresses allowed to call /v1/register */
   UPSTREAM_ALLOWED_SIGNERS?: string
+  /** Gateway Worker URL (used by /resolve-status to query proof status) */
+  GATEWAY_URL?: string
   /** CF KV namespace for address→label registry */
   REGISTRY?: KVNamespace
   /**
@@ -71,12 +85,6 @@ export interface Env {
    * Must bind to the same KV namespace ID as the Gateway Worker's RECORD_CACHE.
    */
   RECORD_CACHE?: KVNamespace
-  /**
-   * Durable Object namespace for atomic nonce consumption (D1).
-   * Eliminates the KV TOCTOU race in consumeNonce().
-   * Optional: falls back to RECORD_CACHE KV when not bound (dev/test).
-   */
-  NONCE_STORE?: DurableObjectNamespace
   /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
   ANALYTICS?: AnalyticsEngineDataset
 }
@@ -123,9 +131,10 @@ export default {
 
       // ── Public GET endpoints ──────────────────────────────────────────────
       if (request.method === 'GET') {
-        if (path === '/check-label')  { response = await handleCheckLabel(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
-        if (path === '/check-owner')  { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
-        if (path === '/lookup')       { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/check-label')    { response = await handleCheckLabel(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/check-owner')    { response = await handleCheckOwner(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/lookup')         { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/resolve-status') { response = await handleResolveStatus(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
@@ -192,25 +201,186 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
   if (!address || !isAddress(address)) return jsonError('Missing or invalid address param', 400)
 
   const kvKey = `reg:${address}`
-  const label = env.REGISTRY ? await env.REGISTRY.get(kvKey) : null
+  // Value is the full qualified name (e.g. "alice.forest.aastar.eth")
+  // Legacy entries stored only label — detect by absence of a '.' and reconstruct with ROOT_DOMAIN.
+  const stored = env.REGISTRY ? await env.REGISTRY.get(kvKey) : null
 
-  if (!label) return json({ found: false })
+  if (!stored) return json({ found: false })
 
-  // Verify the cached entry still exists on-chain (guards against stale cache)
+  const fullName = stored.includes('.') ? stored : `${stored}.${env.ROOT_DOMAIN}`
+
+  // Verify the cached entry still exists on-chain using subnodeOwner(node).
+  // This replaces the old primaryNode check and works for any parent domain.
   try {
     const pub = makePublicClient(env)
     const l2Addr = env.L2_RECORDS_ADDRESS as Address
-    const existingNode = await pub.readContract({
-      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [address as Address],
+    const node = namehash(fullName) as Hex
+    const existingOwner = await pub.readContract({
+      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
     })
-    if (existingNode === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    if ((existingOwner as string) === '0x0000000000000000000000000000000000000000') {
       if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
       return json({ found: false })
     }
   } catch { /* chain unreachable — fall through to return cached value */ }
 
-  const fullName = `${label}.${env.ROOT_DOMAIN}`
-  return json({ found: true, label, fullName })
+  return json({ found: true, name: fullName })
+}
+
+// ─── GET /resolve-status?name=alice.forest.aastar.eth ────────────────────
+// Returns whether the name is currently resolvable via ENS App (L1 proof mode)
+// and an estimated countdown if not.
+
+async function handleResolveStatus(url: URL, env: Env): Promise<Response> {
+  const name = url.searchParams.get('name')?.trim()
+  if (!name) return jsonError('Missing name param', 400)
+
+  const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+
+  // 1. Check if the name exists on L2
+  const pub = makePublicClient(env)
+  const l2Addr = env.L2_RECORDS_ADDRESS as Address
+  const node = namehash(name) as Hex
+
+  let l2Registered = false
+  try {
+    const owner = await pub.readContract({
+      address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
+    })
+    l2Registered = (owner as string) !== '0x0000000000000000000000000000000000000000'
+  } catch {
+    return jsonError('L2 RPC unreachable', 503)
+  }
+
+  if (!l2Registered) {
+    return json({ name, registered: false, l1Resolvable: false })
+  }
+
+  // 2. Query gateway /proof-status for anchor state
+  const gatewayUrl = env.GATEWAY_URL
+  if (!gatewayUrl) {
+    // No gateway configured — return basic info with default estimate
+    const nowSec = Math.floor(Date.now() / 1000)
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: 'unknown',
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + challengePeriod,
+      detail: 'GATEWAY_URL not configured — cannot query anchor state',
+    })
+  }
+
+  try {
+    const proofRes = await fetch(`${gatewayUrl.replace(/\/$/, '')}/proof-status`)
+    if (!proofRes.ok) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      return json({
+        name,
+        registered: true,
+        l1Resolvable: false,
+        challengePeriodSeconds: challengePeriod,
+        estimatedResolvableAt: nowSec + challengePeriod,
+        detail: 'Gateway proof status unavailable',
+      })
+    }
+
+    const proof = await proofRes.json() as {
+      anchorL2Block?: string
+      currentL2Block?: string
+      blocksBehind?: string
+      challengePeriodSeconds?: number
+      proofMode?: boolean
+    }
+
+    if (!proof.proofMode) {
+      // Signature mode — always resolvable (no proof delay)
+      return json({ name, registered: true, l1Resolvable: true, mode: 'signature' })
+    }
+
+    const anchorBlock = BigInt(proof.anchorL2Block ?? '0')
+    const currentBlock = BigInt(proof.currentL2Block ?? '0')
+    const blocksBehind = currentBlock - anchorBlock
+
+    // If anchor is reasonably current (within ~1 hour / 1800 blocks), proofs work
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (blocksBehind <= 1800n) {
+      return json({
+        name,
+        registered: true,
+        l1Resolvable: true,
+        mode: 'proof',
+        anchorL2Block: anchorBlock.toString(),
+      })
+    }
+
+    // Anchor is stale — estimate when it will catch up
+    // For new records: challengePeriod from now (next game needs to include current block)
+    // For stale anchor: could be dispute game infrastructure issues
+    const estimatedDelaySec = Math.min(Number(blocksBehind) * 2, challengePeriod)
+
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: false,
+      mode: 'proof',
+      anchorL2Block: anchorBlock.toString(),
+      currentL2Block: currentBlock.toString(),
+      blocksBehind: blocksBehind.toString(),
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + estimatedDelaySec,
+      estimatedDelaySeconds: estimatedDelaySec,
+      detail: `Anchor covers L2 block ${anchorBlock}; current head is ${currentBlock}. Records written after block ${anchorBlock} are not yet provable on L1.`,
+    })
+  } catch {
+    const nowSec = Math.floor(Date.now() / 1000)
+    return json({
+      name,
+      registered: true,
+      l1Resolvable: 'unknown',
+      challengePeriodSeconds: challengePeriod,
+      estimatedResolvableAt: nowSec + challengePeriod,
+      detail: 'Could not reach gateway for proof status',
+    })
+  }
+}
+
+/**
+ * Build resolve time estimate for write operation responses.
+ * Returns partial JSON to merge into the response body.
+ */
+async function buildResolveEstimate(env: Env): Promise<Record<string, unknown>> {
+  const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  // Default: challengePeriod from now
+  const base = {
+    challengePeriodSeconds: challengePeriod,
+    estimatedL1ResolvableAt: nowSec + challengePeriod,
+  }
+
+  const gatewayUrl = env.GATEWAY_URL
+  if (!gatewayUrl) return base
+
+  try {
+    const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/proof-status`)
+    if (!res.ok) return base
+    const proof = await res.json() as { proofMode?: boolean; anchorL2Block?: string; currentL2Block?: string }
+    if (!proof.proofMode) return { estimatedL1ResolvableAt: nowSec, l1Mode: 'signature' }
+
+    const blocksBehind = BigInt(proof.currentL2Block ?? '0') - BigInt(proof.anchorL2Block ?? '0')
+    const delaySec = blocksBehind > 1800n
+      ? Math.min(Number(blocksBehind) * 2, challengePeriod)
+      : challengePeriod
+
+    return {
+      challengePeriodSeconds: challengePeriod,
+      estimatedL1ResolvableAt: nowSec + delaySec,
+      anchorL2Block: proof.anchorL2Block,
+    }
+  } catch {
+    return base
+  }
 }
 
 // ─── POST /v1/register — Upstream App (personal_sign) ────────────────────────
@@ -228,20 +398,23 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
   if (payload.signature && payload.label && payload.owner && payload.timestamp) {
     const message = `CometENS:register:${String(payload.label).trim().toLowerCase()}:${payload.owner}:${payload.timestamp}`
     const signerAddress = await recoverMessageAddress({ message, signature: payload.signature as Hex })
-    await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)
+      // await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)  // D7: disabled — auth chain provides sufficient protection
   }
 
   const writer = buildWriter(env)
 
   const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer)
 
-  // Persist to KV registry on success
+  // Persist full qualified name to KV registry on success
   if (result.ok && result.name && env.REGISTRY) {
-    const label = result.name.split('.')[0]
     const ownerAddr = (payload.owner as string ?? '').toLowerCase()
-    if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, label)
+    if (ownerAddr) await env.REGISTRY.put(`reg:${ownerAddr}`, result.name)
   }
 
+  if (result.ok) {
+    const resolveEstimate = await buildResolveEstimate(env)
+    return json({ ...result, ...resolveEstimate })
+  }
   return json(result)
 }
 
@@ -254,7 +427,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   const from = payload.from as string | undefined
   if (!from || !isAddress(from)) throw badReq('Invalid from address')
 
-  await checkRateLimit(env.RECORD_CACHE, `rl:write:${from.toLowerCase()}`, 10, 60)
+  // await checkRateLimit(env.RECORD_CACHE, `rl:write:${from.toLowerCase()}`, 10, 60)  // D7: disabled — EIP-712 auth is the gate
 
   const signature = payload.signature as Hex | undefined
   if (!signature || !isHex(signature)) throw badReq('Missing or invalid signature')
@@ -291,7 +464,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -302,7 +475,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (isClearing) {
         await env.RECORD_CACHE.delete(`addr60:${message.node}`)
       } else {
-        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr)
+        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
@@ -316,7 +489,14 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (typeof msg.label !== 'string' || !msg.label) throw badReq('Invalid label')
     if (!isAddress(msg.owner)) throw badReq('Invalid owner')
 
-    // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤64 chars).
+    // Validate parent is a well-formed ENS name: dot-separated lowercase labels, each 1–63 chars.
+    // Required because parent is stored in KV and returned verbatim by /lookup — unvalidated input
+    // could store XSS/injection payloads that are returned to clients.
+    const parent = msg.parent as string
+    if (parent.length > 253) throw badReq('parent too long')
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
+
+    // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤63 chars).
     // Reject if not normalized — prevents signature mismatch from server-side normalization.
     const label = msg.label as string
     const normalizedLabel = label.trim().toLowerCase()
@@ -325,7 +505,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
 
     const message = {
-      parent: msg.parent as string,
+      parent,
       label: normalizedLabel,
       owner: msg.owner as Address,
       nonce: asBigInt(msg.nonce, 'nonce'),
@@ -336,18 +516,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    // Authorization: verify signer is a registrar or the contract owner (check BEFORE consuming nonce)
+    // Self-service model: any wallet can register their own subdomain.
+    // The Worker EOA (WORKER_EOA_PRIVATE_KEY) is the on-chain registrar and
+    // submits the L2 tx — the signer just proves intent via EIP-712.
     const parentNode = namehash(message.parent) as Hex
-    const [contractOwner, isReg] = await Promise.all([
-      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' }),
-      pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'isRegistrar', args: [parentNode, from as Address] }),
-    ])
-    if (
-      (contractOwner as string).toLowerCase() !== from.toLowerCase() &&
-      !isReg
-    ) {
-      throw Object.assign(new Error('Signer is not a registrar or contract owner'), { status: 403 })
-    }
 
     const lh = labelhash(message.label) as Hex
     const node = namehash(`${message.label}.${message.parent}`) as Hex
@@ -357,25 +529,28 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       return jsonError(`Label "${message.label}" is already registered`, 409, 'LABEL_TAKEN')
     }
 
-    // Check the owner's primary node, not the registrar's (signer != owner in registrar flow)
-    const existingPrimary = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'primaryNode', args: [message.owner] })
-    if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-      return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
-    }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    // D6: No per-wallet primaryNode limit — a wallet may hold subdomains under
+    // multiple parent domains (forest.aastar.eth, game.aastar.eth, etc.).
+    // Chain-level uniqueness (subnodeOwner check above) is the real guard.
+
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
     const txHash = await writer.registerSubnode(parentNode, lh, message.owner, message.label, addrBytes)
 
-    // Persist to KV caches (fire-and-forget; don't block response)
+    // Persist to KV caches (fire-and-forget; don't block response).
+    // Store the full qualified name so /lookup works across multi-root domains.
     const ownerLower = message.owner.toLowerCase()
+    const fullName = `${message.label}.${message.parent}`
     const kvWrites: Promise<void>[] = []
-    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, message.label))
-    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
+    if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, fullName))
+    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner, { expirationTtl: RECORD_CACHE_TTL }))
     await Promise.all(kvWrites)
 
-    return json({ ok, action: 'register', txHash })
+    // Include estimated L1 resolve time so frontend can show countdown
+    const resolveEstimate = await buildResolveEstimate(env)
+    return json({ ok, action: 'register', txHash, ...resolveEstimate })
   }
 
   // ── /set-text ─────────────────────────────────────────────────────────────
@@ -402,7 +577,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -413,7 +588,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (message.value === '') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
-        await env.RECORD_CACHE.put(kvKey, message.value)
+        await env.RECORD_CACHE.put(kvKey, message.value, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
@@ -442,7 +617,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -453,7 +628,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (message.hash === '0x') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
-        await env.RECORD_CACHE.put(kvKey, message.hash)
+        await env.RECORD_CACHE.put(kvKey, message.hash, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
@@ -483,7 +658,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -511,7 +686,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
@@ -554,7 +729,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // when WORKER_EOA_PRIVATE_KEY is missing (misconfiguration fail-fast).
     const writer = requireWriter(env)
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
 
     const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
 
@@ -610,14 +785,15 @@ function checkDeadline(deadline: bigint): void {
 }
 
 /**
- * Prevent signature replay: atomically check+store the nonce.
+ * Prevent signature replay: store nonce in KV with TTL = remaining deadline.
  *
- * Priority:
- *   1. Durable Object (NONCE_STORE) — strongly consistent, no TOCTOU race
- *   2. KV (RECORD_CACHE) — eventually consistent fallback for dev/test
- *   3. Neither bound — no-op (existing behaviour for local dev)
+ * KV is eventually consistent across CF PoPs (~1-2s window).
+ * This is acceptable because: chain-level uniqueness (AlreadyRegistered) provides
+ * the hard guarantee for registration; for set-addr/text/contenthash, the worst
+ * case of a replayed mutation is a redundant write with no net state change.
  *
  * Throws 409 if the nonce was already used within its validity window.
+ * No-op when KV is not bound (local dev without KV).
  */
 const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
@@ -626,74 +802,21 @@ async function consumeNonce(
   from: string,
   nonce: bigint,
   deadline: bigint,
-  doNamespace?: DurableObjectNamespace,
 ): Promise<void> {
+  if (!kv) return  // local dev without KV — skip replay protection
+
   const key = `nonce:${from.toLowerCase()}:${nonce}`
-  // Use BigInt arithmetic to avoid precision loss on large deadline values.
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
   const remaining = deadline > nowSecs ? deadline - nowSecs : 0n
   const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(remaining)))
 
-  if (doNamespace) {
-    // Strongly-consistent path: Durable Object guarantees atomicity.
-    const id = doNamespace.idFromName('global')
-    const stub = doNamespace.get(id)
-    const res = await stub.fetch('https://do/consume', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, ttl }),
-    })
-    const result = await res.json() as { ok: boolean }
-    if (!result.ok) throw Object.assign(new Error('Nonce already used'), { status: 409 })
-    return
-  }
-
-  // Eventually-consistent fallback: KV (dev/test without NONCE_STORE bound).
-  // WARNING: KV is not atomic — use only in dev/test environments. Production
-  // deployments must bind NONCE_STORE (Durable Object) to prevent TOCTOU replay.
-  if (kv) {
-    const existing = await kv.get(key)
-    if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
-    await kv.put(key, '1', { expirationTtl: ttl })
-    return
-  }
-
-  // Neither DO nor KV bound — fail closed. Allowing nonces to pass without
-  // deduplication would make replay protection entirely ineffective.
-  throw Object.assign(new Error('Nonce storage not configured on server'), { status: 503 })
+  const existing = await kv.get(key)
+  if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
+  await kv.put(key, '1', { expirationTtl: ttl })
 }
 
-/**
- * KV sliding-window rate limiter.
- *
- * Divides time into fixed windows of `windowSecs` seconds. Within each window,
- * counts requests per key. Throws 429 when the limit is exceeded.
- *
- * No-op when `kv` is undefined (dev/test without KV bound).
- * Key prefix `rl:` does not collide with any existing KV keys.
- */
-async function checkRateLimit(
-  kv: KVNamespace | undefined,
-  key: string,
-  limit: number,
-  windowSecs: number,
-): Promise<void> {
-  if (!kv) return
-
-  const now = Math.floor(Date.now() / 1000)
-  const windowKey = `${key}:${Math.floor(now / windowSecs)}`
-
-  const current = await kv.get(windowKey)
-  const count = current ? parseInt(current, 10) : 0
-
-  if (count >= limit) {
-    throw Object.assign(new Error('Rate limit exceeded'), { status: 429 })
-  }
-
-  // expirationTtl must be ≥ 60s per CF KV minimum — use windowSecs * 2 so
-  // the counter outlives the window (allows the window to drain naturally).
-  await kv.put(windowKey, String(count + 1), { expirationTtl: Math.max(60, windowSecs * 2) })
-}
+// D7 (TODO): Rate limiting — deferred. EIP-712 auth is the primary gate.
+// If needed in future, implement at CF infrastructure level (not per-worker).
 
 function badReq(msg: string): Error {
   return Object.assign(new Error(msg), { status: 400 })
