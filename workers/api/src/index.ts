@@ -46,6 +46,14 @@ import { handleV1Register } from '../../../server/gateway/v1/register'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
+/**
+ * TTL for KV record cache entries (seconds).
+ * Records expire and get refreshed from L2 on the next gateway read.
+ * 300s = 5 minutes — balances edge performance with data freshness.
+ * CF KV minimum expirationTtl is 60s.
+ */
+const RECORD_CACHE_TTL = 300
+
 /** Challenge period by network (seconds). */
 const CHALLENGE_PERIOD: Record<string, number> = {
   'op-mainnet': 302_400,   // 3.5 days (post-Granite)
@@ -467,7 +475,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (isClearing) {
         await env.RECORD_CACHE.delete(`addr60:${message.node}`)
       } else {
-        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr)
+        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
@@ -537,7 +545,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const fullName = `${message.label}.${message.parent}`
     const kvWrites: Promise<void>[] = []
     if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, fullName))
-    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
+    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner, { expirationTtl: RECORD_CACHE_TTL }))
     await Promise.all(kvWrites)
 
     // Include estimated L1 resolve time so frontend can show countdown
@@ -580,7 +588,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (message.value === '') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
-        await env.RECORD_CACHE.put(kvKey, message.value)
+        await env.RECORD_CACHE.put(kvKey, message.value, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
@@ -620,7 +628,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (message.hash === '0x') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
-        await env.RECORD_CACHE.put(kvKey, message.hash)
+        await env.RECORD_CACHE.put(kvKey, message.hash, { expirationTtl: RECORD_CACHE_TTL })
       }
     }
 
