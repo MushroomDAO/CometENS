@@ -1,5 +1,6 @@
 # ENS-tool (CometENS)
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 L2 subdomain distribution system: register subdomains under a root `.eth` name on Optimism, resolved globally via CCIP-Read (EIP-3668).
 
 ## Quick Start
@@ -126,3 +127,7 @@ Please read https://docs.ens.domains/llms-full.txt then help me with ENS integra
 ```bash
 claude mcp add context7 -- npx -y @upstash/context7-mcp
 ```
+
+## License
+
+Licensed under the [Apache License, Version 2.0](https://opensource.org/licenses/Apache-2.0). See [LICENSE](./LICENSE) for details.
