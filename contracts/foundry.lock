@@ -1,0 +1,32 @@
+{
+  "../eval/CometENS": {
+    "rev": "6c693b87b7df3d2dd11c986b5f6329f2cdfcc32e"
+  },
+  "../eval/CometENS-old": {
+    "rev": "b410aa6da655ea9c9e41d879c53fa827ebca6e41"
+  },
+  "../eval/ENS-offchain-resolver": {
+    "rev": "55394311908d869a04eb7f285d75ee0ca8329433"
+  },
+  "../eval/durin": {
+    "rev": "e0226e17d955f42dad93d845eb8bbb85f2df2805"
+  },
+  "../eval/ens-contracts": {
+    "rev": "91c966febd7b55494269df830fc6775f040b927b"
+  },
+  "../eval/ens-docs": {
+    "rev": "abba68d7dc42055c7b5d31215afb60281e1c29b6"
+  },
+  "../eval/ensjs": {
+    "rev": "b267f703698049406a72c741cbc997d81ab259da"
+  },
+  "../vendor/unruggable-gateways": {
+    "rev": "0a9a151515cd8a965120430be8cf52c908e4a90e"
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.6.1",
+      "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+    }
+  }
+}

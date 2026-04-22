@@ -8,14 +8,11 @@
  * Required secrets (set via `wrangler secret put <NAME> --env <testnet|production>`):
  *   OP_RPC_URL               — Optimism RPC endpoint (Sepolia or Mainnet)
  *   PRIVATE_KEY_SUPPLIER     — 0x-prefixed private key that signs CCIP responses
- *   WORKER_EOA_PRIVATE_KEY   — 0x-prefixed private key that submits L2 transactions
- *   REGISTRATION_SECRET      — Secret string for registration auth (password)
  *
  * Required vars (wrangler.toml [env.*].vars):
  *   NETWORK                  — "op-sepolia" | "op-mainnet"
  *   L2_RECORDS_ADDRESS       — deployed L2Records contract address
- *   ROOT_DOMAIN              — Root domain (e.g., "aastar.eth")
- *   ALLOWED_REGISTRANTS      — Comma-separated addresses allowed to register (optional)
+ *   ROOT_DOMAIN              — Root domain (e.g., "aastar.eth") [informational only]
  */
 
 import {
@@ -26,233 +23,139 @@ import {
   encodeAbiParameters,
   keccak256,
   encodePacked,
-  recoverMessageAddress,
   type Hex,
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { namehash, labelhash } from 'viem/ens'
+import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Env {
   OP_RPC_URL: string
   PRIVATE_KEY_SUPPLIER: string
-  WORKER_EOA_PRIVATE_KEY?: string
-  REGISTRATION_SECRET?: string
   L2_RECORDS_ADDRESS: string
   NETWORK: 'op-sepolia' | 'op-mainnet'
   ROOT_DOMAIN?: string
-  ALLOWED_REGISTRANTS?: string
+  /**
+   * CF KV namespace for ENS record cache (Phase 2).
+   * Keys:  addr60:{node}     → ETH address hex (20 bytes, "0x..." or absent)
+   *        text:{node}:{key} → text record value string
+   *        ch:{node}         → contenthash hex bytes
+   * Shared with the API Worker (same namespace ID in wrangler.toml).
+   */
+  RECORD_CACHE?: KVNamespace
+  PROOF_MODE?: string  // "true" enables Bedrock storage proof mode — only active when DEV_MODE=true also set
+  DEV_MODE?: string   // "true" required alongside PROOF_MODE to prevent accidental production activation
+  /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
+  ANALYTICS?: AnalyticsEngineDataset
 }
 
-// ─── ABIs ─────────────────────────────────────────────────────────────────────
+// L2RecordsV2ABI imported from server/gateway/abi.ts — single source of truth
 
-const RESOLVE_ABI = [
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'text',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'key', type: 'string' },
-    ],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'contenthash',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-] as const
+// ─── Proof mode stub (C2) ─────────────────────────────────────────────────────
 
-const L2_RECORDS_ABI = [
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'addr',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'text',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'key', type: 'string' },
-    ],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'contenthash',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'bytes' }],
-  },
-  {
-    type: 'function',
-    name: 'registerSubnode',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'labelhash', type: 'bytes32' },
-      { name: 'newOwner', type: 'address' },
-      { name: 'label', type: 'string' },
-      { name: 'addrBytes', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'subnodeOwner',
-    stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-] as const
-
-// Per-function ABIs
-const ADDR_SINGLE_ABI = [{
-  type: 'function', name: 'addr', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }],
-  outputs: [{ name: '', type: 'address' }],
-}] as const
-
-const ADDR_MULTI_ABI = [{
-  type: 'function', name: 'addr', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-  outputs: [{ name: '', type: 'bytes' }],
-}] as const
-
-const TEXT_ABI = [{
-  type: 'function', name: 'text', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }],
-  outputs: [{ name: '', type: 'string' }],
-}] as const
-
-const CONTENTHASH_ABI = [{
-  type: 'function', name: 'contenthash', stateMutability: 'view',
-  inputs: [{ name: 'node', type: 'bytes32' }],
-  outputs: [{ name: '', type: 'bytes' }],
-}] as const
-
-// ─── Auth utilities ───────────────────────────────────────────────────────────
-
-function buildAuthMessage(secret: string, timestamp: number): string {
-  return `cometens:auth:${secret}:${timestamp}`
+/**
+ * C2 stub: Bedrock storage proof generation not yet implemented.
+ * Production implementation will:
+ *   1. Decode callData to get the storage slot(s) being queried
+ *   2. Call eth_getProof on OP Sepolia/Mainnet for L2Records contract
+ *   3. Return ABI-encoded (bytes[] proof, bytes result) matching OPResolver.resolveWithProof()
+ */
+function handleProofMode(_callData: string, _resolverAddress: Hex): Response {
+  return new Response(
+    JSON.stringify({
+      error: 'proof_mode_not_implemented',
+      message: 'Bedrock storage proof mode is not yet implemented. Set PROOF_MODE=false or unset to use signature mode.',
+    }),
+    { status: 501, headers: { 'Content-Type': 'application/json' } },
+  )
 }
 
-interface AuthPayload {
-  address: Hex
-  timestamp: number
-  signature: Hex
+// ─── Core resolution logic ────────────────────────────────────────────────────
+
+// ─── KV cache helpers ─────────────────────────────────────────────────────────
+
+/** Read ETH addr from KV; returns null on miss or if KV not bound. */
+async function kvGetAddr(kv: KVNamespace | undefined, node: Hex): Promise<`0x${string}` | null> {
+  if (!kv) return null
+  const val = await kv.get(`addr60:${node}`)
+  if (!val || val === '0x0000000000000000000000000000000000000000') return null
+  return val as `0x${string}`
 }
 
-async function verifySignatureAuth(
-  payload: AuthPayload,
-  secret: string,
-  allowedList: string[]
-): Promise<{ valid: boolean; error?: string }> {
-  const { address, timestamp, signature } = payload
-  const TIME_WINDOW = 300 // 5 minutes
+/** Read text record from KV; returns null on miss. */
+async function kvGetText(kv: KVNamespace | undefined, node: Hex, key: string): Promise<string | null> {
+  if (!kv) return null
+  return kv.get(`text:${node}:${key}`)
+}
 
-  // 1. 检查时间戳
-  const now = Math.floor(Date.now() / 1000)
-  const drift = Math.abs(now - timestamp)
-  if (drift > TIME_WINDOW) {
-    return { valid: false, error: `Timestamp expired (drift: ${drift}s)` }
-  }
-
-  // 2. 构建消息
-  const message = buildAuthMessage(secret, timestamp)
-
-  // 3. 恢复签名地址
-  let recovered: Hex
-  try {
-    recovered = await recoverMessageAddress({ message, signature })
-  } catch (e) {
-    return { valid: false, error: 'Invalid signature format' }
-  }
-
-  // 4. 验证地址匹配
-  if (recovered.toLowerCase() !== address.toLowerCase()) {
-    return { valid: false, error: 'Signature mismatch' }
-  }
-
-  // 5. 验证白名单
-  if (allowedList.length > 0 && !allowedList.includes(address.toLowerCase())) {
-    return { valid: false, error: 'Address not in allowed list' }
-  }
-
-  return { valid: true }
+/** Read contenthash from KV; returns null on miss. */
+async function kvGetContenthash(kv: KVNamespace | undefined, node: Hex): Promise<Hex | null> {
+  if (!kv) return null
+  const val = await kv.get(`ch:${node}`)
+  if (!val || val === '0x') return null
+  return val as Hex
 }
 
 // ─── Core resolution logic ────────────────────────────────────────────────────
 
 async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
   const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
-  const client = createPublicClient({
-    chain,
-    transport: http(env.OP_RPC_URL),
-  })
   const contractAddress = env.L2_RECORDS_ADDRESS as Hex
+  const kv = env.RECORD_CACHE
 
-  const { functionName, args } = decodeFunctionData({ abi: RESOLVE_ABI, data: calldata })
+  const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data: calldata })
 
   if (functionName === 'addr') {
     if (args.length === 2) {
+      // Multi-coin addr — bypass KV (less common; only cache ETH addr)
       const [node, coinType] = args as [Hex, bigint]
+      const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
       const value = await client.readContract({
-        address: contractAddress, abi: ADDR_MULTI_ABI, functionName: 'addr', args: [node, coinType],
+        address: contractAddress, abi: L2RecordsV2ABI, functionName: 'addr', args: [node, coinType],
       })
-      return encodeFunctionResult({ abi: ADDR_MULTI_ABI, functionName: 'addr', result: value as Hex })
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: value as Hex })
     }
+
+    // ETH addr — KV first
     const [node] = args as [Hex]
+    const cached = await kvGetAddr(kv, node)
+    if (cached) {
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: ADDR_SINGLE_ABI, functionName: 'addr', args: [node],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'addr', args: [node],
     })
-    return encodeFunctionResult({ abi: ADDR_SINGLE_ABI, functionName: 'addr', result: value as `0x${string}` })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: value as `0x${string}` })
   }
 
   if (functionName === 'text') {
     const [node, key] = args as [Hex, string]
+    const cached = await kvGetText(kv, node, key)
+    if (cached !== null) {
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'text', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: TEXT_ABI, functionName: 'text', args: [node, key],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'text', args: [node, key],
     })
-    return encodeFunctionResult({ abi: TEXT_ABI, functionName: 'text', result: value as string })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'text', result: value as string })
   }
 
   if (functionName === 'contenthash') {
     const [node] = args as [Hex]
+    const cached = await kvGetContenthash(kv, node)
+    if (cached) {
+      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'contenthash', result: cached })
+    }
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
     const value = await client.readContract({
-      address: contractAddress, abi: CONTENTHASH_ABI, functionName: 'contenthash', args: [node],
+      address: contractAddress, abi: L2RecordsV2ABI, functionName: 'contenthash', args: [node],
     })
-    return encodeFunctionResult({ abi: CONTENTHASH_ABI, functionName: 'contenthash', result: value as Hex })
+    return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'contenthash', result: value as Hex })
   }
 
   throw new Error('Unsupported selector')
@@ -282,85 +185,6 @@ async function handleResolveSigned(
   )
 
   return { data }
-}
-
-// ─── Registration logic ───────────────────────────────────────────────────────
-
-interface RegisterPayload {
-  label: string
-  owner?: Hex
-  auth: AuthPayload
-}
-
-async function handleRegister(
-  payload: RegisterPayload,
-  env: Env
-): Promise<{ ok: boolean; txHash: Hex; name: string }> {
-  // 1. 验证配置
-  if (!env.REGISTRATION_SECRET) {
-    throw new Error('Registration not configured')
-  }
-  if (!env.WORKER_EOA_PRIVATE_KEY) {
-    throw new Error('Worker key not configured')
-  }
-  if (!env.ROOT_DOMAIN) {
-    throw new Error('Root domain not configured')
-  }
-
-  const allowedList = (env.ALLOWED_REGISTRANTS || '')
-    .split(',')
-    .filter(Boolean)
-    .map(a => a.toLowerCase())
-
-  // 2. 验证签名
-  const authResult = await verifySignatureAuth(payload.auth, env.REGISTRATION_SECRET, allowedList)
-  if (!authResult.valid) {
-    throw new Error(`Auth failed: ${authResult.error}`)
-  }
-
-  // 3. 验证 label
-  const label = payload.label?.trim().toLowerCase()
-  if (!label || !/^[a-z0-9-]{1,63}$/.test(label)) {
-    throw new Error('Invalid label')
-  }
-
-  // 4. 确定所有者
-  const owner = payload.owner || payload.auth.address
-
-  // 5. 检查是否已注册
-  const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
-  const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
-  const contractAddress = env.L2_RECORDS_ADDRESS as Hex
-  
-  const fullName = `${label}.${env.ROOT_DOMAIN}`
-  const parentNode = namehash(env.ROOT_DOMAIN)
-  const node = namehash(fullName)
-
-  const existing = await client.readContract({
-    address: contractAddress,
-    abi: L2_RECORDS_ABI,
-    functionName: 'subnodeOwner',
-    args: [node],
-  })
-
-  if (existing !== '0x0000000000000000000000000000000000000000') {
-    throw new Error(`Domain already registered to ${existing}`)
-  }
-
-  // 6. 提交交易
-  const workerAccount = privateKeyToAccount(env.WORKER_EOA_PRIVATE_KEY as Hex)
-  const walletClient = createPublicClient({
-    chain,
-    transport: http(env.OP_RPC_URL),
-    account: workerAccount,
-  }) as any // Type workaround for viem
-
-  // Note: Worker doesn't actually have a wallet client method in CF Workers
-  // This would need to be done via an external relayer or the L2Records would need
-  // to accept meta-transactions (EIP-2771) or use a relayer pattern
-  
-  // For now, just simulate success - in production this needs a relayer
-  throw new Error('Registration via worker requires meta-transaction support or external relayer')
 }
 
 // ─── Worker entry point ───────────────────────────────────────────────────────
@@ -406,7 +230,21 @@ export default {
           })
         }
 
-        const resolverAddress: Hex = payload.sender ?? '0x0000000000000000000000000000000000000000'
+        if (!payload.sender || !payload.sender.startsWith('0x')) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid sender (resolver address)' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        const resolverAddress: Hex = payload.sender
+
+        // PROOF_MODE is a C2 development stub (returns 501). It requires BOTH
+        // PROOF_MODE=true AND DEV_MODE=true to activate, preventing accidental
+        // enablement in any deployed environment (testnet or mainnet).
+        if (env.PROOF_MODE === 'true' && env.DEV_MODE === 'true') {
+          return handleProofMode(calldata, resolverAddress)
+        }
+
         const result = await handleResolveSigned(calldata, resolverAddress, env)
 
         return new Response(JSON.stringify(result), {
@@ -439,11 +277,11 @@ export default {
 
     // ─── Health check ─────────────────────────────────────────────────────────
     if (path === '/health') {
-      return new Response(JSON.stringify({ 
+      return new Response(JSON.stringify({
         status: 'ok',
         network: env.NETWORK,
         rootDomain: env.ROOT_DOMAIN || 'not configured',
-        registrationEnabled: !!env.REGISTRATION_SECRET,
+        timestamp: Math.floor(Date.now() / 1000),
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json', ...corsHeaders },

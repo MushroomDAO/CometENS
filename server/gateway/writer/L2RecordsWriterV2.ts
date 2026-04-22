@@ -6,93 +6,26 @@ import {
   type PublicClient,
   type Chain,
   type Hex,
+  type Address,
   type Account,
 } from 'viem'
+import { L2RecordsV2ABI } from '../abi'
 
-const L2_RECORDS_V2_ABI = [
+// Minimal inline ABI for L2RecordsV3.transferSubnodeByGateway.
+// The gateway-callable function requires msg.sender == contract owner (Worker EOA),
+// bypassing the ERC-721 approval check after the gateway has verified the EIP-712 signature.
+// Using standard ERC-721 transferFrom would fail because the Worker EOA is not the NFT owner.
+const TRANSFER_SUBNODE_ABI = [
   {
     type: 'function',
-    name: 'registerSubnode',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'labelhash', type: 'bytes32' },
-      { name: 'newOwner', type: 'address' },
-      { name: 'label', type: 'string' },
-      { name: 'addrBytes', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setAddr',
+    name: 'transferSubnodeByGateway',
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'node', type: 'bytes32' },
-      { name: 'coinType', type: 'uint256' },
-      { name: 'addrBytes', type: 'bytes' },
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
     ],
     outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setText',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'key', type: 'string' },
-      { name: 'value', type: 'string' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setContenthash',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'node', type: 'bytes32' },
-      { name: 'hash', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'addRegistrar',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'registrar', type: 'address' },
-      { name: 'quota', type: 'uint256' },
-      { name: 'expiry', type: 'uint256' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'removeRegistrar',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'registrar', type: 'address' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'isRegistrar',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'parentNode', type: 'bytes32' },
-      { name: 'addr', type: 'address' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'owner',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
   },
 ] as const
 
@@ -118,7 +51,7 @@ export class L2RecordsWriterV2 {
   async registerSubnode(parentNode: Hex, labelhash: Hex, newOwner: `0x${string}`, label: string, addrBytes: Hex): Promise<Hex> {
     const hash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'registerSubnode',
       args: [parentNode, labelhash, newOwner, label, addrBytes],
       account: this.account,
@@ -131,7 +64,7 @@ export class L2RecordsWriterV2 {
   async setAddr(node: Hex, coinType: bigint, addrBytes: Hex): Promise<Hex> {
     const hash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'setAddr',
       args: [node, coinType, addrBytes],
       account: this.account,
@@ -144,7 +77,7 @@ export class L2RecordsWriterV2 {
   async setText(node: Hex, key: string, value: string): Promise<Hex> {
     const hash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'setText',
       args: [node, key, value],
       account: this.account,
@@ -157,7 +90,7 @@ export class L2RecordsWriterV2 {
   async setContenthash(node: Hex, hash: Hex): Promise<Hex> {
     const txHash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'setContenthash',
       args: [node, hash],
       account: this.account,
@@ -171,7 +104,7 @@ export class L2RecordsWriterV2 {
   async addRegistrar(parentNode: Hex, registrar: `0x${string}`, quota: bigint, expiry: bigint): Promise<Hex> {
     const hash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'addRegistrar',
       args: [parentNode, registrar, quota, expiry],
       account: this.account,
@@ -184,7 +117,7 @@ export class L2RecordsWriterV2 {
   async removeRegistrar(parentNode: Hex, registrar: `0x${string}`): Promise<Hex> {
     const hash = await this.wallet.writeContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'removeRegistrar',
       args: [parentNode, registrar],
       account: this.account,
@@ -194,10 +127,23 @@ export class L2RecordsWriterV2 {
     return hash
   }
 
+  async transferSubnode(node: Hex, from: Address, to: Address): Promise<Hex> {
+    const { request } = await this.publicClient.simulateContract({
+      address: this.contractAddress,
+      abi: TRANSFER_SUBNODE_ABI,
+      functionName: 'transferSubnodeByGateway',
+      args: [node, from, to],
+      account: this.account,
+    })
+    const hash = await this.wallet.writeContract(request)
+    await this.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
+    return hash
+  }
+
   async isRegistrar(parentNode: Hex, addr: `0x${string}`): Promise<boolean> {
     return await this.publicClient.readContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'isRegistrar',
       args: [parentNode, addr],
     }) as boolean
@@ -206,7 +152,7 @@ export class L2RecordsWriterV2 {
   async owner(): Promise<`0x${string}`> {
     return await this.publicClient.readContract({
       address: this.contractAddress,
-      abi: L2_RECORDS_V2_ABI,
+      abi: L2RecordsV2ABI,
       functionName: 'owner',
     }) as `0x${string}`
   }

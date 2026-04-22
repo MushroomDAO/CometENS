@@ -22,3 +22,6 @@
 [submodule "eval/ens-docs"]
 	path = eval/ens-docs
 	url = https://github.com/ensdomains/docs
+[submodule "contracts/lib/openzeppelin-contracts"]
+	path = contracts/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

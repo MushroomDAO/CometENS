@@ -4,6 +4,178 @@
 
 ---
 
+## [v0.5.0] — Milestone B/C/D：NFT 子域 + 插件架构 + 状态证明脚手架 + 生产强化（2026-04-04）
+
+### 新合约
+
+| 合约 | 说明 |
+|---|---|
+| `L2RecordsV3.sol` | ERC-721 子域所有权（tokenId = uint256(node)），含 ReentrancyGuard |
+| `IRegistrarPlugin.sol` | 可插拔注册插件接口（继承 IERC165） |
+| `plugins/FreePlugin.sol` | 免费无限制插件 |
+| `plugins/WhitelistPlugin.sol` | owner 管理白名单插件 |
+| `plugins/FlatFeePlugin.sol` | 固定 ETH 费用插件 |
+| `OPResolver.sol` | Bedrock 状态证明脚手架（签名/证明模式切换，verifyProofs flag） |
+
+### 新 API 端点（cometens-api Worker）
+
+| 端点 | 说明 |
+|---|---|
+| `POST /transfer-subnode` | EIP-712 授权子域 NFT 转让，由 Worker EOA 代执行 |
+| `GET /health` | 健康检查（新增 version + timestamp 字段） |
+
+### 新前端功能
+
+- **Admin 页面新增**：Transfer Subdomain 卡片（EIP-712 签名 → Worker 代执行 NFT 转让）
+
+### 里程碑 D1：Durable Objects nonce store
+
+- 新增 `workers/api/src/NonceStore.ts` Durable Object
+- `blockConcurrencyWhile` 保证 check-and-insert 原子性，彻底消除 KV TOCTOU 竞态
+- `consumeNonce` 三层路径：DO（强一致）→ KV（dev/test best-effort）→ fail-closed（503）
+- wrangler.toml 已绑定 `NONCE_STORE` DO namespace
+
+### 里程碑 D2：KV 滑动窗口速率限制
+
+- 写端点：10 req/min / IP+from 地址
+- `/v1/register`：60 req/min / signer
+- 无 KV 绑定时 no-op（开发环境透明）
+
+### 里程碑 D3：CF Analytics Engine + 健康检查
+
+- 两个 Worker 均新增 `ANALYTICS?: AnalyticsEngineDataset` 绑定
+- API Worker：`trackEvent()` 在每个端点返回后写入 Analytics（path + status + timestamp）
+- Gateway Worker：`/health` 新增 `timestamp` 字段
+- wrangler.toml 两个 env 均已配置 `analytics_engine_datasets`
+
+### 里程碑 B1：L2RecordsV3 ERC-721 子域所有权
+
+- `tokenId = uint256(node)` — NFT 与子域 1:1 映射
+- `transferSubnodeByGateway(node, from, to)` — gateway 代执行 EIP-712 授权的转让（`onlyOwner nonReentrant`）
+- `setAddr` / `setText` / `setContenthash` 允许 NFT owner 直接调用（不再需要 contract owner）
+- `registerSubnode()` payable，支持 plugin 费用
+
+### 里程碑 B2：IRegistrarPlugin 插件架构
+
+- 三种参考实现均实现 ERC-165（`type(IRegistrarPlugin).interfaceId`）
+- `setPlugin()` 双重验证：extcodesize + ERC-165 接口检查（`try/catch`）
+- **Pull-payment 费用模型**：`pendingFees[parentOwner] += fee`，防止 non-payable 合约锁死 ETH
+- `withdrawFees()` 由 parentOwner 主动提款
+
+### 里程碑 C1：OPResolver 脚手架
+
+- `verifyProofs` flag：false = 签名模式（与 OffchainResolver 完全兼容），true = 证明模式（C2 实现）
+- `setVerifyProofs(bool)` onlyOwner，`VerifyProofsToggled` 事件
+- `DeployOPResolver.s.sol` 部署脚本
+
+### 里程碑 C2：Gateway PROOF_MODE stub
+
+- `PROOF_MODE=true` + `DEV_MODE=true` 双重 guard，防止生产环境意外开启
+- `handleProofMode` 返回 501，含 Bedrock proof 接线说明注释
+- 主网自动忽略（`env.NETWORK !== 'op-mainnet'` → 改为双 guard 后更严格）
+
+### 安全加固（3 轮 Codex 审核，全部问题修复）
+
+**Round 1：**
+- `NonceStore.blockConcurrencyWhile` — 原子化 DO 操作
+- `consumeNonce` fail-closed — 无 storage 时返回 503，不静默通过
+- BigInt TTL — 用 BigInt 运算后再 `Number()` 转换，避免精度损失
+- `ReentrancyGuard` — `setSubnodeOwner` / `registerSubnode` 加 `nonReentrant`
+- `UnexpectedValue` — fee=0 或无插件时禁止发送 ETH，防止锁死
+- `InvalidPlugin` — EOA 地址设为插件时 revert
+
+**Round 2（B4 专项）：**
+- `transferSubnodeByGateway` — 替代标准 `transferFrom`（Worker EOA 不是 NFT owner，直接调用会 revert）
+- zero address / self-transfer guard — nonce 消费前拒绝
+- `requireWriter()` 在 `consumeNonce` 前调用 — misconfiguration fail-fast
+- `isBytes32` — 严格验证 node 为 64 hex chars（防止 short-hex 被 EIP-712 左填充绕过）
+
+**Round 3（Round 2 follow-up）：**
+- Pull-payment 费用模型（防 non-payable parentOwner 锁死 ETH）
+- ERC-165 接口验证（`type(IRegistrarPlugin).interfaceId` 统一，防止 ABI 不兼容合约被设为插件）
+- PROOF_MODE 双 guard（`PROOF_MODE=true && DEV_MODE=true` 才激活）
+
+### 测试覆盖
+
+| 类型 | 数量 | 新增 |
+|------|------|------|
+| Foundry 合约测试 | 197 | +88（V3 + V3Plugin + OPResolver） |
+| Unit 测试 | 48 | +27（NonceStore、TransferSubnode、schemas 扩展） |
+| E2E 测试 | 11+ | +11（transfer-subnode、plugin-registration） |
+
+### 已知遗留限制
+
+- KV rate limit 最终一致（多 PoP 并发可绕过）— 生产级强制需 CF 原生 Rate Limiting 或 DO per key（里程碑 D 后续）
+- PROOF_MODE / `transferSubnodeByGateway` 依赖 Worker EOA 密钥安全性（里程碑 C 状态证明完成后消除）
+- D4 主网部署 deferred
+
+---
+
+## [v0.4.0] — Production API Server + Security Hardening（2026-04-03）✅
+
+**已部署合约（Testnet）**
+| 合约 | 网络 | 地址 |
+|---|---|---|
+| L2RecordsV2 | OP Sepolia | `0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e` |
+| OffchainResolver | Eth Sepolia | `0xe138Ec90E6a793F69455a45cF78494c7baFd1A1b` |
+| Gateway Worker | Cloudflare | https://cometens-gateway.jhfnetboy.workers.dev |
+| API Worker | Cloudflare | https://cometens-api.jhfnetboy.workers.dev |
+
+**测试通过**：109 Foundry 合约测试 + 45 TS 测试（unit/e2e/integration 全绿）
+
+### 架构重构：纯前端 + CF Worker API
+
+**Phase 1 — cometens-api Cloudflare Worker**（`workers/api/`）
+- 完整 EIP-712 鉴权写端点：`/register`、`/set-addr`、`/set-text`、`/set-contenthash`、`/add-registrar`、`/remove-registrar`
+- 上游应用端点：`POST /v1/register`（personal_sign + UPSTREAM_ALLOWED_SIGNERS 白名单）
+- 公开查询端点：`/check-label`、`/check-owner`、`/lookup`
+- CF KV `REGISTRY` 绑定（address→label 持久化，仅 API Worker）
+
+**Phase 2 — CF KV 边缘缓存**（`workers/gateway/`）
+- Gateway Worker 在链上读取前先查 `RECORD_CACHE` KV
+  - `addr(node)` → `addr60:{node}`，命中 <5ms（vs 链上 ~200ms）
+  - `text(node, key)` → `text:{node}:{key}`
+  - `contenthash(node)` → `ch:{node}`
+- API Worker 每次成功写入后同步更新 / 删除对应 KV 键
+- 两个 Worker 共享同一 `RECORD_CACHE` KV namespace
+
+**Phase 3 — 纯前端构建**
+- `vite.config.ts` 精简至 17 行（移除全部 ~420 行服务器中间件）
+- `src/register.ts` / `src/admin.ts` 所有 `/api/manage/*` 改为 `${config.apiUrl}/*`（指向 CF Worker）
+- `src/config.ts` 新增 `apiUrl`（`VITE_API_URL` 环境变量，默认指向 CF Worker）
+
+### Admin 页面新增
+- **Query Registrar Info** — 查询地址是否被授权为 Registrar
+- **Remove Registrar** — 撤销 Registrar 授权（Owner Only，EIP-712）
+- **Set Contenthash** — 设置内容哈希（Name Owner，EIP-712）
+
+### ABI 去重（单一来源）
+- `contracts/abi/L2RecordsV2.json` 从 Foundry artifact 提取，纳入 git 追踪
+- `server/gateway/abi.ts` 统一导出 shim，5 个消费方移除各自内联 ABI
+- `scripts/sync-abi.mjs` + `pnpm abi:sync` — forge build 后自动同步
+
+### 安全加固（自审 + Codex + Kimi 三轮）
+
+**三个高危问题（开发阶段发现并修复，无需外部补丁）：**
+1. **跨合约签名重放**：`verifyingContract` 强制取自 `env.L2_RECORDS_ADDRESS`，不再信任客户端请求体中的 `domain.verifyingContract`
+2. **EIP-712 签名重放**：`consumeNonce()` 将 `nonce:{from}:{nonce}` 写入 `REGISTRY` KV（带 deadline TTL），重复提交返回 409
+3. **所有权检查绕过**：`primaryNode` 防刷检查改为对比 `message.owner`（而非 signer 地址），修复了 Registrar 可为同一 owner 重复注册的漏洞
+
+**中危修复：**
+- `add-registrar` / `remove-registrar`：`consumeNonce` 移至 owner 鉴权之后，避免鉴权失败的请求消耗 nonce
+- `admin.ts`：`l2Client` 根据 `config.network` 选择 `optimism` / `optimismSepolia`（修复主网误连测试网）
+- `admin.ts`：`addRegistrar` / `removeRegistrar` 增加 `check-owner` 响应 `.ok` 守卫
+- `admin.ts`：`setContenthash` 输入 hex 格式校验（签名前拒绝非法格式）
+
+**部署脚本安全加固：**
+- `deploy-production.sh`：显式要求 `PRIVATE_KEY_SUPPLIER`、`WORKER_EOA_PRIVATE_KEY`、`UPSTREAM_ALLOWED_SIGNERS` 三个变量，任一未设置则退出，移除对部署者密钥的任何 fallback
+- 清理 `sed` 遗留的 `.bak` 文件，防止敏感配置泄漏至仓库
+
+### 安全审计结论
+三轮审计（Codex / Kimi / 人工自审）**未发现残留高危问题**。所有高危项均在开发阶段修复，PR 提交时代码状态已通过完整安全审查。
+
+---
+
 ## [Unreleased] — Milestone A+（2026-03-30）
 
 ### 合约：OffchainResolver.sol — Breaking Change
