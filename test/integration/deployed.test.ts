@@ -83,8 +83,8 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
 
   beforeAll(() => {
     deployer = privateKeyToAccount(PRIVATE_KEY)
-    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC) })
-    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC) })
+    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
   it('reads L2Records contract owner', async () => {
@@ -129,14 +129,14 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
     const value = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'text', args: [node, 'com.twitter'] })
     expect(value).toBe('@cometens_test')
     console.log('text record set:', value)
-  }, 60_000)
+  }, 120_000)
 })
 
 describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia', () => {
   let l1Pub: ReturnType<typeof createPublicClient>
 
   beforeAll(() => {
-    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
   it('reads owner and gateway URL from deployed resolver', async () => {
@@ -146,10 +146,11 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     console.log('Resolver gateway:', gateway)
     expect(owner).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(gateway).toMatch(/^https?:\/\//)
-  }, 30_000)
+  }, 60_000)
 
   it('resolveWithProof verifies a valid signed response', async () => {
     if (!SIGNER_PK) { console.log('SKIP: no PRIVATE_KEY_SUPPLIER'); return }
+    // Note: increased to 60s — Sepolia RPC can be slow
 
     const signerAccount = privateKeyToAccount(SIGNER_PK)
     const node = makeNode(ROOT, 'test-resolver')
@@ -194,7 +195,7 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     const [decoded] = decodeAbiParameters([{ type: 'address' }], returned as Hex)
     expect((decoded as string).toLowerCase()).toBe(signerAccount.address.toLowerCase())
     console.log('resolveWithProof returned:', decoded)
-  }, 30_000)
+  }, 60_000)
 })
 
 // ─── aastar.eth end-to-end ────────────────────────────────────────────────────
@@ -231,9 +232,9 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
   beforeAll(() => {
     deployer = privateKeyToAccount(PRIVATE_KEY as Hex)
     signerAccount = privateKeyToAccount(SIGNER_PK as Hex)
-    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
-    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC) })
-    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC) })
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
   it('aastar.eth resolver on Sepolia is set to our OffchainResolver', async () => {
@@ -258,7 +259,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     })
     console.log('L2 addr for aastar.eth:', stored)
     expect(stored.toLowerCase()).toBe(deployer.address.toLowerCase())
-  }, 60_000)
+  }, 120_000)
 
   it('manually signs CCIP-Read response and resolveWithProof verifies it for aastar.eth', async () => {
     // Build calldata for addr(node) query on aastar.eth
@@ -299,5 +300,5 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     const [decoded] = decodeAbiParameters([{ type: 'address' }], returned as Hex)
     console.log('resolveWithProof for aastar.eth:', decoded)
     expect((decoded as string).toLowerCase()).toBe(deployer.address.toLowerCase())
-  }, 30_000)
+  }, 60_000)
 })

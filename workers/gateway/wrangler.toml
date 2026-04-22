@@ -17,9 +17,15 @@ compatibility_flags = ["nodejs_compat"]
 name = "cometens-gateway"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x4124c580a52E3E8d7E678E3023B913738e5B2FD3"
+L2_RECORDS_ADDRESS = "0x7E9840717CeD353eF5C6CE13673594e8bE4B5c5e"
 ROOT_DOMAIN = "aastar.eth"
 # ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+
+# Phase 2 — KV record cache (read by gateway, written by API worker)
+# Same namespace ID as API Worker's RECORD_CACHE binding.
+[[env.testnet.kv_namespaces]]
+binding = "RECORD_CACHE"
+id = "6147f1fe8d5141389e10475cab1f6647"
 
 # ─── Production (OP Mainnet + Ethereum Mainnet) ───────────────────────────────
 # Deploy: wrangler deploy --env production
@@ -39,6 +45,10 @@ NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
 # ALLOWED_REGISTRANTS — optional whitelist (comma-separated addresses)
+
+# [[env.production.kv_namespaces]]
+# binding = "RECORD_CACHE"
+# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
 
 # Uncomment after assigning a custom domain in the CF dashboard:
 # [[env.production.routes]]
