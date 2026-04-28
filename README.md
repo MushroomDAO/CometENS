@@ -126,3 +126,8 @@ Please read https://docs.ens.domains/llms-full.txt then help me with ENS integra
 ```bash
 claude mcp add context7 -- npx -y @upstash/context7-mcp
 ```
+
+## License
+
+This project is licensed under the [Apache License, Version 2.0](LICENSE).  
+Copyright 2024-present MushroomDAO Contributors. See [NOTICE](./NOTICE) for attribution.
