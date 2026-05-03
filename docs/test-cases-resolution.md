@@ -46,11 +46,11 @@ Created: 2026-04-04 23:30 CST
 | **L2 Block** | 41,756,799 |
 | **Registered** | 2026-04-04 23:20 CST |
 | **Resolved addr** | `0xb5600060e6de5E11D3636731964218E53caadf0E` (on L2 directly) |
-| **L1 CCIP-Read** | Gateway returns **503** — anchor state behind |
-| **ENS App** | https://sepolia.app.ens.domains/proof1.forest.aastar.eth — **PENDING** |
+| **L1 CCIP-Read** | `fetchCallback` returns correct addr — **PASS** (2026-05-03) |
+| **ENS App** | https://sepolia.app.ens.domains/proof1.forest.aastar.eth |
 | **ASR anchor at test time** | L2 block 41,604,994 (151,939 blocks behind) |
-| **Expected delay** | ~3.5 days after dispute games catch up to block 41,756,799 |
-| **Estimated resolvable** | 2026-04-08 ~11:00 CST (if dispute games resume normally) |
+| **ASR anchor at verification** | L2 block 42,689,800 (> registration block ✓) |
+| **Verified** | 2026-05-03 — `scripts/check-proof-resolution.mjs` **ALL PASS** |
 
 **Verification steps (to run after estimated time):**
 ```bash
@@ -76,11 +76,11 @@ open https://sepolia.app.ens.domains/proof1.forest.aastar.eth
 | **L2 Block** | 41,756,901 |
 | **Registered** | 2026-04-04 23:25 CST (re-registered on V3; originally on V2) |
 | **Resolved addr** | `0x935f8694855FA9f1D1520E43689219ED4fFF8c97` (on L2 directly) |
-| **L1 CCIP-Read** | Gateway returns **503** — anchor state behind |
-| **ENS App** | https://sepolia.app.ens.domains/2.forest.aastar.eth — **PENDING** |
+| **L1 CCIP-Read** | `fetchCallback` returns correct addr — **PASS** (2026-05-03) |
+| **ENS App** | https://sepolia.app.ens.domains/2.forest.aastar.eth |
 | **ASR anchor at test time** | L2 block 41,604,994 |
-| **Expected delay** | Same as Test Case 2 |
-| **Estimated resolvable** | 2026-04-08 ~11:00 CST |
+| **ASR anchor at verification** | L2 block 42,689,800 (> registration block ✓) |
+| **Verified** | 2026-05-03 — `scripts/check-proof-resolution.mjs` **ALL PASS** |
 
 **Note:** This name was originally registered on L2RecordsV2 (now obsolete). It had to be re-registered on V3 because OPResolver reads from V3 storage slots (7/8/9).
 
@@ -90,40 +90,37 @@ open https://sepolia.app.ens.domains/proof1.forest.aastar.eth
 
 ## Summary
 
-| Test Case | Mode | Name | Status | Expected Resolution |
-|-----------|------|------|--------|-------------------|
-| 1 | Signature | sig1.forest.aastar.eth | **PASS** | Immediate |
-| 2 | Proof | proof1.forest.aastar.eth | **PENDING** | ~2026-04-08 |
-| 3 | Proof | 2.forest.aastar.eth | **PENDING** | ~2026-04-08 |
+| Test Case | Mode | Name | Status | Verified |
+|-----------|------|------|--------|---------|
+| 1 | Signature | sig1.forest.aastar.eth | **PASS** | 2026-04-04 (immediate) |
+| 2 | Proof | proof1.forest.aastar.eth | **PASS** | 2026-05-03 |
+| 3 | Proof | 2.forest.aastar.eth | **PASS** | 2026-05-03 |
 
 ## Key Findings
 
 1. **Signature mode works immediately** — no delay, ENS App resolves as soon as L2 registration confirms.
 
-2. **Proof mode has inherent delay** — the OP dispute game challenge period (3.5 days) means L1 verification can only work after the anchor state catches up.
+2. **Proof mode works after dispute game finalization** — once the ASR anchor advances past the L2 registration block, `OPFaultVerifier.getStorageValues()` returns the verified address.
 
-3. **OP Sepolia dispute games are currently slow** — ~150K blocks behind (should be <1800). This is a testnet infrastructure issue; OP Mainnet games resolve normally.
+3. **OP Sepolia dispute game cadence is ~1 per challenge period** (~151,200 blocks = 3.5 days). The anchor is always ~1 challenge period behind current head. This is expected testnet behavior (few validators).
 
-4. **503 guard works correctly** — our gateway detects stale anchor state and returns an informative 503 instead of a guaranteed-to-fail proof.
+4. **503 guard threshold was fixed** — raised from 1800 blocks to 230,000 blocks for `op-sepolia` in `ANCHOR_STALE_THRESHOLD`. Mainnet threshold (1800) unchanged.
 
-5. **forest.aastar.eth needs its own resolver entry** — ENS resolution walks up the name hierarchy and stops at the first node with a resolver. If `forest.aastar.eth` has a different resolver than `aastar.eth`, subdomains under it use `forest.aastar.eth`'s resolver, not `aastar.eth`'s.
+5. **viem `getEnsAddress()` + new Universal Resolver incompatibility** — the 2026-05 version of the ENS Universal Resolver (`0xeeeeeeee...`) on Sepolia uses `resolveWithGateways()` which doesn't properly handle our `@unruggable/gateways` CCIP-Read callback. Use the manual CCIP-Read flow (see `scripts/check-proof-resolution.mjs`) for testing.
+
+6. **forest.aastar.eth now uses OPResolver** — all subdomains resolve via proof mode.
 
 ## How to Re-verify
 
-Run `scripts/check-test-cases.sh` (to be created) or manually:
-
 ```bash
-# Check ASR anchor block
-source .env.local
-cast call 0xa1Cec548926eb5d69aa3B7B57d371EdBdD03e64b "anchors(uint32)(bytes32,uint256)" 1 --rpc-url $SEPOLIA_RPC_URL
-
-# If anchor > 41756901, all 3 test cases should resolve via proof mode
-# Test gateway proof generation
-for NAME in "proof1.forest.aastar.eth" "2.forest.aastar.eth" "sig1.forest.aastar.eth"; do
-  NODE=$(cast namehash "$NAME")
-  CALLDATA=$(cast calldata "addr(bytes32)" "$NODE")
-  echo "$NAME:"
-  curl -s "https://cometens-gateway.jhfnetboy.workers.dev/0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083/$CALLDATA" | head -c 200
-  echo ""
-done
+# Full end-to-end proof mode test (manual CCIP-Read flow, bypasses viem UR incompatibility)
+node scripts/check-proof-resolution.mjs
 ```
+
+The script:
+1. Calls `OPResolver.resolve()` via raw `eth_call` to get the `OffchainLookup`
+2. Fetches the storage proof from the gateway via `curl` (proxy-aware)
+3. Calls `OPResolver.fetchCallback(proof, carry)` to verify on L1
+4. Checks the returned address matches expected
+
+Note: Node.js native `fetch` doesn't use the system proxy (`127.0.0.1:7890`). The script uses `curl` (which respects `https_proxy`) for the gateway call.

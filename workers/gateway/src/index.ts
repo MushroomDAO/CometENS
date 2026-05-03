@@ -50,6 +50,24 @@ const CHALLENGE_PERIOD: Record<string, number> = {
 /** Approximate OP block time in seconds */
 const OP_BLOCK_TIME = 2
 
+/**
+ * 503 guard staleness threshold (blocks).
+ *
+ * On OP Mainnet, dispute games are submitted continuously so the anchor
+ * stays within a few hours of head — use strict 1800-block (1-hour) threshold.
+ *
+ * On OP Sepolia, there are very few dispute game participants so a new game
+ * is only finalized once per challenge period (~151,200 blocks = 3.5 days).
+ * The anchor is therefore always ~1 challenge period behind current head,
+ * which is expected testnet behaviour — not a stale-state error.
+ * Use a threshold that allows proof generation for historical records that
+ * ARE covered by the anchor: 1.5× challenge-period blocks gives headroom.
+ */
+const ANCHOR_STALE_THRESHOLD: Record<string, bigint> = {
+  'op-mainnet': 1_800n,           // ~1 hour
+  'op-sepolia': 230_000n,         // ~1.5× challenge period — covers normal testnet lag
+}
+
 interface Env {
   OP_RPC_URL: string
   ETH_RPC_URL?: string        // L1 Sepolia/Mainnet — required for proof mode
@@ -175,9 +193,13 @@ async function handleProofMode(
       const currentL2Block = BigInt(await l2Provider.getBlockNumber())
       const blocksBehind = currentL2Block - anchor.l2Block
 
-      // If anchor is more than 1800 blocks (~1 hour) behind, proofs for recent
-      // state changes will fail. Return 503 with diagnostic info.
-      if (blocksBehind > 1800n) {
+      // If anchor is too far behind, proofs for recent state changes will fail.
+      // Threshold is network-dependent: mainnet uses 1800 blocks (~1 hour);
+      // OP Sepolia uses 230,000 blocks (~1.5× challenge period) because
+      // the testnet only produces one dispute game per challenge period,
+      // so the anchor is always ~151,200 blocks behind current head by design.
+      const staleThreshold = ANCHOR_STALE_THRESHOLD[env.NETWORK] ?? 1_800n
+      if (blocksBehind > staleThreshold) {
         const challengePeriod = CHALLENGE_PERIOD[env.NETWORK] ?? 302_400
         const estimatedCatchUpSec = Number(blocksBehind) * OP_BLOCK_TIME
         const retryAfter = Math.min(estimatedCatchUpSec, challengePeriod)
