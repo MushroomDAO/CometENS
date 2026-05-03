@@ -186,6 +186,56 @@ describe('full name construction', () => {
   })
 })
 
+// ─── Security: parent whitelist enforcement ───────────────────────────────────
+
+function validateParentAgainstWhitelist(
+  parent: string,
+  allowedParents: string[],
+): { ok: true } | { ok: false; error: string } {
+  const formatResult = validateParent(parent)
+  if (!formatResult.ok) return formatResult
+  if (allowedParents.length > 0 && !allowedParents.includes(parent)) {
+    return { ok: false, error: `parent '${parent}' is not an allowed root domain` }
+  }
+  return { ok: true }
+}
+
+describe('Security: parent domain whitelist', () => {
+  const allowedParents = ['forest.aastar.eth', 'game.aastar.eth']
+
+  it('accepts allowed parent forest.aastar.eth', () => {
+    expect(validateParentAgainstWhitelist('forest.aastar.eth', allowedParents).ok).toBe(true)
+  })
+
+  it('accepts allowed parent game.aastar.eth', () => {
+    expect(validateParentAgainstWhitelist('game.aastar.eth', allowedParents).ok).toBe(true)
+  })
+
+  it('rejects unlisted parent vitalik.eth (CRITICAL-1 fix)', () => {
+    const result = validateParentAgainstWhitelist('vitalik.eth', allowedParents)
+    expect(result.ok).toBe(false)
+    expect((result as any).error).toMatch(/not an allowed root domain/)
+  })
+
+  it('rejects unlisted parent uniswap.eth', () => {
+    const result = validateParentAgainstWhitelist('uniswap.eth', allowedParents)
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects format-valid but unlisted arbitrary.domain.xyz', () => {
+    const result = validateParentAgainstWhitelist('arbitrary.domain.xyz', allowedParents)
+    expect(result.ok).toBe(false)
+  })
+
+  it('allows any parent when whitelist is empty (open mode)', () => {
+    expect(validateParentAgainstWhitelist('vitalik.eth', []).ok).toBe(true)
+  })
+
+  it('still rejects format-invalid parents even with empty whitelist', () => {
+    expect(validateParentAgainstWhitelist('INVALID.ETH', []).ok).toBe(false)
+  })
+})
+
 // ─── D6: Multi-root capability — no primaryNode restriction ──────────────────
 
 describe('D6: multi-root — one address can own subnodes under multiple parents', () => {

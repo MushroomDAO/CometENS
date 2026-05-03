@@ -176,6 +176,15 @@ async function handleCheckLabel(url: URL, env: Env): Promise<Response> {
   const parent = url.searchParams.get('parent')?.trim()
   if (!label || !parent) return jsonError('Missing label or parent param', 400)
 
+  // Validate parent format and whitelist
+  if (parent.length > 253 || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) {
+    return jsonError('parent must be a valid ENS name', 400)
+  }
+  const allowedParents = getRootDomains(env)
+  if (allowedParents.length > 0 && !allowedParents.includes(parent)) {
+    return jsonError(`parent '${parent}' is not an allowed root domain`, 400)
+  }
+
   const node = namehash(`${label}.${parent}`) as Hex
   const pub = makePublicClient(env)
   const l2Addr = env.L2_RECORDS_ADDRESS as Address
@@ -223,25 +232,26 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
     names = [fullName]
   }
 
-  // Verify each name on-chain; remove stale entries
+  // Verify each name on-chain concurrently; remove stale entries.
+  // Cap to MAX_NAMES_PER_ADDRESS to bound RPC fan-out even if legacy KV has more entries.
+  const cappedNames = names.slice(0, MAX_NAMES_PER_ADDRESS)
   const pub = makePublicClient(env)
   const l2Addr = env.L2_RECORDS_ADDRESS as Address
-  const verified: string[] = []
 
-  for (const name of names) {
-    try {
-      const node = namehash(name) as Hex
-      const owner = await pub.readContract({
-        address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
-      })
-      if ((owner as string) !== '0x0000000000000000000000000000000000000000') {
-        verified.push(name)
+  const results = await Promise.all(
+    cappedNames.map(async (name) => {
+      try {
+        const node = namehash(name) as Hex
+        const owner = await pub.readContract({
+          address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node],
+        })
+        return (owner as string) !== '0x0000000000000000000000000000000000000000' ? name : null
+      } catch {
+        return name // Chain unreachable — keep cached entry
       }
-    } catch {
-      // Chain unreachable — keep cached entry
-      verified.push(name)
-    }
-  }
+    })
+  )
+  const verified = results.filter((n): n is string => n !== null)
 
   // Update KV if stale entries were removed
   if (verified.length !== names.length && env.REGISTRY) {
@@ -527,6 +537,15 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (parent.length > 253) throw badReq('parent too long')
     if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
 
+    // Security: reject parent domains not in ROOT_DOMAINS whitelist.
+    // The Worker EOA is the contract owner and can write to ANY parentNode on-chain,
+    // so without this check an attacker could register under arbitrary ENS namespaces
+    // (e.g. vitalik.eth) that this service has no authority over.
+    const allowedParents = getRootDomains(env)
+    if (allowedParents.length > 0 && !allowedParents.includes(parent)) {
+      throw badReq(`parent '${parent}' is not an allowed root domain`)
+    }
+
     // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤63 chars).
     // Reject if not normalized — prevents signature mismatch from server-side normalization.
     const label = msg.label as string
@@ -777,6 +796,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Maximum number of subdomain names stored per address in the KV registry. */
+const MAX_NAMES_PER_ADDRESS = 50
+
 /**
  * Append a registered name to the KV registry for a given address.
  * Stores as JSON array to support multiple names per address.
@@ -798,8 +820,9 @@ async function registryAppendName(kv: KVNamespace, address: string, fullName: st
     }
   }
 
-  // Don't add duplicates
+  // Don't add duplicates; cap total to prevent unbounded KV growth and slow /lookup
   if (!names.includes(fullName)) {
+    if (names.length >= MAX_NAMES_PER_ADDRESS) return
     names.push(fullName)
   }
 
