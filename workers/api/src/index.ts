@@ -222,9 +222,15 @@ async function handleLookup(url: URL, env: Env): Promise<Response> {
       if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
       return json({ found: false })
     }
+    // [security] Verify the cached entry still belongs to the queried address (NFT may have been transferred)
+    if ((existingOwner as string).toLowerCase() !== address) {
+      if (env.REGISTRY) await env.REGISTRY.delete(kvKey)
+      return json({ found: false })
+    }
   } catch { /* chain unreachable — fall through to return cached value */ }
 
-  return json({ found: true, name: fullName })
+  const label = fullName.split('.')[0]
+  return json({ found: true, label, fullName, name: fullName })
 }
 
 // ─── GET /resolve-status?name=alice.forest.aastar.eth ────────────────────
@@ -781,7 +787,7 @@ function asBigInt(value: unknown, fieldName = 'field'): bigint {
 function checkDeadline(deadline: bigint): void {
   const now = BigInt(Math.floor(Date.now() / 1000))
   if (deadline < now) throw badReq('Request deadline expired')
-  if (deadline > now + BigInt(MAX_NONCE_TTL)) throw badReq('Deadline too far in future (max 24h)')
+  if (deadline > now + BigInt(MAX_NONCE_TTL)) throw badReq('Deadline too far in future (max 1h)')
 }
 
 /**
@@ -795,7 +801,7 @@ function checkDeadline(deadline: bigint): void {
  * Throws 409 if the nonce was already used within its validity window.
  * No-op when KV is not bound (local dev without KV).
  */
-const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
+const MAX_NONCE_TTL = 3_600 // 1 hour hard cap (reduced from 24h to limit KV consistency window)
 
 async function consumeNonce(
   kv: KVNamespace | undefined,
@@ -803,7 +809,7 @@ async function consumeNonce(
   nonce: bigint,
   deadline: bigint,
 ): Promise<void> {
-  if (!kv) return  // local dev without KV — skip replay protection
+  if (!kv) throw Object.assign(new Error('KV namespace not bound — replay protection unavailable. Configure REGISTRY or RECORD_CACHE binding.'), { status: 503 })
 
   const key = `nonce:${from.toLowerCase()}:${nonce}`
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
