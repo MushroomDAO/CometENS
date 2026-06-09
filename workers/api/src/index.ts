@@ -104,7 +104,9 @@ export default {
 
       return jsonError('Not Found', 404)
     } catch (e: any) {
-      return jsonError(e?.message ?? String(e), e?.status ?? 500)
+      const status = e?.status ?? 500
+      if (status === 500) return jsonError('Internal server error', 500)
+      return jsonError(e?.message ?? String(e), status)
     }
   },
 }
@@ -506,12 +508,12 @@ function checkDeadline(deadline: bigint): void {
 /**
  * Prevent signature replay: store the nonce in KV with TTL = (deadline - now).
  * Throws 409 if the nonce was already used within its validity window.
- * No-ops gracefully if RECORD_CACHE is not bound (dev/test environments).
+ * Throws 503 if no KV namespace is bound — replay protection is mandatory in production.
  */
 const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
 async function consumeNonce(kv: KVNamespace | undefined, from: string, nonce: bigint, deadline: bigint): Promise<void> {
-  if (!kv) return
+  if (!kv) throw Object.assign(new Error('KV namespace not bound — replay protection unavailable. Configure REGISTRY or RECORD_CACHE binding.'), { status: 503 })
   const key = `nonce:${from.toLowerCase()}:${nonce}`
   const existing = await kv.get(key)
   if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })

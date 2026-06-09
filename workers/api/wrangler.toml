@@ -41,10 +41,12 @@ NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
 
-# [[env.production.kv_namespaces]]
-# binding = "REGISTRY"
-# id = "REPLACE_WITH_REGISTRY_NAMESPACE_ID"
-#
-# [[env.production.kv_namespaces]]
-# binding = "RECORD_CACHE"
-# id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
+# REQUIRED: create with `wrangler kv namespace create REGISTRY --env production`
+[[env.production.kv_namespaces]]
+binding = "REGISTRY"
+id = "REPLACE_WITH_REGISTRY_NAMESPACE_ID"
+
+# REQUIRED: create with `wrangler kv namespace create RECORD_CACHE --env production`
+[[env.production.kv_namespaces]]
+binding = "RECORD_CACHE"
+id = "REPLACE_WITH_RECORD_CACHE_NAMESPACE_ID"
