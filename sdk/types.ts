@@ -36,6 +36,12 @@ export interface CometENSOptions {
   gatewayUrl?: string
 
   /**
+   * API Worker base URL for write operations (register, set-addr, etc.).
+   * Defaults to gatewayUrl with /api/ccip replaced by /api if not provided.
+   */
+  apiUrl?: string
+
+  /**
    * L1 JSON-RPC endpoint. Must match the chain where l1ResolverAddress is deployed.
    */
   l1RpcUrl: string

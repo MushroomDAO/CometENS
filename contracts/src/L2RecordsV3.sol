@@ -433,7 +433,8 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         // AlreadyRegistered: token must not already exist
         if (_ownerOf(uint256(node)) != address(0)) revert AlreadyRegistered();
         _names[node] = _encodeDnsName(label);
-        if (_primaryNode[newOwner] == bytes32(0)) _primaryNode[newOwner] = node;
+        if (_primaryNode[newOwner] != bytes32(0)) revert AlreadyRegistered();
+        _primaryNode[newOwner] = node;
         // Mint the NFT — this is the canonical ownership record
         _mint(newOwner, uint256(node));
         emit SubnodeOwnerSet(parentNode, labelhash, node, newOwner);

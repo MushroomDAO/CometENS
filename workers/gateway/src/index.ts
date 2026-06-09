@@ -30,6 +30,17 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { namehash, labelhash } from 'viem/ens'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
+// ─── Dedicated ABI for multicoin addr(node, coinType) — avoids viem overload ambiguity ──
+const ADDR_MULTICOIN_ABI = [
+  {
+    type: 'function',
+    name: 'addr',
+    stateMutability: 'view',
+    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bytes' }],
+  },
+] as const
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Env {
@@ -78,23 +89,23 @@ function handleProofMode(_callData: string, _resolverAddress: Hex): Response {
 // ─── KV cache helpers ─────────────────────────────────────────────────────────
 
 /** Read ETH addr from KV; returns null on miss or if KV not bound. */
-async function kvGetAddr(kv: KVNamespace | undefined, node: Hex): Promise<`0x${string}` | null> {
+async function kvGetAddr(kv: KVNamespace | undefined, node: Hex, contractAddr: string): Promise<`0x${string}` | null> {
   if (!kv) return null
-  const val = await kv.get(`addr60:${node}`)
+  const val = await kv.get(`${contractAddr}:addr60:${node}`)
   if (!val || val === '0x0000000000000000000000000000000000000000') return null
   return val as `0x${string}`
 }
 
 /** Read text record from KV; returns null on miss. */
-async function kvGetText(kv: KVNamespace | undefined, node: Hex, key: string): Promise<string | null> {
+async function kvGetText(kv: KVNamespace | undefined, node: Hex, key: string, contractAddr: string): Promise<string | null> {
   if (!kv) return null
-  return kv.get(`text:${node}:${key}`)
+  return kv.get(`${contractAddr}:text:${node}:${key}`)
 }
 
 /** Read contenthash from KV; returns null on miss. */
-async function kvGetContenthash(kv: KVNamespace | undefined, node: Hex): Promise<Hex | null> {
+async function kvGetContenthash(kv: KVNamespace | undefined, node: Hex, contractAddr: string): Promise<Hex | null> {
   if (!kv) return null
-  const val = await kv.get(`ch:${node}`)
+  const val = await kv.get(`${contractAddr}:ch:${node}`)
   if (!val || val === '0x') return null
   return val as Hex
 }
@@ -116,12 +127,12 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
       const value = await client.readContract({
         address: contractAddress, abi: L2RecordsV2ABI, functionName: 'addr', args: [node, coinType],
       })
-      return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: value as Hex })
+      return encodeFunctionResult({ abi: ADDR_MULTICOIN_ABI, functionName: 'addr', result: value as Hex })
     }
 
     // ETH addr — KV first
     const [node] = args as [Hex]
-    const cached = await kvGetAddr(kv, node)
+    const cached = await kvGetAddr(kv, node, contractAddress)
     if (cached) {
       return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'addr', result: cached })
     }
@@ -134,7 +145,7 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
 
   if (functionName === 'text') {
     const [node, key] = args as [Hex, string]
-    const cached = await kvGetText(kv, node, key)
+    const cached = await kvGetText(kv, node, key, contractAddress)
     if (cached !== null) {
       return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'text', result: cached })
     }
@@ -147,7 +158,7 @@ async function handleResolve(calldata: Hex, env: Env): Promise<Hex> {
 
   if (functionName === 'contenthash') {
     const [node] = args as [Hex]
-    const cached = await kvGetContenthash(kv, node)
+    const cached = await kvGetContenthash(kv, node, contractAddress)
     if (cached) {
       return encodeFunctionResult({ abi: L2RecordsV2ABI, functionName: 'contenthash', result: cached })
     }

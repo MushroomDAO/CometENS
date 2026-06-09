@@ -300,9 +300,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // Sync to KV record cache (coinType=60 only)
     if (env.RECORD_CACHE && message.coinType === 60n) {
       if (isClearing) {
-        await env.RECORD_CACHE.delete(`addr60:${message.node}`)
+        await env.RECORD_CACHE.delete(`${env.L2_RECORDS_ADDRESS}:addr60:${message.node}`)
       } else {
-        await env.RECORD_CACHE.put(`addr60:${message.node}`, message.addr)
+        await env.RECORD_CACHE.put(`${env.L2_RECORDS_ADDRESS}:addr60:${message.node}`, message.addr)
       }
     }
 
@@ -372,7 +372,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const ownerLower = message.owner.toLowerCase()
     const kvWrites: Promise<void>[] = []
     if (env.REGISTRY) kvWrites.push(env.REGISTRY.put(`reg:${ownerLower}`, message.label))
-    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`addr60:${node}`, message.owner))
+    if (env.RECORD_CACHE) kvWrites.push(env.RECORD_CACHE.put(`${env.L2_RECORDS_ADDRESS}:addr60:${node}`, message.owner))
     await Promise.all(kvWrites)
 
     return json({ ok, action: 'register', txHash })
@@ -409,7 +409,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     // Sync to KV record cache
     if (env.RECORD_CACHE) {
-      const kvKey = `text:${message.node}:${message.key}`
+      const kvKey = `${env.L2_RECORDS_ADDRESS}:text:${message.node}:${message.key}`
       if (message.value === '') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
@@ -449,7 +449,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     // Sync to KV record cache
     if (env.RECORD_CACHE) {
-      const kvKey = `ch:${message.node}`
+      const kvKey = `${env.L2_RECORDS_ADDRESS}:ch:${message.node}`
       if (message.hash === '0x') {
         await env.RECORD_CACHE.delete(kvKey)
       } else {
@@ -560,7 +560,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     // Invalidate KV record cache for this node — owner changed
     if (env.RECORD_CACHE) {
-      await env.RECORD_CACHE.delete(`addr60:${message.node}`)
+      await env.RECORD_CACHE.delete(`${env.L2_RECORDS_ADDRESS}:addr60:${message.node}`)
     }
 
     return json({ ok, action: 'transfer-subnode', txHash })

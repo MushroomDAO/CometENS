@@ -134,8 +134,8 @@ export class CometENS implements ICometENS {
 
   async register(req: RegisterRequest): Promise<RegisterResult> {
     const name = `${req.label}.${this.options.rootDomain}`
-    const gwBase = this.options.gatewayUrl?.replace('/api/ccip', '') || ''
-    const resp = await fetch(`${gwBase}/api/manage/register`, {
+    const apiBase = (this.options.apiUrl || this.options.gatewayUrl?.replace('/api/ccip', '/api') || '').replace(/\/$/, '')
+    const resp = await fetch(`${apiBase}/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -164,8 +164,8 @@ export class CometENS implements ICometENS {
     const node = namehash(req.name) as Hex
     const coinType = req.coinType ?? 60n
     const addrBytes = encodeAbiParameters([{ type: 'address' }], [req.addr]) as Hex
-    const gwBase = this.options.gatewayUrl?.replace('/api/ccip', '') || ''
-    const resp = await fetch(`${gwBase}/api/manage/set-addr`, {
+    const apiBase = (this.options.apiUrl || this.options.gatewayUrl?.replace('/api/ccip', '/api') || '').replace(/\/$/, '')
+    const resp = await fetch(`${apiBase}/set-addr`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

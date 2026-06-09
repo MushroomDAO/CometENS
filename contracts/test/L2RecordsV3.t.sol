@@ -285,9 +285,14 @@ contract L2RecordsV3Test is Test {
     }
 
     function test_setPrimaryNodeSelf() public {
+        // Register "alice" for alice (primary node set automatically)
         records.setSubnodeOwner(ROOT_NODE, LABEL_ALICE, alice, "alice");
-        records.setSubnodeOwner(ROOT_NODE, LABEL_BOB, alice, "bob");
+        // Register "bob" for bob, then transfer it to alice so alice owns two nodes
+        records.setSubnodeOwner(ROOT_NODE, LABEL_BOB, bob, "bob");
+        // Transfer NODE_BOB to alice via gateway (contract owner may call this)
+        records.transferSubnodeByGateway(NODE_BOB, bob, alice);
 
+        // alice now owns NODE_ALICE (primary) and NODE_BOB; she can switch her primary
         vm.prank(alice);
         records.setPrimaryNodeSelf(NODE_BOB);
         assertEq(records.primaryNode(alice), NODE_BOB);
