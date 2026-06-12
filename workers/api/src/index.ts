@@ -291,7 +291,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -362,7 +362,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
@@ -402,7 +402,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -442,7 +442,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -483,7 +483,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -511,7 +511,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
@@ -554,7 +554,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // when WORKER_EOA_PRIVATE_KEY is missing (misconfiguration fail-fast).
     const writer = requireWriter(env)
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline, env.NONCE_STORE)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline, env.NONCE_STORE)
 
     const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
 
@@ -623,12 +623,13 @@ const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
 async function consumeNonce(
   kv: KVNamespace | undefined,
+  chainId: number,
   from: string,
   nonce: bigint,
   deadline: bigint,
   doNamespace?: DurableObjectNamespace,
 ): Promise<void> {
-  const key = `nonce:${from.toLowerCase()}:${nonce}`
+  const key = `nonce:${chainId}:${from.toLowerCase()}:${nonce}`
   // Use BigInt arithmetic to avoid precision loss on large deadline values.
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
   const remaining = deadline > nowSecs ? deadline - nowSecs : 0n

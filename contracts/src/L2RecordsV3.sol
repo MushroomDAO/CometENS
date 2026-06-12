@@ -116,7 +116,7 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         uint256 amount = pendingFees[msg.sender];
         if (amount == 0) return;
         pendingFees[msg.sender] = 0;
-        (bool ok,) = msg.sender.call{value: amount}("");
+        (bool ok,) = msg.sender.call{value: amount, gas: 2300}("");
         require(ok, "withdraw failed");
         emit FeeWithdrawn(msg.sender, amount);
     }
@@ -299,7 +299,7 @@ contract L2RecordsV3 is ERC721, ReentrancyGuard {
         // Refund excess ETH to the caller immediately.
         uint256 excess = msg.value - fee;
         if (excess > 0) {
-            (bool ok,) = msg.sender.call{value: excess}("");
+            (bool ok,) = msg.sender.call{value: excess, gas: 2300}("");
             require(ok, "refund failed");
         }
     }
