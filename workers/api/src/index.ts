@@ -235,7 +235,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -306,7 +306,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((existingPrimary as string) !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       return jsonError(`This wallet has already registered a subdomain`, 409, 'ALREADY_REGISTERED')
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
@@ -346,7 +346,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -386,7 +386,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -427,7 +427,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -455,7 +455,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
@@ -512,9 +512,9 @@ function checkDeadline(deadline: bigint): void {
  */
 const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
-async function consumeNonce(kv: KVNamespace | undefined, from: string, nonce: bigint, deadline: bigint): Promise<void> {
+async function consumeNonce(kv: KVNamespace | undefined, chainId: number, from: string, nonce: bigint, deadline: bigint): Promise<void> {
   if (!kv) throw Object.assign(new Error('KV namespace not bound — replay protection unavailable. Configure REGISTRY or RECORD_CACHE binding.'), { status: 503 })
-  const key = `nonce:${from.toLowerCase()}:${nonce}`
+  const key = `nonce:${chainId}:${from.toLowerCase()}:${nonce}`
   const existing = await kv.get(key)
   if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
   const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(deadline) - Math.floor(Date.now() / 1000)))
