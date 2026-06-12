@@ -177,7 +177,7 @@ async function handleCheckLabel(url: URL, env: Env): Promise<Response> {
   if (!label || !parent) return jsonError('Missing label or parent param', 400)
 
   // Validate parent format and whitelist
-  if (parent.length > 253 || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) {
+  if (parent.length > 253 || !/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(parent)) {
     return jsonError('parent must be a valid ENS name', 400)
   }
   const allowedParents = getRootDomains(env)
@@ -505,7 +505,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -535,7 +535,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // could store XSS/injection payloads that are returned to clients.
     const parent = msg.parent as string
     if (parent.length > 253) throw badReq('parent too long')
-    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
+    if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
 
     // Security: reject parent domains not in ROOT_DOMAINS whitelist.
     // The Worker EOA is the contract owner and can write to ANY parentNode on-chain,
@@ -552,7 +552,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const normalizedLabel = label.trim().toLowerCase()
     if (label !== normalizedLabel) throw badReq('Label must be lowercase and trimmed')
     if (!normalizedLabel || normalizedLabel.length > 63) throw badReq('Label must be 1–63 characters')
-    if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
+    if (!/^[a-z0-9_-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, hyphens, and underscores')
 
     const message = {
       parent,
@@ -583,7 +583,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // multiple parent domains (forest.aastar.eth, game.aastar.eth, etc.).
     // Chain-level uniqueness (subnodeOwner check above) is the real guard.
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
@@ -627,7 +627,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -667,7 +667,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -708,7 +708,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -736,7 +736,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
@@ -779,8 +779,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // when WORKER_EOA_PRIVATE_KEY is missing (misconfiguration fail-fast).
     const writer = requireWriter(env)
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
+    // Gateway EOA is the trusted operator for all L2Records writes — approval bypass is intentional.
+    // This matches the trust model used by all other write endpoints.
     const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
 
     // Invalidate KV record cache for this node — owner changed
@@ -890,13 +892,14 @@ const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
 async function consumeNonce(
   kv: KVNamespace | undefined,
+  chainId: number,
   from: string,
   nonce: bigint,
   deadline: bigint,
 ): Promise<void> {
   if (!kv) return  // local dev without KV — skip replay protection
 
-  const key = `nonce:${from.toLowerCase()}:${nonce}`
+  const key = `nonce:${chainId}:${from.toLowerCase()}:${nonce}`
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
   const remaining = deadline > nowSecs ? deadline - nowSecs : 0n
   const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(remaining)))
@@ -906,8 +909,9 @@ async function consumeNonce(
   await kv.put(key, '1', { expirationTtl: ttl })
 }
 
-// D7 (TODO): Rate limiting — deferred. EIP-712 auth is the primary gate.
-// If needed in future, implement at CF infrastructure level (not per-worker).
+// D7: Rate limiting intentionally deferred. EIP-712 auth + on-chain idempotency (AlreadyRegistered)
+// are the primary defenses. Accepted risk: a valid signature can be spammed until deadline;
+// mitigation: tighten deadline to ≤60s at the client level.
 
 function badReq(msg: string): Error {
   return Object.assign(new Error(msg), { status: 400 })

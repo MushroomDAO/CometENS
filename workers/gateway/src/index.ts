@@ -83,6 +83,7 @@ interface Env {
    * Shared with the API Worker (same namespace ID in wrangler.toml).
    */
   RECORD_CACHE?: KVNamespace
+  // Gateway is read-only — no nonce tracking needed (no write endpoints)
   /**
    * Enable Bedrock storage proof mode.
    * When "true", GET /{sender}/{data} serves OPFaultRollup storage proofs.
