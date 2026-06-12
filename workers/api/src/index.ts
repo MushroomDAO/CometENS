@@ -470,7 +470,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const addrBytes = isClearing ? ('0x' as Hex) : (toHex(toBytes(message.addr), { size: 20 }) as Hex)
@@ -500,7 +500,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // could store XSS/injection payloads that are returned to clients.
     const parent = msg.parent as string
     if (parent.length > 253) throw badReq('parent too long')
-    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
+    if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
 
     // Require client to send a pre-normalized label (lowercase, trimmed, non-empty, ≤63 chars).
     // Reject if not normalized — prevents signature mismatch from server-side normalization.
@@ -508,7 +508,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const normalizedLabel = label.trim().toLowerCase()
     if (label !== normalizedLabel) throw badReq('Label must be lowercase and trimmed')
     if (!normalizedLabel || normalizedLabel.length > 63) throw badReq('Label must be 1–63 characters')
-    if (!/^[a-z0-9-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, and hyphens')
+    if (!/^[a-z0-9_-]+$/.test(normalizedLabel)) throw badReq('Label must contain only a-z, 0-9, hyphens, and underscores')
 
     const message = {
       parent,
@@ -539,7 +539,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // multiple parent domains (forest.aastar.eth, game.aastar.eth, etc.).
     // Chain-level uniqueness (subnodeOwner check above) is the real guard.
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const addrBytes = toHex(toBytes(message.owner), { size: 20 }) as Hex
     const writer = requireWriter(env)
@@ -583,7 +583,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setText(message.node, message.key, message.value)
@@ -623,7 +623,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((subnodeOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Signer is not the subdomain owner'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.setContenthash(message.node, message.hash)
@@ -664,7 +664,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can add registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
@@ -692,7 +692,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
       throw Object.assign(new Error('Only contract owner can remove registrars'), { status: 403 })
     }
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
@@ -735,7 +735,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // when WORKER_EOA_PRIVATE_KEY is missing (misconfiguration fail-fast).
     const writer = requireWriter(env)
 
-    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, from, message.nonce, message.deadline)
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     const txHash = await writer.transferSubnode(message.node, from as Address, message.to)
 
@@ -805,13 +805,14 @@ const MAX_NONCE_TTL = 3_600 // 1 hour hard cap (reduced from 24h to limit KV con
 
 async function consumeNonce(
   kv: KVNamespace | undefined,
+  chainId: number,
   from: string,
   nonce: bigint,
   deadline: bigint,
 ): Promise<void> {
   if (!kv) throw Object.assign(new Error('KV namespace not bound — replay protection unavailable. Configure REGISTRY or RECORD_CACHE binding.'), { status: 503 })
 
-  const key = `nonce:${from.toLowerCase()}:${nonce}`
+  const key = `nonce:${chainId}:${from.toLowerCase()}:${nonce}`
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
   const remaining = deadline > nowSecs ? deadline - nowSecs : 0n
   const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(remaining)))

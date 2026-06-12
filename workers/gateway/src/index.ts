@@ -99,6 +99,7 @@ let _gatewayKey = ''
 let _gatewayInstance: import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup> | null = null
 
 async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup>> {
+  // Key includes all vars affecting Gateway construction; other vars (L2_RECORDS_ADDRESS etc.) are read per-request
   const key = `${env.ETH_RPC_URL}|${env.OP_RPC_URL}|${env.NETWORK}`
   if (_gatewayInstance && _gatewayKey === key) return _gatewayInstance
 

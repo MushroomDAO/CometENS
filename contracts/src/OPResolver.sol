@@ -162,9 +162,6 @@ contract OPResolver is GatewayFetchTarget {
         } else {
             revert UnsupportedSelector(sel);
         }
-
-        // unreachable: _fetch* always reverts via OffchainLookup
-        return "";
     }
 
     // ─── Fetch helpers ────────────────────────────────────────────────────────
