@@ -29,8 +29,8 @@ pnpm abi:sync        # Sync ABI from contracts/out/ into contracts/abi/
 cd contracts && forge test        # Run Solidity unit tests
 cd contracts && forge build       # Compile contracts
 
-# Cloudflare Workers deployment
-cd workers/gateway && wrangler deploy --env testnet
+# Cloudflare Workers deployment (gateway has its own deps)
+cd workers/gateway && pnpm install && wrangler deploy --env testnet
 cd workers/api && wrangler deploy --env testnet
 ```
 
@@ -64,13 +64,13 @@ This is a **Vite + TypeScript** app with no framework (no React/Vue). DOM manipu
 
 `vite.config.ts` is now a **pure frontend build config** — all API logic has moved to Cloudflare Workers:
 
-- **`workers/gateway/`** (`cometens-gateway` worker) — CCIP-Read resolution. Reads L2Records, returns signed responses. Configured via `wrangler.toml` env `testnet`/`production`. Supports two modes:
+- **`workers/gateway/`** (`cometens-gateway` worker) — CCIP-Read resolution. Has its own `package.json` (depends on `@unruggable/gateways`, `ethers`, `viem`). Supports two modes:
   - **Signature mode** (default): signs responses with `PRIVATE_KEY_SUPPLIER`
-  - **Proof mode** (`PROOF_MODE=true`): Bedrock storage proof (trustless, no signing key needed)
+  - **Proof mode** (`PROOF_MODE=true`): Bedrock storage proof via `OPFaultVerifier`; requires `ETH_RPC_URL` (L1) and `ALLOWED_SENDERS` (comma-separated OPResolver addresses)
 
-- **`workers/api/`** (`cometens-api` worker) — Write operations + lookup. Handles `/register`, `/set-addr`, `/lookup`. Uses KV namespaces:
+- **`workers/api/`** (`cometens-api` worker) — Write operations + lookup. Handles `/register`, `/set-addr`, `/set-text`, `/set-contenthash`, `/transfer-subnode`, `/lookup`. Uses KV namespaces:
   - `REGISTRY` — address→label registry
-  - `RECORD_CACHE` — ENS record cache (shared namespace ID with gateway worker)
+  - `RECORD_CACHE` — ENS record cache scoped by `L2_RECORDS_ADDRESS` (shared namespace ID with gateway worker; KV keys are prefixed `${L2_RECORDS_ADDRESS}:`)
 
 The legacy `server/gateway/` code remains as a reference implementation used only by tests and local tooling.
 
@@ -89,7 +89,7 @@ Contracts use Foundry; libraries are git submodules under `contracts/lib/`.
 
 ### SDK (`sdk/`)
 
-`sdk/CometENS.ts` — public SDK for third-party integration. Reads records directly from L2Records (no gateway needed); writes go through the API worker's `/api/manage` endpoints. Testnet/mainnet is auto-detected from the RPC URL.
+`sdk/CometENS.ts` — public SDK for third-party integration. Reads records directly from L2Records (no gateway needed); writes POST to the API worker's `/register` and `/set-addr` endpoints. Configure `apiUrl` in `CometENSOptions` to point at the API worker; falls back to deriving from `gatewayUrl` if omitted. Testnet/mainnet is auto-detected from the RPC URL.
 
 ### Key Library
 
@@ -110,13 +110,16 @@ VITE_API_URL=                   # defaults to deployed testnet worker
 VITE_L2_RPC_URL=
 VITE_L1_SEPOLIA_RPC_URL=
 
-# Server-side (no VITE_ prefix — never exposed to browser)
-PRIVATE_KEY_SUPPLIER=           # Signs CCIP-Read gateway responses
+# Server-side / Workers secrets (never VITE_ prefixed)
+PRIVATE_KEY_SUPPLIER=           # Signs CCIP-Read gateway responses (signature mode)
 WORKER_EOA_PRIVATE_KEY=         # Executes L2 write transactions
-UPSTREAM_ALLOWED_SIGNERS=       # Comma-separated addresses for /api/v1 whitelist
+UPSTREAM_ALLOWED_SIGNERS=       # Comma-separated addresses for /v1/register whitelist
+ETH_RPC_URL=                    # L1 RPC — required for gateway proof mode only
 ```
 
 For local dev, `VITE_API_URL` and `VITE_GATEWAY_URL` default to the deployed testnet workers (`src/config.ts`), so `.env.local` only needs RPC URLs.
+
+Workers env vars (`NETWORK`, `L2_RECORDS_ADDRESS`, `ROOT_DOMAIN`, `ROOT_DOMAINS`, `PROOF_MODE`, `ALLOWED_SENDERS`) are set in `wrangler.toml` per environment and are **not** read from `.env.local`. Multi-root support is enabled in the API worker by setting `ROOT_DOMAINS` to a comma-separated list (e.g. `forest.aastar.eth,game.aastar.eth`).
 
 ## Testing
 
