@@ -117,7 +117,22 @@
     <div class="result-box hidden" id="setTextResult"></div>
   </div>
 
-  <!-- ── Section 4: Add Registrar ── -->
+  <!-- ── Section 4: Query Registrar Info ── -->
+  <div class="card">
+    <h3>Query Registrar Info</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Check if an address is authorized as a registrar</p>
+
+    <label for="queryRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
+    <input id="queryRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="queryRegistrarAddress">Registrar Address (0x...)</label>
+    <input id="queryRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <button class="btn-small" id="queryRegistrarBtn">Query</button>
+    <div class="result-box hidden" id="queryRegistrarResult"></div>
+  </div>
+
+  <!-- ── Section 5: Add Registrar ── -->
   <div class="card">
     <h3>Add Registrar (Owner Only)</h3>
     <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Authorize an address to register subdomains under a parent domain</p>
@@ -141,6 +156,50 @@
 
     <button class="btn-primary" id="addRegistrarBtn" style="background:#2e7d32;">Connect &amp; Sign AddRegistrar</button>
     <div class="result-box hidden" id="addRegistrarResult"></div>
+  </div>
+
+  <!-- ── Section 6: Remove Registrar ── -->
+  <div class="card">
+    <h3>Remove Registrar (Owner Only)</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Revoke a registrar's authorization under a parent domain</p>
+
+    <label for="removeRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
+    <input id="removeRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="removeRegistrarAddress">Registrar Address (0x...)</label>
+    <input id="removeRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <button class="btn-primary" id="removeRegistrarBtn" style="background:#c62828;">Connect &amp; Sign RemoveRegistrar</button>
+    <div class="result-box hidden" id="removeRegistrarResult"></div>
+  </div>
+
+  <!-- ── Section 7: Set Contenthash ── -->
+  <div class="card">
+    <h3>Set Contenthash (EIP-712)</h3>
+
+    <label for="setChName">ENS name</label>
+    <input id="setChName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="setChHash">Contenthash (hex, leave empty to clear)</label>
+    <input id="setChHash" type="text" placeholder="0xe301017012... (IPFS) or empty to clear" autocomplete="off" spellcheck="false" />
+
+    <button class="btn-primary" id="setChBtn">Connect &amp; Sign SetContenthash</button>
+    <div class="result-box hidden" id="setChResult"></div>
+  </div>
+
+  <!-- ── Section 8: Transfer Subdomain ── -->
+  <div class="card">
+    <h3>Transfer Subdomain (NFT Owner)</h3>
+    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Transfer ownership of a subdomain NFT to another address</p>
+
+    <label for="transferSubdomain">Subdomain (e.g. alice.forest.aastar.eth)</label>
+    <input id="transferSubdomain" type="text" placeholder="alice.forest.aastar.eth" autocomplete="off" spellcheck="false" />
+
+    <label for="transferSubdomainTo">New Owner Address (0x...)</label>
+    <input id="transferSubdomainTo" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+    <button class="btn-small" id="transferSubdomainBtn">Transfer</button>
+    <div class="result-box hidden" id="transferSubdomainResult"></div>
   </div>
 
   <!-- ── Deployed Contracts ── -->

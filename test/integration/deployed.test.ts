@@ -34,6 +34,7 @@ const OP_RPC     = process.env.OP_SEPOLIA_RPC_URL ?? ''
 const L2_ADDR    = (process.env.OP_L2_RECORDS_ADDRESS ?? '') as Address
 const L1_RPC     = process.env.SEPOLIA_RPC_URL ?? ''
 const L1_ADDR    = (process.env.L1_OFFCHAIN_RESOLVER_ADDRESS ?? '') as Address
+const L1_OP_RESOLVER = (process.env.L1_OP_RESOLVER_ADDRESS ?? '') as Address
 const PRIVATE_KEY = (process.env.PRIVATE_KEY_JASON ?? '') as Hex
 const SIGNER_PK   = (process.env.PRIVATE_KEY_SUPPLIER ?? PRIVATE_KEY) as Hex
 
@@ -83,8 +84,8 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
 
   beforeAll(() => {
     deployer = privateKeyToAccount(PRIVATE_KEY)
-    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC) })
-    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC) })
+    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
   it('reads L2Records contract owner', async () => {
@@ -129,14 +130,14 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
     const value = await opPub.readContract({ address: L2_ADDR, abi: L2_ABI, functionName: 'text', args: [node, 'com.twitter'] })
     expect(value).toBe('@cometens_test')
     console.log('text record set:', value)
-  }, 60_000)
+  }, 120_000)
 })
 
 describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia', () => {
   let l1Pub: ReturnType<typeof createPublicClient>
 
   beforeAll(() => {
-    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
   it('reads owner and gateway URL from deployed resolver', async () => {
@@ -146,10 +147,11 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     console.log('Resolver gateway:', gateway)
     expect(owner).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(gateway).toMatch(/^https?:\/\//)
-  }, 30_000)
+  }, 60_000)
 
   it('resolveWithProof verifies a valid signed response', async () => {
     if (!SIGNER_PK) { console.log('SKIP: no PRIVATE_KEY_SUPPLIER'); return }
+    // Note: increased to 60s — Sepolia RPC can be slow
 
     const signerAccount = privateKeyToAccount(SIGNER_PK)
     const node = makeNode(ROOT, 'test-resolver')
@@ -194,7 +196,7 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     const [decoded] = decodeAbiParameters([{ type: 'address' }], returned as Hex)
     expect((decoded as string).toLowerCase()).toBe(signerAccount.address.toLowerCase())
     console.log('resolveWithProof returned:', decoded)
-  }, 30_000)
+  }, 60_000)
 })
 
 // ─── aastar.eth end-to-end ────────────────────────────────────────────────────
@@ -231,15 +233,17 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
   beforeAll(() => {
     deployer = privateKeyToAccount(PRIVATE_KEY as Hex)
     signerAccount = privateKeyToAccount(SIGNER_PK as Hex)
-    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC) })
-    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC) })
-    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC) })
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opPub = createPublicClient({ chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
+    opWallet = createWalletClient({ account: deployer, chain: optimismSepolia, transport: http(OP_RPC, { timeout: 30_000, retryCount: 2 }) })
   })
 
-  it('aastar.eth resolver on Sepolia is set to our OffchainResolver', async () => {
+  it('aastar.eth resolver on Sepolia is set to our OPResolver (C3)', async () => {
     const resolver = await l1Pub.getEnsResolver({ name: ENS_NAME })
     console.log('aastar.eth resolver:', resolver)
-    expect(resolver?.toLowerCase()).toBe(L1_ADDR.toLowerCase())
+    // C3': resolver was updated to OPResolver on 2026-04-04
+    const expected = L1_OP_RESOLVER || L1_ADDR
+    expect(resolver?.toLowerCase()).toBe(expected.toLowerCase())
   }, 30_000)
 
   it('sets ETH addr record for aastar.eth node on L2Records', async () => {
@@ -258,7 +262,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     })
     console.log('L2 addr for aastar.eth:', stored)
     expect(stored.toLowerCase()).toBe(deployer.address.toLowerCase())
-  }, 60_000)
+  }, 120_000)
 
   it('manually signs CCIP-Read response and resolveWithProof verifies it for aastar.eth', async () => {
     // Build calldata for addr(node) query on aastar.eth
@@ -299,5 +303,20 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
     const [decoded] = decodeAbiParameters([{ type: 'address' }], returned as Hex)
     console.log('resolveWithProof for aastar.eth:', decoded)
     expect((decoded as string).toLowerCase()).toBe(deployer.address.toLowerCase())
+  }, 60_000)
+})
+
+// ─── D6: forest.aastar.eth setup ─────────────────────────────────────────────
+
+describe.skipIf(!L1_RPC || !L1_OP_RESOLVER)('Integration: forest.aastar.eth setup', () => {
+  let l1Pub: ReturnType<typeof createPublicClient>
+
+  beforeAll(() => {
+    l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
+  })
+
+  it('forest.aastar.eth resolver on Sepolia is set to OPResolver', async () => {
+    const resolver = await l1Pub.getEnsResolver({ name: 'forest.aastar.eth' })
+    expect(resolver?.toLowerCase()).toBe(L1_OP_RESOLVER.toLowerCase())
   }, 30_000)
 })

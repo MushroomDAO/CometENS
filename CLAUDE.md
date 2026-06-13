@@ -1,20 +1,54 @@
 # CLAUDE.md
 
+## Mycelium Protocol 生态上下文
+> 本 repo 属于 mycelium 组织，参与 Mycelium Protocol 生态建设。
+> 上下文来源: github.com/AAStarCommunity/Brood — 更新时自动同步
+
+@/Users/jason/Dev/Brood/protocol/MISSION.md
+@/Users/jason/Dev/Brood/protocol/PGL/CONTEXT.md
+@/Users/jason/Dev/Brood/orgs/mycelium/PROFILE.md
+@/Users/jason/Dev/Brood/orgs/mycelium/INTERFACES.md
+
+---
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
 
 ```bash
-npm run dev          # Start dev server on port 4173 (includes gateway middleware)
-npm run build        # Build for production
-npm run typecheck    # TypeScript validation (no emit)
-```
+pnpm dev             # Start frontend dev server on port 4173
+pnpm build           # Production build
+pnpm typecheck       # TypeScript validation (no emit)
+pnpm test            # Run all tests (unit + e2e + integration)
+pnpm vitest run test/unit/        # Unit tests only (fast, no network)
+pnpm vitest run test/e2e/         # E2E tests (requires Anvil)
+pnpm vitest run test/integration/ # Integration tests (requires .env.local)
+pnpm abi:sync        # Sync ABI from contracts/out/ into contracts/abi/
 
-No test suite exists. Use `typecheck` to validate changes.
+# Solidity contracts (Foundry)
+cd contracts && forge test        # Run Solidity unit tests
+cd contracts && forge build       # Compile contracts
+
+# Cloudflare Workers deployment (gateway has its own deps)
+cd workers/gateway && pnpm install && wrangler deploy --env testnet
+cd workers/api && wrangler deploy --env testnet
+```
 
 ## Architecture
 
-This is a **Vite + TypeScript** app with no framework (no React/Vue). DOM manipulation is done imperatively in plain TS files.
+**CometENS** is an L2 subdomain distribution system for ENS. Users register subdomains under a root `.eth` name on Optimism; global resolution works via CCIP-Read (EIP-3668).
+
+```
+User/DApp → L1 ENS → OffchainResolver → [OffchainLookup] → Gateway Worker
+                                                                    ↓
+                                                            L2Records (OP)
+                                                                    ↓
+                                                           Signed Response
+                                                                    ↓
+                                             OffchainResolver.resolveWithProof()
+```
+
+This is a **Vite + TypeScript** app with no framework (no React/Vue). DOM manipulation is done imperatively in plain TS.
 
 ### Pages and Entry Points
 
@@ -22,33 +56,40 @@ This is a **Vite + TypeScript** app with no framework (no React/Vue). DOM manipu
 |-----------|----------|---------|
 | `index.html` | — | Landing/console page |
 | `box.html` | `src/main.ts` | `.box` domain manager (Optimism Mainnet) |
-| `eth.html` | `src/eth.ts` | `.eth` domain manager (L1/L2 dual mode) |
+| `register.html` | `src/register.ts` | User-facing subdomain registration |
+| `admin.html` | `src/admin.ts` | Admin interface for querying/setting records |
+| `api-docs.html` | — | API documentation |
 
-### Two Domain Systems
+### Backend: Cloudflare Workers (Phase 3)
 
-**`.box` system (`src/main.ts`)**
-- Operates on Optimism Mainnet (chainId=10)
-- Uses ThreeDNS contract (`0xBB7B805B257d7C76CA9435B3ffe780355E4C4B17`)
-- Users allocate subdomains via `setSubnodeOwner(parentNode, labelHash, targetAddress)`
-- Pre-checks: confirms caller is owner/approved operator before executing
+`vite.config.ts` is now a **pure frontend build config** — all API logic has moved to Cloudflare Workers:
 
-**`.eth` system (`src/eth.ts`)**
-- Dual query mode: L1 (Mainnet/Sepolia ENS) or L2 (Optimism Sepolia L2Records contract)
-- L2Records stores domain records; OffchainResolver on L1 fetches them via CCIP-Read
-- Supports querying `addr`, `text`, `contenthash` records
-- EIP-712 signing for `SetAddr` typed data (payload-only, no broadcast)
+- **`workers/gateway/`** (`cometens-gateway` worker) — CCIP-Read resolution. Has its own `package.json` (depends on `@unruggable/gateways`, `ethers`, `viem`). Supports two modes:
+  - **Signature mode** (default): signs responses with `PRIVATE_KEY_SUPPLIER`
+  - **Proof mode** (`PROOF_MODE=true`): Bedrock storage proof via `OPFaultVerifier`; requires `ETH_RPC_URL` (L1) and `ALLOWED_SENDERS` (comma-separated OPResolver addresses)
 
-### Backend Gateway (dev server middleware in `vite.config.ts`)
+- **`workers/api/`** (`cometens-api` worker) — Write operations + lookup. Handles `/register`, `/set-addr`, `/set-text`, `/set-contenthash`, `/transfer-subnode`, `/lookup`. Uses KV namespaces:
+  - `REGISTRY` — address→label registry
+  - `RECORD_CACHE` — ENS record cache scoped by `L2_RECORDS_ADDRESS` (shared namespace ID with gateway worker; KV keys are prefixed `${L2_RECORDS_ADDRESS}:`)
 
-Two API routes injected into the Vite dev server:
+The legacy `server/gateway/` code remains as a reference implementation used only by tests and local tooling.
 
-- **POST `/api/ccip`** — CCIP-Read handler: decodes calldata, reads from L2RecordsReader, optionally signs response with `PRIVATE_KEY_SUPPLIER`
-- **POST `/api/manage`** — EIP-712 signature verifier for `/set-addr` and `/register` operations
+### Smart Contracts (`contracts/`)
 
-Server-side logic lives in `server/gateway/`:
-- `index.ts` — main gateway handler
-- `manage/schemas.ts` — EIP-712 domain and message type definitions
-- `readers/L2RecordsReader.ts` — reads from L2 contract via viem
+Three versions of the L2 storage contract:
+- **`L2Records.sol`** (V1) — basic record storage
+- **`L2RecordsV2.sol`** — adds registrar plugin architecture (`IRegistrarPlugin`) with quota/expiry
+- **`L2RecordsV3.sol`** — extends V2 with ERC-721 subdomain ownership (tokenId = `uint256(node)`)
+
+On-chain resolver contracts:
+- **`OffchainResolver.sol`** — L1 resolver that triggers CCIP-Read lookup to the gateway
+- **`OPResolver.sol`** — L1 resolver using Optimism Bedrock storage proofs (trustless, no gateway key)
+
+Contracts use Foundry; libraries are git submodules under `contracts/lib/`.
+
+### SDK (`sdk/`)
+
+`sdk/CometENS.ts` — public SDK for third-party integration. Reads records directly from L2Records (no gateway needed); writes POST to the API worker's `/register` and `/set-addr` endpoints. Configure `apiUrl` in `CometENSOptions` to point at the API worker; falls back to deriving from `gatewayUrl` if omitted. Testnet/mainnet is auto-detected from the RPC URL.
 
 ### Key Library
 
@@ -56,18 +97,39 @@ Server-side logic lives in `server/gateway/`:
 
 ## Environment Setup
 
-Copy `.env.op-sepolia` and fill in values. Required variables:
+Copy `.env.op-sepolia` to `.env.local` and fill in values:
 
 ```
-OP_SEPOLIA_RPC_URL=             # Optimism Sepolia RPC
-OP_L2_RECORDS_ADDRESS=          # L2Records contract (server-side)
-VITE_L2_RECORDS_ADDRESS=        # L2Records contract (client-side)
-VITE_EIP712_VERIFYING_CONTRACT= # EIP-712 domain contract
-PRIVATE_KEY_SUPPLIER=           # Signs gateway CCIP responses
+# Client-side (VITE_ prefix = bundled into browser)
+VITE_NETWORK=op-sepolia
+VITE_ROOT_DOMAIN=aastar.eth
+VITE_L2_RECORDS_ADDRESS=        # L2RecordsV3 contract on OP Sepolia
+VITE_L1_OFFCHAIN_RESOLVER_ADDRESS=
+VITE_GATEWAY_URL=               # defaults to deployed testnet worker
+VITE_API_URL=                   # defaults to deployed testnet worker
+VITE_L2_RPC_URL=
+VITE_L1_SEPOLIA_RPC_URL=
+
+# Server-side / Workers secrets (never VITE_ prefixed)
+PRIVATE_KEY_SUPPLIER=           # Signs CCIP-Read gateway responses (signature mode)
+WORKER_EOA_PRIVATE_KEY=         # Executes L2 write transactions
+UPSTREAM_ALLOWED_SIGNERS=       # Comma-separated addresses for /v1/register whitelist
+ETH_RPC_URL=                    # L1 RPC — required for gateway proof mode only
 ```
 
-`VITE_` prefix = exposed to browser bundle. Non-prefixed vars are server/build-time only.
+For local dev, `VITE_API_URL` and `VITE_GATEWAY_URL` default to the deployed testnet workers (`src/config.ts`), so `.env.local` only needs RPC URLs.
+
+Workers env vars (`NETWORK`, `L2_RECORDS_ADDRESS`, `ROOT_DOMAIN`, `ROOT_DOMAINS`, `PROOF_MODE`, `ALLOWED_SENDERS`) are set in `wrangler.toml` per environment and are **not** read from `.env.local`. Multi-root support is enabled in the API worker by setting `ROOT_DOMAINS` to a comma-separated list (e.g. `forest.aastar.eth,game.aastar.eth`).
+
+## Testing
+
+| Test type | Location | Requirements |
+|-----------|----------|--------------|
+| Unit | `test/unit/` | None (mocked) |
+| E2E | `test/e2e/` | Anvil (`brew install foundry`) + `pnpm dev` running |
+| Integration | `test/integration/` | `.env.local` with real RPCs |
+| Solidity | `contracts/test/` | Foundry |
 
 ## Vendor Submodule
 
-`vendor/unruggable-gateways/` is a git submodule containing CCIP-Read gateway reference implementations. Run `git submodule update --init` if it's empty.
+`vendor/unruggable-gateways/` is a git submodule with CCIP-Read gateway reference implementations. Run `git submodule update --init` if it's empty. The same library is also a Foundry submodule at `contracts/lib/unruggable-gateways/`.

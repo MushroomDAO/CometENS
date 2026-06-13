@@ -2,9 +2,14 @@
 
 ## 背景
 
-当前 dev server（`vite.config.ts` 中间件）将前端构建和 API 逻辑混在一起，无法用于生产。
+原 dev server（`vite.config.ts` 中间件）将前端构建和 API 逻辑混在一起，无法用于生产。
 本文档规划将 API 逻辑独立为一个新的 Cloudflare Worker（`cometens-api`），
 与现有的 CCIP Gateway Worker（`cometens-gateway`）分开部署。
+
+**当前状态（Phase 1-3 全部完成）：**
+- `cometens-api` 已部署：https://cometens-api.jhfnetboy.workers.dev
+- `cometens-gateway` 已部署：https://cometens-gateway.jhfnetboy.workers.dev
+- `vite.config.ts` 已瘦身为纯前端构建配置，API 逻辑全部移除
 
 ---
 
@@ -25,6 +30,7 @@
 | 端点 | Public | Upstream App | Name Owner | Registrar | Contract Owner |
 |------|--------|-------------|------------|-----------|----------------|
 | `GET /check-label` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `GET /check-owner` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GET /lookup` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `POST /v1/register` | ❌ | ✅ whitelist | ❌ | ❌ | ✅ |
 | `POST /register` | ❌ | ❌ | ❌ | ✅ quota内 | ✅ |
@@ -39,14 +45,14 @@
 ```
 收到请求
   │
-  ├─ 1. 验证 timestamp 在 N 秒内（防重放）
-  ├─ 2. 从签名恢复 recovered_address
+  ├─ 1. 验证 deadline 未过期（防重放）
+  ├─ 2. 验证 EIP-712 / personal_sign 签名，恢复 recovered_address
   ├─ 3. 按端点类型做链上查询：
-  │      - Name Owner：L2Records.subnodeOwner(node) == recovered_address ?
-  │      - Contract Owner：L2Records.owner() == recovered_address ?
-  │      - Registrar：L2Records.isRegistrar(parentNode, recovered_address) ?
-  │      - Upstream App：recovered_address ∈ ALLOWED_SIGNERS env ?
-  └─ 4. 通过 → 执行 L2 写入
+  │      - Name Owner：L2RecordsV2.subnodeOwner(node) == recovered_address ?
+  │      - Contract Owner：L2RecordsV2.owner() == recovered_address ?
+  │      - Registrar：L2RecordsV2.isRegistrar(parentNode, recovered_address) ?
+  │      - Upstream App：recovered_address ∈ UPSTREAM_ALLOWED_SIGNERS env ?
+  └─ 4. 通过 → 执行 L2 写入 → 同步写 CF KV
 ```
 
 ---
@@ -61,44 +67,49 @@
                ▼                      ▼
 ┌──────────────────────┐   ┌──────────────────────────┐
 │  CCIP Gateway Worker  │   │    API Server Worker      │
-│  (已有，全球分发)      │   │    (新建，单部署)          │
+│  (全球分发，read-only) │   │    (单部署，writes)        │
 │                       │   │                           │
 │  cometens-gateway     │   │  cometens-api             │
 │  .jhfnetboy.workers   │   │  .jhfnetboy.workers.dev   │
 │  .dev                 │   │                           │
 │                       │   │  POST /register           │
-│  POST / (EIP-3668)    │   │  POST /set-text           │
-│  读 CF KV cache ──┐   │   │  POST /set-addr           │
-│  miss → L2 RPC    │   │   │  POST /set-contenthash    │
-│                   │   │   │  POST /add-registrar      │
-└───────────────────│───┘   │  POST /remove-registrar   │
-                    │       │  POST /v1/register        │
-                    │       │  GET  /check-label        │
-                    │       │  GET  /lookup             │
-                    │       └────────────┬──────────────┘
-                    │                    │ 写入成功后
-                    │                    │ 同步写 CF KV
-                    ▼                    ▼
-              ┌─────────────────────────────┐
-              │      Cloudflare KV          │
-              │  (全球复制，~60s 同步)        │
-              │                             │
-              │  addr:{node} → address      │
-              │  text:{node}:{key} → value  │
-              └──────────────┬──────────────┘
-                             │
-                             ▼
-                   ┌─────────────────┐
-                   │  L2RecordsV2    │
-                   │  (OP Sepolia /  │
-                   │   OP Mainnet)   │
-                   └─────────────────┘
+│  POST / (EIP-3668)    │   │  POST /set-addr           │
+│  读 RECORD_CACHE ──┐  │   │  POST /set-text           │
+│  miss → L2 RPC     │  │   │  POST /set-contenthash    │
+│                    │  │   │  POST /add-registrar      │
+└────────────────────│──┘   │  POST /remove-registrar   │
+                     │      │  POST /v1/register        │
+                     │      │  GET  /check-label        │
+                     │      │  GET  /check-owner        │
+                     │      │  GET  /lookup             │
+                     │      └────────────┬──────────────┘
+                     │                   │ 写入成功后同步写 KV
+                     ▼                   ▼
+        ┌────────────────────────────────────────────┐
+        │              Cloudflare KV                  │
+        │          (全球复制，~60s 同步)               │
+        │                                             │
+        │  RECORD_CACHE (id: 6147f1fe...)             │
+        │    addr60:{node}     → ETH address           │
+        │    text:{node}:{key} → value string          │
+        │    ch:{node}         → contenthash hex       │
+        │                                             │
+        │  REGISTRY (id: a8ec4846...)  [API only]     │
+        │    reg:{address}     → label string          │
+        └──────────────────────┬──────────────────────┘
+                               │
+                               ▼
+                     ┌─────────────────┐
+                     │  L2RecordsV2    │
+                     │  (OP Sepolia /  │
+                     │   OP Mainnet)   │
+                     └─────────────────┘
 ```
 
 ### CF KV 的作用
 
-注册/写入后同步到 KV → 全球所有 CCIP Worker 边缘节点优先读 KV（<5ms），
-不需要每次跨洋查 OP Sepolia RPC（100-300ms）。中国节点同样受益。
+- **RECORD_CACHE**：API Worker 写入后同步，Gateway Worker 读 KV 优先（<5ms），miss 再查链（200ms）。两个 Worker 绑定同一 namespace ID。
+- **REGISTRY**：仅 API Worker 使用。`GET /lookup?address=0x...` 反查地址对应的 label，避免前端扫链上事件日志。
 
 ---
 
@@ -127,50 +138,52 @@ ENS 域名主人可通过 `POST /set-text` 设置的所有字段：
 
 ## 五、开发阶段
 
-### Phase 1 — API Worker（核心功能）
+### Phase 1 — API Worker（核心功能）✅ 已完成
 分支：`feat/production-api-server`
 
-- [ ] 新建 `workers/api/src/index.ts`
-- [ ] 迁移 `vite.config.ts` 所有 `/api/manage` + `/api/v1` 逻辑到 Worker
-- [ ] 实现完整权限验证（Name Owner / Contract Owner / Registrar 链上查询）
-- [ ] 补充 `set-contenthash`、`remove-registrar` 端点
-- [ ] 新建 `workers/api/wrangler.toml`
-- [ ] 本地 miniflare 测试
-- [ ] 部署 `cometens-api` Worker（testnet）
+- [x] 新建 `workers/api/src/index.ts`
+- [x] 迁移 `vite.config.ts` 所有 `/api/manage` + `/api/v1` 逻辑到 Worker
+- [x] 实现完整权限验证（Name Owner / Contract Owner / Registrar 链上查询）
+- [x] 补充 `set-contenthash`、`remove-registrar` 端点
+- [x] 新建 `workers/api/wrangler.toml`
+- [x] 部署 `cometens-api` Worker（testnet）— https://cometens-api.jhfnetboy.workers.dev
 
-### Phase 2 — CF KV 缓存（解析提速）
+### Phase 2 — CF KV 缓存（解析提速）✅ 已完成
 
-- [ ] 创建 CF KV namespace
-- [ ] API Worker 写入成功后同步写 KV
-- [ ] CCIP Gateway Worker 读 KV（miss 再查链）
-- [ ] 全球解析延迟：~200ms → ~10ms（边缘命中）
+- [x] 创建 CF KV namespace（RECORD_CACHE: `6147f1fe...`，REGISTRY: `a8ec4846...`）
+- [x] API Worker 写入成功后同步写 RECORD_CACHE（addr60/text/ch）
+- [x] CCIP Gateway Worker 读 RECORD_CACHE（miss 再查链）
+- [x] 全球解析延迟：~200ms → <5ms（边缘命中）
 
-### Phase 3 — Dev server 瘦身
+### Phase 3 — Dev server 瘦身 ✅ 已完成
 
-- [ ] `vite.config.ts` 里的 API 逻辑全部移除，只保留 Vite 前端构建
-- [ ] 本地开发 proxy 到已部署的 API Worker 或本地 miniflare 实例
+- [x] `vite.config.ts` 里的 API 逻辑全部移除，只保留 Vite 前端构建
+- [x] 前端 `src/config.ts` 增加 `apiUrl`（`VITE_API_URL`），所有 fetch 调用更新为 API Worker 路径
+- [x] `.env.local` 更新：`VITE_GATEWAY_URL` 和 `VITE_API_URL` 指向已部署的 testnet workers
 
 ---
 
 ## 六、安全注意事项
 
 1. **WORKER_EOA_PRIVATE_KEY** 通过 `wrangler secret put` 注入，不进代码库
-2. **ALLOWED_SIGNERS** 白名单通过环境变量配置，支持多地址逗号分隔
-3. **Replay protection**：所有写操作验证 `timestamp` 在 60s 内
-4. **Ownable2Step**：合约 owner 转移建议采用两步确认（提名+接受），防止误操作永久丢失控制权（待 V3 实现）
+2. **UPSTREAM_ALLOWED_SIGNERS** 白名单通过环境变量配置，支持多地址逗号分隔
+3. **Replay protection**：所有写操作验证 `deadline`（EIP-712）或 `timestamp`（personal_sign）
+4. **Ownable2Step**：主网部署前合约 owner 必须换为 Gnosis Safe 多签（≥3/5），EOA 单点风险不可接受
+5. **多 parent domain**：`POST /register` 的 `message.parent` 字段支持任意父域（如 `forest.aastar.eth`），由链上 `isRegistrar(parentNode, signer)` 验证权限，无需修改 API
 
 ---
 
-## 七、当前已实现 API（dev server，待迁移）
+## 七、已实现 API 端点（API Worker，生产就绪）
 
-| 端点 | 状态 | 备注 |
-|------|------|------|
-| `POST /api/manage/register` | ✅ 已实现 | EIP-712，Name Owner 注册 |
-| `POST /api/manage/set-addr` | ✅ 已实现 | EIP-712，Name Owner |
-| `POST /api/manage/set-text` | ✅ 已实现 | EIP-712，Name Owner |
-| `POST /api/manage/add-registrar` | ✅ 已实现 | EIP-712，Contract Owner only |
-| `POST /api/v1/register` | ✅ 已实现 | personal_sign，Upstream App |
-| `GET /api/manage/check-label` | ✅ 已实现 | Public |
-| `GET /api/manage/lookup` | ✅ 已实现 | Public |
-| `POST /api/manage/set-contenthash` | ❌ 缺失 | 待 Phase 1 补充 |
-| `POST /api/manage/remove-registrar` | ❌ 缺失 | 待 Phase 1 补充 |
+| 端点 | 状态 | 认证方式 |
+|------|------|---------|
+| `GET /check-label` | ✅ | Public |
+| `GET /check-owner` | ✅ | Public |
+| `GET /lookup` | ✅ | Public，KV + 链上校验 |
+| `POST /register` | ✅ | EIP-712，Registrar/Owner |
+| `POST /set-addr` | ✅ | EIP-712，Name Owner（支持清零） |
+| `POST /set-text` | ✅ | EIP-712，Name Owner |
+| `POST /set-contenthash` | ✅ | EIP-712，Name Owner |
+| `POST /add-registrar` | ✅ | EIP-712，Contract Owner |
+| `POST /remove-registrar` | ✅ | EIP-712，Contract Owner |
+| `POST /v1/register` | ✅ | personal_sign，Upstream App whitelist |
