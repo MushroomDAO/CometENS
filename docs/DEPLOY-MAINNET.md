@@ -114,8 +114,8 @@ export DEPLOYER_ADDRESS=0x...
 export GATEWAY_URL=https://cometens-gateway-production.<your-subdomain>.workers.dev/{sender}/{data}
 export L2_RECORDS_ADDRESS=$L2_MAINNET                                  # Step 1 的地址
 export ANCHOR_STATE_REGISTRY=0x23B2C62946350F4246f9f9D027e071f0264FD113  # Step 2.1 复核后的值
-export MIN_AGE_SEC=...        # 见文末决策详解。0=仅终结game(最去信任,记录延迟~3.5天);>0=接受未挑战的较新game
-export WINDOW_SEC=...         # 必须容纳所接受 game 的滞后:minAgeSec=0 时建议 >=604800(7天);minAgeSec=几小时 时 86400(1天)即可
+export MIN_AGE_SEC=3600       # 【已选定:均衡档】新记录约 1h 生效;接受达 1h 且未被挑战的 game。详见文末附录
+export WINDOW_SEC=86400       # 配合 MIN_AGE_SEC=3600,1 天窗口足够
 export ETH_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
 
 forge script script/DeployOPResolver.s.sol \
@@ -348,7 +348,7 @@ if (被验证 game 的时间 + WINDOW_SEC < 最新 game 的时间) revert Commit
 | 取值 | MIN_AGE_SEC | WINDOW_SEC | 新记录可解析延迟 | 信任模型 | 适合 |
 |------|:-----------:|:----------:|:----------------:|----------|------|
 | **最大去信任** | `0` | `604800` | **~3.5 天** | 零信任(仅终结状态) | 把"绝对去信任"放第一位,能接受注册后数天才生效 |
-| **均衡(推荐)** | `3600`(1h) | `86400` | **~1 小时** | 赌 1h 内无有效挑战 | 注册产品的实用选择,UX 与安全兼顾 |
+| **✅ 均衡(已选定)** | `3600`(1h) | `86400` | **~1 小时** | 赌 1h 内无有效挑战 | 注册产品的实用选择,UX 与安全兼顾 |
 | **最新鲜** | `300`(5min) | `86400` | **~5 分钟** | 赌 5min 内无挑战(较激进) | 体验优先,信任 OP 看门人快速挑战 |
 
 > 测试网用 `MIN_AGE_SEC=0`/`WINDOW_SEC=86400` 能跑通,是因为 **OP Sepolia 的 game 终结远快于主网**,滞后落在 1 天窗口内。主网照搬 `0`/`86400` 会因终结 game 太老而 `CommitTooOld` 解析失败——这是主网必须重新决策这两个值的根本原因。
