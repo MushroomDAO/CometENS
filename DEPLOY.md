@@ -120,6 +120,10 @@ To add a custom domain, add a route in `workers/gateway/wrangler.toml` and confi
 
 ## 主网部署清单
 
+> ⚠️ **本章节描述旧架构(V1 `L2Records` + `OffchainResolver` 签名模式),已过时。**
+> 当前 v0.6.0 主网部署(`L2RecordsV3` + `OPResolver` 证明模式)请见 **[docs/DEPLOY-MAINNET.md](docs/DEPLOY-MAINNET.md)**。
+> 以下内容仅作历史参考。
+
 ### 📋 部署前准备
 
 #### 1. 资金准备
