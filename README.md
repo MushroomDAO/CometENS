@@ -54,6 +54,22 @@ User/DApp → L1 ENS → OffchainResolver → [OffchainLookup] → Gateway
 
 See `CLAUDE.md` for full architecture details.
 
+## Resolution Modes — what users get, and who you trust
+
+CometENS resolves a subdomain (e.g. `alice.aastar.eth`) the same way for the end user in both modes. The only difference is **the trust assumption**:
+
+| | Signature mode | Proof mode |
+|---|---|---|
+| User capability | name resolves network-wide | **same** — name resolves network-wide |
+| Trust | trust the gateway's signing key (run by the community org) | trustless — the L1 contract verifies a Merkle proof of OP-chain data |
+| New-record latency | **instant** (gateway reads latest L2 state and signs) | delayed (waits for an OP dispute game; ~1h–7d depending on `MIN_AGE_SEC`) |
+| Cost / ops | fast, cheap, no proof generation | heavier (proof generation + dispute-game lookup), needs cache warming |
+| Status | implemented, default | implemented (`PROOF_MODE=true`); has a cold-start performance cost |
+
+For end users the experience is identical (signature mode is even faster). Proof mode only adds the **"don't trust the org's key"** guarantee — a decentralization enhancement, not a functional requirement.
+
+Note: dApps/SDKs that read `L2Records` **directly** on Optimism are already trustless (no gateway involved) — the SDK does this. The trust question only applies to the **L1 ENS CCIP-Read path** used by generic ENS apps/wallets.
+
 ## Deployed Contracts
 
 | Contract | Network | Address |
