@@ -70,6 +70,20 @@ For end users the experience is identical (signature mode is even faster). Proof
 
 Note: dApps/SDKs that read `L2Records` **directly** on Optimism are already trustless (no gateway involved) — the SDK does this. The trust question only applies to the **L1 ENS CCIP-Read path** used by generic ENS apps/wallets.
 
+### CometENS resolution strategy (by record age)
+
+CometENS combines the two modes by record age, deliberately **avoiding the expensive "optimistic proof" path**:
+
+| Record age | Path | Why |
+|---|---|---|
+| **Fresh (< ~7 days)** | **Signature mode** (instant) | An OP storage proof can only prove *finalized* L2 state; a just-written record isn't finalized yet, so a proof can't cover it. Signature mode reads the latest L2 state and resolves it immediately. |
+| **Aged (≥ ~7 days)** | **Finalized proof mode** (`MIN_AGE_SEC=0`) | Once the L2 block holding the record is covered by a *finalized* dispute game, a Bedrock storage proof is **fast** (anchor root assumed valid — no challenge-window validation loop) and **fully trustless**. |
+
+**Why this is the right trade-off:**
+- L1 can never read L2 storage "directly" — it always needs a proof. The ~7-day finalization only determines *which* state root you prove against.
+- The **optimistic proof path** (`MIN_AGE_SEC > 0`, proving against an un-finalized game) is the only one with a cold-start performance cost (a ~15s game-validation loop) *and* a weaker trust assumption (bets no challenge appears). CometENS skips it entirely.
+- Result: fresh names resolve instantly (signature); aged names additionally gain trustless verifiability (finalized proof) — with **no proof-indexing service or cache-warming infrastructure required**.
+
 ## Deployed Contracts
 
 | Contract | Network | Address |

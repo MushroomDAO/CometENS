@@ -3,6 +3,8 @@
 > 目标:**先在 Sepolia 测试网完整跑通并通过 E2E,再上主网。** 主网部署绝不在测试网验证之前进行。
 > 主网执行细节见 [DEPLOY-MAINNET.md](./DEPLOY-MAINNET.md);本文档是它前面的**测试闸门**。
 
+> **解析策略**(见 [README · Resolution Modes](../README.md#resolution-modes--what-users-get-and-who-you-trust)):上线走**签名模式**(即时,覆盖所有记录);**终结证明模式**(`MIN_AGE_SEC=0`)作为 ≥7 天老记录的去信任层。**弃用乐观证明(`MIN_AGE_SEC>0`)**——它有冷启动性能坑。因此本计划的证明模式验证用 `MIN_AGE_SEC=0`;签名模式 E2E 是上线必过项。
+
 ---
 
 ## 总览(5 个阶段,逐阶段闸门)
