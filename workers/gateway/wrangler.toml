@@ -16,10 +16,11 @@ compatibility_flags = ["nodejs_compat"]
 name = "cometens-gateway"
 [env.testnet.vars]
 NETWORK = "op-sepolia"
-L2_RECORDS_ADDRESS = "0x8836E89D654141a858f680e995CA86f6644A29a5"
+L2_RECORDS_ADDRESS = "0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc"
 ROOT_DOMAIN = "aastar.eth"
 PROOF_MODE = "true"  # C4: Bedrock storage proof mode
-ALLOWED_SENDERS = "0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083"  # OPResolver on Eth Sepolia
+ALLOWED_SENDERS = "0x17D4d74dF0eC301e56292f00df6DA62f30bfA546"  # OPResolver on Eth Sepolia
+MIN_AGE_SEC = "0"  # finalized-proof strategy (fast, trustless, no cold-start). MUST match OPResolver's MIN_AGE_SEC. Do NOT use >0 (optimistic — has a ~15s game-validation cold start).
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
@@ -49,6 +50,8 @@ NETWORK = "op-mainnet"
 L2_RECORDS_ADDRESS = "0x0000000000000000000000000000000000000000"  # set after mainnet deploy
 ROOT_DOMAIN = "aastar.eth"
 # PROOF_MODE = "true"  # enable after mainnet OPResolver deployment
+# ALLOWED_SENDERS = "0x..."  # set to mainnet OPResolver after deploy
+# MIN_AGE_SEC = "3600"  # MUST match mainnet OPResolver's MIN_AGE_SEC (balanced tier) — enable with PROOF_MODE
 
 # [[env.production.kv_namespaces]]
 # binding = "RECORD_CACHE"
