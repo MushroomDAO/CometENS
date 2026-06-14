@@ -97,6 +97,17 @@ interface Env {
    * Example: "0xABC...123,0xDEF...456"
    */
   ALLOWED_SENDERS?: string
+  /**
+   * Minimum dispute-game age (seconds) the gateway proves against.
+   * MUST match the on-chain OPFaultVerifier's MIN_AGE_SEC, otherwise the gateway
+   * proves against a different game than the verifier accepts:
+   *   - "0"  → gateway proves against the latest FINALIZED game (~3.5–7 days old);
+   *            records newer than that game resolve as empty.
+   *   - ">0" → gateway proves against the latest game aged ≥ this many seconds and
+   *            unchallenged (even if not finalized) — lets fresh records resolve.
+   * Defaults to 0 (finalized-only) when unset.
+   */
+  MIN_AGE_SEC?: string
   /** CF Analytics Engine dataset (optional — metrics emitted if bound). */
   ANALYTICS?: AnalyticsEngineDataset
 }
@@ -118,7 +129,7 @@ let _gatewayKey = ''
 let _gatewayInstance: import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup> | null = null
 
 async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gateway<import('@unruggable/gateways').OPFaultRollup>> {
-  const key = `${env.ETH_RPC_URL}|${env.OP_RPC_URL}|${env.NETWORK}`
+  const key = `${env.ETH_RPC_URL}|${env.OP_RPC_URL}|${env.NETWORK}|${env.MIN_AGE_SEC ?? '0'}`
   if (_gatewayInstance && _gatewayKey === key) return _gatewayInstance
 
   const { JsonRpcProvider } = await import('ethers')
@@ -132,7 +143,14 @@ async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gate
       ? OPFaultRollup.mainnetConfig
       : OPFaultRollup.sepoliaConfig
 
-  _gatewayInstance = new Gateway(new OPFaultRollup({ provider1, provider2 }, config))
+  const rollup = new OPFaultRollup({ provider1, provider2 }, config)
+  // Align the gateway's game selection with the on-chain OPFaultVerifier's MIN_AGE_SEC.
+  // Without this the rollup defaults to minAgeSec=0 (finalized games only) and fresh
+  // records resolve as empty even though the verifier would accept a newer aged game.
+  const minAgeSec = Number(env.MIN_AGE_SEC ?? '0')
+  if (Number.isFinite(minAgeSec) && minAgeSec > 0) rollup.minAgeSec = minAgeSec
+
+  _gatewayInstance = new Gateway(rollup)
   _gatewayKey = key
   return _gatewayInstance
 }
