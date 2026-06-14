@@ -1,8 +1,24 @@
-# CometENS 主网部署 Runbook (v0.6.0 — 证明模式架构)
+# CometENS 主网部署 Runbook (v0.6.0)
 
-> ⚠️ 本文档对应**当前架构**:`L2RecordsV3` + `OPResolver`(Optimism Bedrock 状态证明，去信任)。
-> 根目录的 `DEPLOY.md` 主网章节描述的是旧架构(V1 `L2Records` + `OffchainResolver` 签名模式)，已过时，**以本文档为准**。
-> 本 runbook 完全镜像测试网 C3' 部署流程(`5df883c` proof-mode end-to-end PASS)。
+> ⚠️ 根目录的 `DEPLOY.md` 主网章节是旧架构(V1 `L2Records`)，已过时，**以本文档为准**。
+
+---
+
+## 🎯 解析策略(先读这一节)
+
+CometENS 采用**按记录年龄组合两种模式**的策略,**刻意绕开昂贵的乐观证明路径**(详见 [README · Resolution Modes](../README.md#resolution-modes--what-users-get-and-who-you-trust)):
+
+| 记录年龄 | 路径 | 上线优先级 |
+|---|---|---|
+| **新记录(< ~7 天)** | **签名模式**(即时) | 🔴 上线必备 |
+| **老记录(≥ ~7 天)** | **终结证明模式**(`MIN_AGE_SEC=0`,快且去信任) | 🟡 去信任增强,可后置 |
+
+**关键含义,影响下面怎么部署:**
+- **上线走签名模式**:部署 `OffchainResolver`(签名版),`aastar.eth` 指向它,gateway 开签名模式(`PROOF_MODE=false`,用 `PRIVATE_KEY_SUPPLIER` 签名)。即时解析所有记录。这是 P0。
+- **去信任层走终结证明**:之后(或同时)部署 `OPResolver` + verifier,gateway `PROOF_MODE=true` 且 **`MIN_AGE_SEC=0`(终结,不是乐观的 3600)**。只对 ≥7 天的记录有效,但又快又去信任,无需任何 index/预热基建。
+- **不要用 `MIN_AGE_SEC > 0`(乐观)**:它是唯一有冷启动性能坑(~15s 验证循环)且信任更弱的路径,本方案已弃用。
+
+> 下面的 Step 1–7 是**证明模式(去信任层)**的部署。**签名模式上线**更简单:部署 `OffchainResolver`(签名)代替 Step 2 的 OPResolver stack,gateway 设 `PROOF_MODE=false` + `PRIVATE_KEY_SUPPLIER` secret,其余(L2RecordsV3、registrar、ENS setResolver、前端)相同。
 
 ---
 
@@ -114,8 +130,8 @@ export DEPLOYER_ADDRESS=0x...
 export GATEWAY_URL=https://cometens-gateway-production.<your-subdomain>.workers.dev/{sender}/{data}
 export L2_RECORDS_ADDRESS=$L2_MAINNET                                  # Step 1 的地址
 export ANCHOR_STATE_REGISTRY=0x23B2C62946350F4246f9f9D027e071f0264FD113  # Step 2.1 复核后的值
-export MIN_AGE_SEC=3600       # 【已选定:均衡档】新记录约 1h 生效;接受达 1h 且未被挑战的 game。详见文末附录
-export WINDOW_SEC=86400       # 配合 MIN_AGE_SEC=3600,1 天窗口足够
+export MIN_AGE_SEC=0          # 【已选定:终结证明】只对已终结状态出证明,快且去信任。新记录的即时解析由签名模式覆盖。详见文末附录
+export WINDOW_SEC=604800      # 终结 game 滞后 ~7 天,窗口需 >= 7 天
 export ETH_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
 
 forge script script/DeployOPResolver.s.sol \
@@ -345,11 +361,12 @@ if (被验证 game 的时间 + WINDOW_SEC < 最新 game 的时间) revert Commit
 
 ### 三种取值对照(供决策)
 
-| 取值 | MIN_AGE_SEC | WINDOW_SEC | 新记录可解析延迟 | 信任模型 | 适合 |
+| 取值 | MIN_AGE_SEC | WINDOW_SEC | 证明可覆盖的记录 | 信任模型 | 性能 |
 |------|:-----------:|:----------:|:----------------:|----------|------|
-| **最大去信任** | `0` | `604800` | **~3.5 天** | 零信任(仅终结状态) | 把"绝对去信任"放第一位,能接受注册后数天才生效 |
-| **✅ 均衡(已选定)** | `3600`(1h) | `86400` | **~1 小时** | 赌 1h 内无有效挑战 | 注册产品的实用选择,UX 与安全兼顾 |
-| **最新鲜** | `300`(5min) | `86400` | **~5 分钟** | 赌 5min 内无挑战(较激进) | 体验优先,信任 OP 看门人快速挑战 |
+| **✅ 终结证明(已选定)** | `0` | `604800` | ≥ ~7 天的记录 | **零信任**(仅终结状态) | **快**(锚定根直接有效,无验证循环) |
+| 乐观(已弃用) | `>0` | `86400` | 新记录也可 | 赌窗口内无挑战 | **慢**(~15s 验证循环,worker 超时)|
+
+**为什么选 `0`(终结):** 新记录的即时解析由**签名模式**负责(见顶部策略),所以证明模式无需追求"新记录也能证明"。把证明模式定位成"老记录的去信任层",用 `MIN_AGE_SEC=0` 即可——它**没有乐观路径那个冷启动性能坑**,也无需 index 服务或缓存预热。两全其美。
 
 > 测试网用 `MIN_AGE_SEC=0`/`WINDOW_SEC=86400` 能跑通,是因为 **OP Sepolia 的 game 终结远快于主网**,滞后落在 1 天窗口内。主网照搬 `0`/`86400` 会因终结 game 太老而 `CommitTooOld` 解析失败——这是主网必须重新决策这两个值的根本原因。
 
