@@ -19,8 +19,8 @@ NETWORK = "op-sepolia"
 L2_RECORDS_ADDRESS = "0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc"
 ROOT_DOMAIN = "aastar.eth"
 PROOF_MODE = "true"  # C4: Bedrock storage proof mode
-ALLOWED_SENDERS = "0x17D4d74dF0eC301e56292f00df6DA62f30bfA546"  # OPResolver on Eth Sepolia (MIN_AGE_SEC=300)
-MIN_AGE_SEC = "300"  # MUST match OPResolver's MIN_AGE_SEC — controls which dispute game the gateway proves against
+ALLOWED_SENDERS = "0x17D4d74dF0eC301e56292f00df6DA62f30bfA546"  # OPResolver on Eth Sepolia
+MIN_AGE_SEC = "0"  # finalized-proof strategy (fast, trustless, no cold-start). MUST match OPResolver's MIN_AGE_SEC. Do NOT use >0 (optimistic — has a ~15s game-validation cold start).
 
 # Phase 2 — KV record cache (read by gateway, written by API worker)
 # Same namespace ID as API Worker's RECORD_CACHE binding.
