@@ -4,6 +4,42 @@
 
 ---
 
+## [v0.7.0] — 测试网正式发布：混合解析（签名 ↔ 终结证明）（2026-06）
+
+首个正式 **GitHub Release**,标志 OP Sepolia 测试网上线。
+
+### 新增
+
+| 组件 | 说明 |
+|---|---|
+| `HybridResolver.sol` | 单 resolver 自动按记录年龄路由:新记录(<~7天)→ 网关签名(即时);老且未变记录(≥~7天)→ Bedrock 终结证明(去信任)。刻意弃用乐观证明路径 |
+| gateway `POST /hybrid` | 纯 viem 判定 mode(终结窗口内值是否变更)+ 返回 `abi.encode(uint8 mode, bytes payload)`;证明生成由 `HYBRID_PROOF_ENABLED` 门控 |
+| `DeployHybridResolver.s.sol` | HybridResolver + OPFaultVerifier 栈部署脚本 |
+| `docs/HYBRID-RESOLVER-DESIGN.md` | 线格式 + 安全说明 |
+| `docs/USER-GUIDE.md` / `docs/blog/2026-06-testnet-launch.md` | 用户指南 + 发布博客 |
+| `docs/DEPLOY-MAINNET.md` / `docs/RELEASE-PLAN.md` | 主网 runbook + 分阶段发布闸门 |
+
+### 已部署(OP Sepolia 测试网)
+
+| 合约/服务 | 地址 |
+|---|---|
+| L2RecordsV3 (Optimism Sepolia) | `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc` |
+| HybridResolver (Ethereum Sepolia) | `0xA54D63a6223B66EDED35286522336e45F21BE512` |
+| OPFaultVerifier | `0x136D6a500C80C00A62B124F6809178a4f5f309ff` |
+| Gateway / API | `cometens-gateway` / `cometens-api`.jhfnetboy.workers.dev |
+
+### 验证
+
+- 312 自动化测试全过:198 Foundry + 101 TS 单元 + 29 Anvil E2E
+- OP Sepolia 链上 E2E:`resolve(aastar.eth, addr)` → CCIP-Read → `/hybrid` → 签名 → `hybridCallback` 返回正确地址
+- HybridResolver 通过多轮对抗 review(证明请求不可替换;签名绑定 resolver/calldata/result/expiry)
+
+### 安全说明
+
+- gateway/verifier 双向 fail-safe;上主网前 HybridResolver owner 应设为 Gnosis Safe 多签
+
+---
+
 ## [v0.5.0] — Milestone B/C/D：NFT 子域 + 插件架构 + 状态证明脚手架 + 生产强化（2026-04-04）
 
 ### 新合约
