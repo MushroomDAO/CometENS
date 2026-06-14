@@ -29,8 +29,10 @@ import {
   createPublicClient,
   http,
   decodeFunctionData,
+  encodeFunctionData,
   encodeFunctionResult,
   encodeAbiParameters,
+  decodeAbiParameters,
   keccak256,
   encodePacked,
   type Hex,
@@ -90,6 +92,14 @@ interface Env {
    * Requires ETH_RPC_URL (L1 provider).
    */
   PROOF_MODE?: string
+  /**
+   * Enable the hybrid PROOF branch (finalized Bedrock proof for aged/unchanged records).
+   * When unset, /hybrid serves signatures only. The proof/sign decision is pure-viem
+   * (fast); proof generation (ethers + unruggable, verified ~1-4s in Node) only runs
+   * for records whose value is unchanged across the finality-lag window.
+   * Full proof-path E2E is pending records older than the finalized anchor (~7d).
+   */
+  HYBRID_PROOF_ENABLED?: string
   /**
    * Optional comma-separated list of allowed sender (resolver) addresses for proof mode.
    * When set, requests from any other sender are rejected with 403.
@@ -371,6 +381,141 @@ async function handleResolveSigned(
   return { data }
 }
 
+// ─── Hybrid mode (auto: signature for fresh / finalized proof for aged) ─────────
+
+/** Read the raw record value on-chain (no KV) at an optional block. */
+async function readRecordRaw(
+  env: Env,
+  functionName: string,
+  args: readonly unknown[],
+  blockNumber?: bigint,
+): Promise<unknown> {
+  const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
+  const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
+  const base = { address: env.L2_RECORDS_ADDRESS as Hex, abi: L2RecordsV2ABI } as const
+  const opts = blockNumber !== undefined ? { blockNumber } : {}
+  return client.readContract({ ...base, functionName: functionName as any, args: args as any, ...opts })
+}
+
+function isEmptyRaw(functionName: string, v: unknown): boolean {
+  if (functionName === 'addr') {
+    if (typeof v === 'string') return v.toLowerCase() === '0x0000000000000000000000000000000000000000' || v === '0x'
+  }
+  if (functionName === 'text') return v === ''
+  return v === '0x' || v === undefined || v === null
+}
+
+function rawEqual(a: unknown, b: unknown): boolean {
+  if (typeof a === 'string' && typeof b === 'string') return a.toLowerCase() === b.toLowerCase()
+  return a === b
+}
+
+/** Hot-path budget for the proof/sign decision; exceeding it falls back to signature. */
+const PROOF_DECISION_BUDGET_MS = 8000
+
+/**
+ * Conservative finalized-state lag (L2 blocks) used for the proof/sign DECISION.
+ * We compare the record at `currentBlock - lag` vs latest using pure viem (no
+ * ethers/unruggable game-finding, which hangs in CF Workers). The lag must be
+ * ≥ the real finalized-anchor lag so that "unchanged over the lag window" implies
+ * "unchanged through the real anchor" (conservative — the on-chain proof, generated
+ * against the real anchor, then proves the correct current value).
+ */
+const FINALITY_LAG_BLOCKS: Record<string, bigint> = {
+  'op-mainnet': 350_000n,  // ~8 days @ 2s — covers the ~7d finalization window + margin
+  'op-sepolia': 400_000n,  // testnet finalizes slowly; anchor observed ~302k behind
+}
+
+/** True iff the record's value `lag` blocks ago equals its current value (aged & unchanged). Pure viem. */
+async function _decideUseProof(
+  env: Env,
+  functionName: string,
+  args: readonly unknown[],
+): Promise<boolean> {
+  try {
+    const latest = await readRecordRaw(env, functionName, args)
+    if (isEmptyRaw(functionName, latest)) return false
+    const chain = env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
+    const client = createPublicClient({ chain, transport: http(env.OP_RPC_URL) })
+    const current = await client.getBlockNumber()
+    const lag = FINALITY_LAG_BLOCKS[env.NETWORK] ?? 400_000n
+    if (current <= lag) return false
+    const finalized = await readRecordRaw(env, functionName, args, current - lag)
+    return rawEqual(finalized, latest)
+  } catch {
+    return false // any failure (e.g. record didn't exist that far back) → signature
+  }
+}
+
+/**
+ * Hybrid: decide per record whether to serve a finalized proof (trustless) or a
+ * signature (instant). Proof is used ONLY when the finalized L2 state equals the
+ * current value (record is aged & unchanged); otherwise (fresh / recently changed)
+ * we sign the current value. Never serves an optimistic (un-finalized) proof.
+ *
+ * Request blob (from HybridResolver.resolve): abi.encode(bytes context, GatewayRequest req, bytes data)
+ * Response: abi.encode(uint8 mode, bytes payload)  — mode 0 = signature, 1 = proof
+ */
+async function handleHybrid(requestHex: Hex, sender: Hex, env: Env): Promise<Response> {
+  // HybridResolver.resolve sends abi.encode(bytes context, GatewayRequest req, bytes data).
+  // GatewayRequest is the struct { bytes ops }.
+  const [context, reqStruct, recordData] = decodeAbiParameters(
+    [
+      { type: 'bytes' },
+      { type: 'tuple', components: [{ name: 'ops', type: 'bytes' }] },
+      { type: 'bytes' },
+    ],
+    requestHex,
+  ) as [Hex, { ops: Hex }, Hex]
+
+  const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data: recordData })
+  if (!args) throw new Error('Unsupported selector')
+
+  // Proof branch gated by HYBRID_PROOF_ENABLED. Decision is pure-viem (fast) and
+  // bounded by PROOF_DECISION_BUDGET_MS; any failure / timeout → signature
+  // (instant, always correct). Proof is used ONLY for aged & unchanged records.
+  let useProof = false
+  if (env.ETH_RPC_URL && env.HYBRID_PROOF_ENABLED === 'true') {
+    useProof = await Promise.race<boolean>([
+      _decideUseProof(env, functionName, args),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), PROOF_DECISION_BUDGET_MS)),
+    ]).catch(() => false)
+  }
+
+  let mode: number
+  let payload: Hex
+  if (useProof) {
+    // Reconstruct the unruggable proveRequest(context, req) calldata the proof
+    // gateway expects (same as OPResolver's OffchainLookup request).
+    const proveCalldata = encodeFunctionData({
+      abi: [{
+        type: 'function', name: 'proveRequest', stateMutability: 'pure',
+        inputs: [
+          { name: 'context', type: 'bytes' },
+          { name: 'req', type: 'tuple', components: [{ name: 'ops', type: 'bytes' }] },
+        ],
+        outputs: [{ type: 'bytes' }],
+      }] as const,
+      functionName: 'proveRequest',
+      args: [context, reqStruct],
+    })
+    const gateway = await getGateway(env)
+    const { data } = await gateway.handleRead(sender, proveCalldata, { protocol: 'raw' })
+    mode = 1
+    payload = data as Hex
+  } else {
+    const signed = await handleResolveSigned(recordData, sender, env)
+    mode = 0
+    payload = signed.data
+  }
+
+  const out = encodeAbiParameters([{ type: 'uint8' }, { type: 'bytes' }], [mode, payload])
+  return new Response(JSON.stringify({ data: out }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  })
+}
+
 // ─── Worker entry point ───────────────────────────────────────────────────────
 
 const corsHeaders = {
@@ -442,6 +587,44 @@ export default {
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
           })
         }
+      }
+    }
+
+    // ─── Hybrid mode: POST /hybrid ────────────────────────────────────────────
+    // HybridResolver emits OffchainLookup with a non-templated URL → CCIP client
+    // POSTs { sender, data }. data = abi.encode(proveCalldata, recordData).
+    // We reply { data: abi.encode(uint8 mode, bytes payload) }.
+    if (path === '/hybrid') {
+      if (request.method !== 'POST') {
+        return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+          status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
+      try {
+        const payload = (await request.json()) as { sender?: Hex; data?: Hex }
+        if (!payload.data || !payload.data.startsWith('0x')) {
+          return new Response(JSON.stringify({ error: 'Missing data' }), {
+            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        if (!payload.sender || !payload.sender.startsWith('0x')) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid sender' }), {
+            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          })
+        }
+        if (env.ALLOWED_SENDERS) {
+          const allowed = env.ALLOWED_SENDERS.split(',').map((s) => s.trim().toLowerCase())
+          if (!allowed.includes(payload.sender.toLowerCase())) {
+            return new Response(JSON.stringify({ error: 'Sender not allowed' }), {
+              status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            })
+          }
+        }
+        return await handleHybrid(payload.data, payload.sender, env)
+      } catch {
+        return new Response(JSON.stringify({ error: 'Hybrid resolution failed' }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
       }
     }
 
