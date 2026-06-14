@@ -1,11 +1,19 @@
 // Proof-mode CCIP-Read end-to-end check (Sepolia).
 // viem auto-follows OffchainLookup -> gateway (Bedrock proof) -> resolveWithProof.
+//
+// Usage: node scripts/proof-e2e.mjs [name] [expectedAddr]
+//   expectedAddr — if given, the script exits 1 unless the resolved addr matches.
+// Note: gateway ALLOWED_SENDERS (allowlist) enforcement is covered by test/unit/gateway
+// tests; this script exercises the live finalized-proof resolution path end-to-end.
 import { createPublicClient, http, encodeFunctionData, decodeFunctionResult, toHex } from 'viem'
 import { sepolia } from 'viem/chains'
 
 const RPC = process.env.SEPOLIA_RPC_URL
 const RESOLVER = process.env.L1_OP_RESOLVER_ADDRESS
 const NAME = process.argv[2] || 'aastar.eth'
+// Optional: assert the resolved address equals this (exit 1 on mismatch) — makes
+// the script a real pass/fail check rather than a "did not throw" smoke test.
+const EXPECT = (process.argv[3] || '').toLowerCase()
 
 function dnsEncode(name) {
   let out = '0x'
@@ -46,8 +54,15 @@ try {
     // ccipRead is enabled by default; viem follows OffchainLookup automatically
   })
   const addr = decodeFunctionResult({ abi: ADDR_ABI, functionName: 'addr', data: result })
-  console.log(`\n✅ PROOF-MODE RESOLVE PASS`)
-  console.log(`   ${NAME} addr = ${addr}`)
+  if (EXPECT && addr.toLowerCase() !== EXPECT) {
+    console.log(`\n❌ PROOF-MODE RESOLVE MISMATCH`)
+    console.log(`   ${NAME} addr = ${addr}`)
+    console.log(`   expected   = ${EXPECT}`)
+    process.exitCode = 1
+  } else {
+    console.log(`\n✅ PROOF-MODE RESOLVE PASS`)
+    console.log(`   ${NAME} addr = ${addr}${EXPECT ? ' (matches expected)' : ''}`)
+  }
 } catch (e) {
   console.log(`\n❌ resolve failed:`)
   console.log('   ' + (e.shortMessage || e.message || String(e)).slice(0, 500))

@@ -148,6 +148,11 @@ async function getGateway(env: Env): Promise<import('@unruggable/gateways').Gate
   // Without this the rollup defaults to minAgeSec=0 (finalized games only) and fresh
   // records resolve as empty even though the verifier would accept a newer aged game.
   const minAgeSec = Number(env.MIN_AGE_SEC ?? '0')
+  if (env.MIN_AGE_SEC !== undefined && (!Number.isFinite(minAgeSec) || minAgeSec < 0)) {
+    // Don't silently swallow a misconfiguration — falling back to finalized-only (0)
+    // would mismatch a verifier expecting >0 and make fresh records resolve empty.
+    console.warn(`[gateway] invalid MIN_AGE_SEC="${env.MIN_AGE_SEC}" — falling back to finalized-only (0)`)
+  }
   if (Number.isFinite(minAgeSec) && minAgeSec > 0) rollup.minAgeSec = minAgeSec
 
   _gatewayInstance = new Gateway(rollup)
