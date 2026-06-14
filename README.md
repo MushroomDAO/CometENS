@@ -1,7 +1,18 @@
 # ENS-tool (CometENS)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Testnet: live](https://img.shields.io/badge/OP_Sepolia-live-brightgreen.svg)](docs/blog/2026-06-testnet-launch.md)
 L2 subdomain distribution system: register subdomains under a root `.eth` name on Optimism, resolved globally via CCIP-Read (EIP-3668).
+
+## 🚀 Testnet live (v0.7.0)
+
+CometENS is **live on OP Sepolia** with a **hybrid resolver** that auto-routes per record: fresh names resolve instantly via signature, aged & unchanged names gain trustless finalized-proof resolution. See the [launch post](docs/blog/2026-06-testnet-launch.md) and [user guide](docs/USER-GUIDE.md).
+
+| Deployed (OP Sepolia) | Address |
+|---|---|
+| L2RecordsV3 (Optimism Sepolia) | `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc` |
+| HybridResolver (Ethereum Sepolia) | `0xA54D63a6223B66EDED35286522336e45F21BE512` |
+| Gateway / API | `cometens-gateway` / `cometens-api`.jhfnetboy.workers.dev |
 
 ## Quick Start
 
