@@ -35,8 +35,11 @@ API Worker (Cloudflare)       ← EIP-712 鉴权 → Worker EOA 发交易
 这三处让 owner 绕过一切限制,**且都有测试背书 —— 是刻意设计,不是 bug**:
 
 - `onlyOwnerOrRegistrar`(L2RecordsV3.sol:67):`msg.sender != owner` 才进检查,owner 直接放行
+- `_checkRegistrarQuota`(:183):**配额扣减也对 owner 短路** —— owner 发放不消耗任何配额
+  (此前误把配额绕过归到 :67,实际在这里)
 - `_requireNodeAuth`(:300):`if (msg.sender == owner) return;` → owner 可覆写**任意用户**的记录
 - `transferSubnodeByGateway`(:209):`onlyOwner`,链上**无签名校验** → owner 可把任意子域 NFT 转走
+- `setPrimaryNode`(:237):`onlyOwner`,可改**任意地址**的反向解析指向
   (测试:`test_contractOwnerCanAlwaysSetAddr`、`test_gatewayTransfer_succeeds`)
 
 API 层确实做了 EIP-712 验签 + 链上归属校验,但那是 **off-chain 约束**;

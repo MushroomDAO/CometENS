@@ -41,12 +41,15 @@
 pilot 不自审自 PR。用户将启动 pr-daemon 承担该角色;
 开 PR 后本会话用 ListAgents 找到该会话并对接。
 
-### 🔴 ③ TB.3 托管模式密钥架构 —— 需用户拍板(不阻塞夜间其余任务)
-线上 owner / writer / gateway signer 是同一把私钥,且 owner 绕过一切限制。
-详见 tasks.md TB.3。**在拍板前不写 DELEGATED-HOSTING.md。**
+### ✅ ③ TB.3 密钥架构 —— 已决策(2026-09-03)
+KMS(TEE)保管密钥 + 三角色密钥分离 + owner 冷存不用于日常写入 + 签名器抽象
+(自部署用 env-key,托管用 kms)。落地为 F1.5。
+其中 **T1.5.0(网关签名钥热轮换)不依赖此决策,可立即做**。
+注意:KMS 解决密钥保管,**不改变** owner 在链上被允许做什么,须在文档如实披露。
 
-### 🔴 ④ TB.4 register.html 自助注册流处置 —— 需用户拍板
-与"用户不登录、授予制"定位冲突,且已上线。详见 tasks.md TB.4。
+### ✅ ④ TB.4 自助注册流 —— 已决策(2026-09-03)
+改造为「申请 → 审批 → 授予」,审批**可配置**:`auto`(自动批准,等价当前线上行为,
+向后兼容)/ `manual`(管理员队列审批)。落地为 F1.6。
 
 ### ⚠️ ⑤ 环境阻塞(已给出兜底,见 T1.0.1)
 - `.env.local` 的 `OP_SEPOLIA_RPC_URL`(Alchemy)返回 **403 OPT_SEPOLIA is not enabled**。
@@ -66,6 +69,14 @@ pilot 不自审自 PR。用户将启动 pr-daemon 承担该角色;
 
 ## 变更日志
 
+- **2026-09-03(第四轮,pr-daemon REQUEST_CHANGES 后)**:修掉 3 条恒真/弱验收命令 ——
+  T1.3.1 的 `grep -c "owner"` 恒真(现在就返回 25)改为精确检出
+  `test_ownerCanStillRegisterAfterRevoke`;T1.3.1 性质 2 拆为正对照 2a + 具体 selector 2b;
+  T1.1.1 的 "token≥10" 改用 `test … -ge 10` 真检查。修正 architecture.md 中归错的引用
+  (配额绕过在 `_checkRegistrarQuota:183` 而非 :67),补 `setPrimaryNode:237`。
+  新增 T1.5.0(网关签名钥热轮换,不依赖任何待决事项)。
+- **2026-09-03(第三轮,用户拍板)**:TB.3 / TB.4 决策落定,新增 F1.5 / F1.6 共 6 个 task,
+  T1.3.2 解除阻塞。
 - **2026-09-03(第二轮,Codex 对抗式 review 后)**:修正 Mode B 信任模型的错误表述;
   T1.3.1 增加"owner 绕过"反向断言以堵死假阳性;新增 T1.0.1(RPC/地址漂移修复)、
   TB.3(密钥架构决策)、TB.4(register.html 处置);修正 roadmap 与 tasks 的依赖矛盾;

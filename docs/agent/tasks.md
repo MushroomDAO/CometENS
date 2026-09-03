@@ -43,8 +43,10 @@
 - **明确不做**:不引入任何 UI 框架/Tailwind CDN;保持零运行时依赖(viem 之外)。
 - **依赖**:无
 - **交付物**:`src/styles/design-system.css` + `index.html` 接入
-- **验收命令**:`pnpm build && pnpm typecheck && grep -c '^\s*--c-' src/styles/design-system.css`
-  (build 与 typecheck 必须通过;token 数 ≥ 10)
+- **验收命令**:
+  `pnpm build && pnpm typecheck && test "$(grep -c '^[[:space:]]*--c-' src/styles/design-system.css)" -ge 10`
+  (`grep -c` 单独用只能区分 0 与非 0——1 个 token 也会 exit 0 让整条链通过,
+  必须用 `test … -ge 10` 才真的检查数量)
 - **涉及文件**:`src/styles/design-system.css`、`index.html`、`vite.config.ts`(如需)
 - **证据**:
 
@@ -144,35 +146,44 @@
   并用测试**同时证明它有效、和它的边界在哪**。
 - **开发范围**:按 spec.md §3 实现 `scripts/delegate.ts`(grant/status/revoke),
   错误按错误表分类给提示。补 Foundry 测试守住**三条**性质:
-  1. registrar **不能越权**到别的 parentNode(revert);
-  2. `removeRegistrar` 后该 registrar 再发子域 **revert**;
+  1. registrar **不能越权**到别的 parentNode:
+     `vm.expectRevert(L2RecordsV3.Unauthorized.selector)`(**不接受裸 `expectRevert()`**);
+  2a. **正对照** —— 撤销**之前**,该 registrar 调 `setSubnodeOwner` 必须**成功**
+     (没有这条,"撤销后失败"可能只是因为它从来就没成功过);
+  2b. 撤销**之后**,同一 registrar 再发子域必须
+     `vm.expectRevert(L2RecordsV3.Unauthorized.selector)`(同样不接受裸 revert);
   3. **⚠️ 反向断言(本任务的重点)**:同样撤销之后,**合约 owner 仍然能发出该 parentNode 的子域、
      仍能覆写记录、仍能转移他人 NFT** —— 必须有测试把这个事实钉死。
+     该用例固定命名 `test_ownerCanStillRegisterAfterRevoke`,供验收命令精确检出。
+
+> 注:本文件里的三条性质必须自足。`pilot run` 只读 tasks.md、**不读 acceptance.md**
+> (`~/.claude/skills/pilot/phases/run.md:125`),写在别处的更严格版本到不了执行者手上。
 - **为什么必须有第 3 条**:只测 1+2 会得到"撤销已验证 ✅"的**假阳性**,
   而托管场景下我们就是 owner,撤销对我们根本不生效。少了这条测试,
   文档就会写出当前不成立的安全承诺。
 - **明确不做**:不新增合约、不改 owner 权限语义(那属于 TB.3 的架构决策)。
 - **依赖**:T1.0.1(需要可用的 RPC)
 - **交付物**:`scripts/delegate.ts` + 3 组 Foundry 测试 + 一次链上实跑记录
-- **验收命令**:`forge test` 全绿;且
-  `grep -c "owner" contracts/test/L2RecordsV3.t.sol` 对应的新增用例必须存在并断言
-  **owner 在 revoke 之后依然成功**(不是 revert)
+- **验收命令**:
+  `forge test && grep -q 'function test_ownerCanStillRegisterAfterRevoke' contracts/test/L2RecordsV3.t.sol`
+  (**当前树上这条是红的**;此前用的 `grep -c "owner" …` 恒真——现在就返回 25/exit 0,
+  区分不了"反向断言写了"和"什么都没写",正是本任务要消灭的假阳性)
 - **风险/回滚**:发测试网交易。**必须在 T1.2.2 新部署的合约上跑,
   严禁对线上 `0xbA692Cdf…` 执行任何写操作**(线上 owner 与运营 EOA 同址,误操作会影响已上线服务)。
 - **涉及文件**:`scripts/delegate.ts`、`contracts/test/L2RecordsV3.t.sol`、`package.json`
 - **证据**:
 
-### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `BLOCKED`
+### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `READY`
 - **优先级**:mid
 - **目标**:让社区看懂"我交出了什么、保留了什么、怎么收回";让上游系统能照着接 API。
 - **开发范围**:写 `docs/DELEGATED-HOSTING.md`(所有权 vs 管理权、授权/撤销流程、
   基于 T1.3.1 实跑结果);写 `docs/UPSTREAM-API.md`(按 spec.md §7.1:
   `/v1/register` 调用范例 + 失败语义表)。
 - **明确不做**:不承诺 SLA、不写计费。
-- **依赖**:T1.3.1 **+ TB.3 必须先拍板**
-- **阻塞原因**:托管模式的信任模型尚未定案(见 TB.3)。在定案前写
-  `DELEGATED-HOSTING.md` 必然写出过度承诺,定案后还要重写。
-  **可以拆出不受阻塞的部分先做**:`docs/UPSTREAM-API.md`(纯 API 文档,与信任模型无关)。
+- **依赖**:T1.3.1(TB.3 已于 2026-09-03 决策,不再阻塞)
+- **必须写进 DELEGATED-HOSTING.md 的两条**:①按 TB.3 决策描述密钥架构
+  (KMS/TEE 保管 + 三钥分离 + owner 冷存不用于日常写入);
+  ②如实披露 KMS **不改变** owner 在链上被允许做什么,运营方技术上仍可覆写/收回已发子域。
 - **交付物**:`docs/DELEGATED-HOSTING.md`(阻塞)、`docs/UPSTREAM-API.md`(可先做)
 - **验收命令**:`node -e "const fs=require('fs'); const a=fs.readFileSync('docs/DELEGATED-HOSTING.md','utf8'); const b=fs.readFileSync('docs/UPSTREAM-API.md','utf8'); if(!/撤销|revoke/.test(a)) throw new Error('未写撤销'); if(!/v1\/register/.test(b)) throw new Error('未写端点')"`
 - **涉及文件**:`docs/DELEGATED-HOSTING.md`、`docs/UPSTREAM-API.md`
@@ -218,37 +229,150 @@
 
 ---
 
+## F1.5 — 签名器抽象与密钥分离(TB.3 落地)
+
+### T1.5.0 网关签名钥轮换脚本 + runbook(**不依赖任何待决事项**)  `READY`
+- **优先级**:high
+- **目标**:把三钥复用里**最容易解掉的一把**先解掉:那把 7×24 在线的 CCIP-Read 签名钥。
+- **为什么现在就能做**:网关签名用 `PRIVATE_KEY_SUPPLIER`
+  (`workers/gateway/src/index.ts:366`),写入用 `WORKER_EOA_PRIVATE_KEY`
+  (`workers/api/src/index.ts:855`)——**是两个 Worker 里两个不同的变量,复用是配置不是架构**。
+  且 `HybridResolver:112/118` 与 `OffchainResolver:60/66` 都有 `addSigner`/`removeSigner`,
+  因此 `addSigner(新)` → 换 secret → `removeSigner(旧)` 即可热轮换,
+  **不需要重新部署、不需要多签、不依赖 TB.3 的任何决策**。
+- **开发范围**:写 `scripts/rotate-gateway-signer.ts`,分三步且**每步之间做验证**
+  (加新签名者 → 确认链上已生效 → 换 secret → 实测解析仍通过 → 摘旧签名者);
+  必须支持 `--dry-run`;写 `docs/KEY-ROTATION.md` runbook。
+- **明确不做**:**夜间不得对线上环境真执行轮换**——顺序错一步会让网关解析全挂。
+  夜间只交付「脚本 + dry-run 通过 + runbook」,真轮换是人工步骤。
+- **依赖**:无
+- **交付物**:`scripts/rotate-gateway-signer.ts` + `docs/KEY-ROTATION.md`
+- **验收命令**:`pnpm typecheck && pnpm rotate:gateway-signer --dry-run`
+  (dry-run 必须打印完整步骤与每步的验证点,且**不发任何交易**)
+- **风险/回滚**:脚本本身零风险(dry-run);真执行由人做,runbook 须含回滚步骤
+  (摘错了就把旧签名者 addSigner 回去)。
+- **涉及文件**:`scripts/rotate-gateway-signer.ts`、`docs/KEY-ROTATION.md`、`package.json`
+- **证据**:
+
+### T1.5.1 抽象签名器接口 + env-key 实现  `READY`
+- **优先级**:high
+- **目标**:把"用哪把钥匙、怎么签"从业务逻辑里剥离,为 KMS 留出插槽,
+  同时保证自部署者只需一个环境变量即可运行。
+- **开发范围**:定义 `Signer` 接口(至少 `signTransaction` 与 `signMessage`/`signTypedData`);
+  实现 `EnvKeySigner`(从环境变量读私钥,默认实现);
+  把 API worker 的写路径与 gateway 的 EIP-3668 应答签名改为经此接口获取签名者。
+- **明确不做**:本任务**不实现 KMS**(见 T1.5.3);不改任何链上合约。
+- **依赖**:无
+- **交付物**:signer 接口 + `EnvKeySigner` + 两个 worker 接入 + 单测
+- **验收命令**:`pnpm vitest run test/unit/ && pnpm typecheck`
+  (单测须覆盖:接口契约、EnvKeySigner 派生地址正确、缺钥时报错清晰)
+- **风险/回滚**:改动签名路径,**必须保证现有 e2e 解析仍通过**;
+  不得改变已部署合约与线上 Worker 的对外行为。
+- **涉及文件**:`workers/api/src/`、`workers/gateway/src/`、`test/unit/`
+- **证据**:
+
+### T1.5.2 三角色密钥分离 + preflight 校验  `READY`
+- **优先级**:high
+- **目标**:让 owner / writer / gateway-signer 在配置层就是三把独立的钥匙,
+  并让 preflight 能检出"又混用了"。
+- **开发范围**:配置上区分 `OWNER_KEY` / `WRITER_KEY` / `GATEWAY_SIGNER_KEY`
+  (保留旧变量名兼容,但标记 deprecated);把 T1.2.1 的 3b 检查从 WARN 升级为
+  可配置(自部署默认 WARN,托管配置下 FAIL);文档写明三者职责与最小权限。
+- **明确不做**:不在本任务里轮换线上密钥(那是运维动作,需你执行)。
+- **依赖**:T1.2.1、T1.5.1
+- **交付物**:配置分离 + preflight 规则 + 文档章节
+- **验收命令**:`pnpm vitest run test/unit/preflight.test.ts`
+  (须有用例:三钥同址 → 触发告警/失败;三钥不同址 → PASS)
+- **涉及文件**:`scripts/preflight.ts`、`.env.op-sepolia`、`workers/*/wrangler.toml` 注释、文档
+- **证据**:
+
+### T1.5.3 KMS(TEE)签名器实现  `BLOCKED`
+- **阻塞原因**:需要一个可运行 TEE 的节点与 KMS 服务端,属基础设施,非夜间开发范围。
+  另需确定 CometENS 写路径是留在 Cloudflare Workers(只能 HTTPS 调 KMS)
+  还是迁到与 KMS 同机的自托管节点(可走 IPC)。
+- **解除条件**:KMS 服务可用 + 你确定写路径部署形态。
+
+---
+
+## F1.6 — 申请 / 审批 / 授予流程(TB.4 落地)
+
+### T1.6.1 审批策略与申请端点  `READY`
+- **优先级**:high
+- **目标**:把"直接发放"改成"提交申请",并支持 `auto` / `manual` 两种审批模式。
+- **开发范围**:新增 `APPROVAL_MODE`(`auto`|`manual`,默认 `auto` 以兼容线上行为);
+  新增申请端点(提交申请 → `auto` 直接发放并返回结果;`manual` 落 KV 队列返回 pending);
+  新增管理员审批端点(批准 → 发放;拒绝 → 标记);申请状态查询端点。
+  队列复用现有 KV 命名空间,不引入新依赖。
+- **明确不做**:不做用户账号/登录;不做邮件通知;不引入数据库。
+- **依赖**:无
+- **交付物**:端点 + KV schema + 单测
+- **验收命令**:`pnpm vitest run test/unit/ && pnpm typecheck`
+  (单测须覆盖:auto 模式直接发放、manual 模式落队列、重复申请、
+  未授权者不能批准、批准后状态流转)
+- **风险/回滚**:`APPROVAL_MODE` 默认 `auto` 等价于当前行为,**向后兼容**,不影响线上。
+- **涉及文件**:`workers/api/src/index.ts`、`test/unit/`
+- **证据**:
+
+### T1.6.2 register.html 改造为申请入口  `READY`
+- **优先级**:mid
+- **目标**:页面语义从"自己注册"改为"提交申请",并如实显示当前审批模式。
+- **开发范围**:用设计系统重做;`auto` 模式下体验仍是即时拿到名字,
+  `manual` 模式下提交后显示"已提交,等待审批"并可用申请号查询状态;四态反馈。
+- **明确不做**:不做登录;不做账号体系。
+- **依赖**:T1.1.1、T1.6.1
+- **交付物**:改造后的 `register.html` + `src/register.ts`
+- **验收命令**:`pnpm build && pnpm typecheck && node -e "const s=require('fs').readFileSync('src/register.ts','utf8'); if(/\balert\(/.test(s)) throw new Error('仍在用 alert 做用户反馈')"`
+- **涉及文件**:`register.html`、`src/register.ts`
+- **证据**:
+
+### T1.6.3 admin 审批队列页面  `READY`
+- **优先级**:mid
+- **目标**:管理员能看到待审列表,逐条批准/拒绝。
+- **开发范围**:在管理控制台增加"待审批"分区:列表、批准、拒绝、空状态、四态反馈。
+- **明确不做**:不做角色权限系统(沿用现有 EIP-712 管理员鉴权)。
+- **依赖**:T1.1.4、T1.6.1
+- **交付物**:admin 审批区 + 单测
+- **验收命令**:`pnpm build && pnpm typecheck && pnpm vitest run test/unit/`
+- **涉及文件**:`admin.html`、`src/admin.ts`
+- **证据**:
+
+---
+
 ## BLOCKED — 需要用户拍板,夜间不得自行决定
 
 ### TB.1 主网部署(D4)  `BLOCKED`
 - **阻塞原因**:用户 2026-09 明确当前阶段只做测试网。主网属 M2。
 - **解除条件**:M1 验收通过 + 用户明确指示上主网。
 
-### TB.3 托管模式的信任模型 / 密钥架构决策  `BLOCKED` 🔴 最高优先待决
-- **问题**:线上合约 `0xbA692Cdf…` 的 `owner`、写入管道 EOA、CCIP-Read 网关签名者
-  **三者是同一把私钥**(`0xb5600060…`)。而 owner 无条件绕过 registrar/quota/expiry,
-  可覆写任意记录、转移任意子域 NFT。因此:
-  - 托管模式下"社区可撤销我们"在链上**不成立**(只能在 L1 改 resolver);
-  - 该密钥泄露一次 = 既能伪造全网解析应答,又能没收任意用户的名字。
-- **需要你在三者中选一**:
-  1. **每个托管社区独立部署一份 L2RecordsV3**,owner 用冷钱包/多签,
-     日常只用 registrar 权限写入(改动小,复用现有部署脚本);
-  2. **共享实例但拆密钥**:owner 进多签冷存,日常写入用另一把只被授予 registrar 的热钥;
-  3. **接受现状**,但在 `DELEGATED-HOSTING.md` 里如实披露"运营方可没收",不做技术约束。
-- **解除条件**:你选定方案。选定前 T1.3.2 的 DELEGATED-HOSTING.md 不动笔。
-- **注意**:此项**不影响** F1.0/F1.1/F1.2 与 T1.3.1 的执行,夜间可照常推进其余任务。
+### TB.3 托管模式信任模型 / 密钥架构  ✅ **已决策(2026-09-03)**
+- **原问题**:线上 `owner`、写入 EOA、CCIP-Read 网关签名者是同一把私钥(`0xb5600060…`),
+  且 owner 无条件绕过 registrar/quota/expiry。
+- **决策**:
+  1. **密钥保管走 KMS(TEE 内保存私钥)**,CometENS 通过 RPC/HTTPS 调用其签名。
+  2. **三角色密钥分离**:`OWNER_KEY` / `WRITER_KEY` / `GATEWAY_SIGNER_KEY` 各自独立,
+     并各自绑定签名策略 —— **网关签名钥匙只允许签 EIP-3668 应答,永不允许签交易**。
+  3. **owner 密钥冷存(或 KMS 严格策略),不用于日常写入**;日常发放用被授予 registrar
+     权限的热钥。
+  4. **签名器必须抽象**:自部署者不得被迫依赖 KMS/TEE(违反 research.md 的自部署零依赖边界)。
+     接口两实现:`env-key`(默认,自部署)与 `kms`(我们托管运营)。
+- **仍需注意**:KMS/TEE 解决的是**密钥保管**,不改变 owner 在链上**被允许做什么**。
+  托管模式下仍须在 `DELEGATED-HOSTING.md` 如实披露 owner 的能力边界。
+- **⚡ 无需等待本决策即可先做的一半**:网关签名钥与写入钥本就是两个 Worker 里的
+  两个不同变量(`PRIVATE_KEY_SUPPLIER` vs `WORKER_EOA_PRIVATE_KEY`),复用属**配置**而非架构;
+  两个 Resolver 都有 `addSigner`/`removeSigner`,可热轮换。见 T1.5.0。
+- **落地任务**:F1.5(T1.5.0 / T1.5.1 / T1.5.2 夜间可做;
+  T1.5.3 KMS 实现需基础设施,不在夜间范围)。
 
-### TB.4 register.html 自助注册流的处置  `BLOCKED`
-- **问题**:`register.html` + `src/register.ts` 是一条**已上线**的自助注册流
-  (连钱包即可自行申领),从 `index.html:32` 直接链接,
-  `workers/api/src/index.ts:569` 注释写明 "Self-service model: any wallet can register
-  their own subdomain."。这与你定的"用户不登录、子域由 API/管理员授予"直接冲突。
-- **需要你在三者中选一**:
-  1. **下线**:移除首页入口与页面,写路径只保留 API 授予 + 管理员授予;
-  2. **保留但收口**:作为自部署者可选开关(默认关),默认部署不暴露;
-  3. **承认为第三条路径**:保留并在文档中如实写明"支持自助申领",
-     同时修正 acceptance.md 里"jack 不注册"的表述。
-- **解除条件**:你选定方案。选定前不改动 register 相关代码。
+### TB.4 自助注册流的处置  ✅ **已决策(2026-09-03)**
+- **原问题**:`register.html` 是已上线、从首页直链的开放自助注册(零审批),
+  与"用户不登录、由 API/管理员授予"的定位冲突。
+- **决策:改造成「申请 → 审批 → 授予」,且审批是可配置的**,两种模式都必须支持:
+  - `APPROVAL_MODE=auto` —— 自动批准。等价于当前的开放自助领取,
+    适用于运营方主动放弃门槛、免费为所有人服务的场景。
+  - `APPROVAL_MODE=manual` —— 进审批队列,由管理员(多签成员或专职审核人)
+    在 admin 页面逐条批准后才发放。
+- **要点**:`auto` 模式与当前线上行为等价,因此该改造**向后兼容**,不破坏已上线服务。
+- **落地任务**:F1.6(T1.6.1 / T1.6.2 / T1.6.3,均夜间可做)。
 
 ### TB.2 DNSSEC → ENS 导入验证  `BLOCKED`
 - **阻塞原因**:需要用户在域名注册商侧启用 DNSSEC 并配置 `_ens` TXT,
