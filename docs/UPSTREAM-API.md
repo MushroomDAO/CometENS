@@ -13,6 +13,7 @@ CometENS 是组件,不管你的用户是谁、怎么登录。你的系统知道"
 
 ```
 POST /register        ← 面向浏览器,EIP-712 签名,用户自己签
+                        ⚠️ APPROVAL_MODE=manual 时**仅限合约 owner**,其他人拿 409 并被指向 /apply
 POST /v1/register     ← 面向服务端,personal_sign,你的系统签  ← 本文讲这个
 ```
 
@@ -161,3 +162,18 @@ export async function grantSubdomain(label: string, owner: string) {
 转移这个 NFT** —— 这是链上事实,不是本 API 的限制。如果你的用户需要这条保证,
 看 [DELEGATED-HOSTING.md](DELEGATED-HOSTING.md) 的"运营方能做什么"一节,
 以及自部署选项 [SELF-HOSTING.md](SELF-HOSTING.md)。
+
+---
+
+## 错误码
+
+集成方请匹配 `code`,不要匹配英文文案 —— 文案会变。
+
+| code | HTTP | 含义 | 该怎么办 |
+|---|---|---|---|
+| `LABEL_TAKEN` | 409 | 这个名字已经属于**别人** | 换一个标签。不要重试 —— 重试不会让它变成你的 |
+| `APPROVAL_REQUIRED` | 409 | 这套部署是 `APPROVAL_MODE=manual`,直接 `/register` 只对合约 owner 开放 | 改用 `POST /apply` 提交申请。**若你的地址是链上授权的 registrar,你本来就能直接调合约发放** —— 这条限制是关于运营方替谁付 gas,不是关于你有没有发放权 |
+| `OWNER_UNVERIFIABLE` | 503 | 读不到合约 owner(L2 RPC 没答),因此拒绝而不是猜 | 重试。**这不是在说你是谁** —— 持续出现请查 OP RPC |
+
+> `APPROVAL_REQUIRED` 只影响 `POST /register`。`POST /v1/register` 有自己的白名单
+> (`UPSTREAM_ALLOWED_SIGNERS`),两种审批模式下都照常工作。

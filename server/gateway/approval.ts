@@ -201,3 +201,60 @@ export function isAuthorisedApprover(caller: string | undefined, contractOwner: 
   if (!ADDRESS_RE.test(caller) || !ADDRESS_RE.test(contractOwner)) return false
   return caller.toLowerCase() === contractOwner.toLowerCase()
 }
+
+/**
+ * Whether a direct /register call may proceed under the current approval mode.
+ *
+ * `/register` predates applications and grants immediately with no reference to APPROVAL_MODE.
+ * That made `manual` a promise the code did not keep: an operator who turns it on believes
+ * "nothing is issued without my decision", while anyone with a wallet could still POST
+ * /register and mint a name. The mode governed /apply only.
+ *
+ * It cannot simply be closed in manual mode: the admin console's own grant button posts to
+ * /register (admin.ts), and that grant IS the operator's decision — closing it would break the
+ * one flow manual mode exists to serve. So the rule is by CALLER, not by endpoint:
+ *
+ *   auto   → anyone (the deployment has said names are issued on request)
+ *   manual → the contract owner only; everyone else is redirected to /apply
+ *
+ * This does not touch /v1/register, which has its own allowlist (UPSTREAM_ALLOWED_SIGNERS)
+ * and is machine-to-machine: an upstream system holding a whitelisted key IS an authorised
+ * issuer under either mode.
+ */
+export function mayRegisterDirectly(
+  mode: ApprovalMode,
+  caller: string | undefined,
+  contractOwner: string | undefined,
+): { ok: true } | { ok: false; status: number; code: string; message: string; hint: string } {
+  if (mode === 'auto') return { ok: true }
+
+  // "I could not check" is not "you are not the owner".
+  //
+  // When owner() cannot be read, the earlier version told the REAL owner that /register is
+  // "limited to the contract owner" — so they would go and audit their own key while the
+  // actual cause was an RPC that did not answer. The response asserted something it did not
+  // know. Same family as the fake provenance label in #22 and the false PASS in #24.
+  if (!contractOwner) {
+    return {
+      ok: false,
+      status: 503,
+      code: 'OWNER_UNVERIFIABLE',
+      message: 'Could not verify the contract owner',
+      hint: 'the L2 RPC did not answer, so this request is refused rather than guessed. Retry; if it persists, check the OP RPC endpoint. This is not a statement about who you are.',
+    }
+  }
+
+  if (isAuthorisedApprover(caller, contractOwner)) return { ok: true }
+
+  // The hint says what is actually true. A registrar authorised on-chain CAN issue names —
+  // `onlyOwnerOrRegistrar` on L2RecordsV3.registerSubnode — completely bypassing this Worker.
+  // Refusing them here buys no security; the only real difference is that the API path spends
+  // the operator's WORKER_EOA gas. Telling a registrar "you lack permission" would be false.
+  return {
+    ok: false,
+    status: 409,
+    code: 'APPROVAL_REQUIRED',
+    message: 'This deployment reviews requests before a name is issued',
+    hint: 'POST /apply instead — it queues the request for review. Direct /register is limited to the contract owner while APPROVAL_MODE=manual, because that is the path the operator pays gas for. An address authorised as a registrar on-chain can still issue names by calling the contract directly.',
+  }
+}
