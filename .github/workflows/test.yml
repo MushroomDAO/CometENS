@@ -1,0 +1,87 @@
+# The test suite as a merge gate.
+#
+# Why this exists rather than a local pre-merge script: GitHub checks out
+# `refs/pull/N/merge` for a `pull_request` event — the MERGE RESULT, not the branch head. That
+# is the only tree where cross-file properties actually hold or fail.
+#
+# We learned this the hard way. #50 added a guard forbidding a retracted sentence; #48's ledger
+# quoted that sentence while explaining why it was withdrawn. Both PRs were green on their own
+# branches and `preview` went red on the second merge. Neither reviewer could have seen it:
+# the offending text and the guard lived in different diffs, and the tree that fails never
+# existed on any branch. A local "check before merging" script cannot fix that either — its
+# answer expires the moment the next PR lands. Only the merge result, checked at merge time, is
+# the right measurement at the right moment.
+#
+# It also removes a conflict in the human half of the protocol: "rebase before merging" changes
+# the branch sha, which invalidates the review that was recorded against the old one. With this
+# workflow the merge result is tested without anyone having to touch the branch at all.
+#
+# See docs/agent/tasks.md「合并前协议」for the reasoning; this file is what enforces it.
+name: Tests
+
+on:
+  pull_request:
+    branches: [preview, main]
+  push:
+    branches: [preview, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two of contracts/lib/* ARE submodules and the contracts import them:
+      #
+      #   git ls-files -s contracts/lib  →  67×100644  1×100755  2×160000
+      #   the 160000 pair: openzeppelin-contracts, unruggable-gateways
+      #   HybridResolver.sol / OPResolver.sol import "@unruggable/…", remapped to lib/
+      #
+      # Fetched HERE rather than left to `forge build`, which silently runs
+      # `git submodule update --init` when they are missing ("Missing dependencies found.
+      # Installing now…", visible in this job's own earlier logs). That worked, but it made the
+      # gate depend on cloning two external repos at build time without saying so: if either
+      # remote is unreachable or rate-limited the gate goes red for a reason unrelated to the
+      # code under review. Doing it at checkout makes the dependency declared and fails in the
+      # step whose name explains it.
+      #
+      # NOT `submodules: recursive` — that would also pull vendor/ and eval/* (several large
+      # reference repos that nothing in test/, src/, server/, sdk/ or scripts/ imports).
+      - name: Fetch the two submodules the contracts import
+        run: git submodule update --init --depth 1 contracts/lib/openzeppelin-contracts contracts/lib/unruggable-gateways
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      # Installed before the suite because test/e2e spawns `anvil`. Without it those files fail
+      # rather than skip, and e2e is where the contract-invariant assertions live (#45).
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Contracts must compile before the e2e suite deploys them
+        run: forge build
+        working-directory: contracts
+
+      # `pnpm test` = `vitest run` — unit + e2e + integration. Integration skips itself when the
+      # RPC/key env vars are absent (describe.skipIf), which is the case here; that is
+      # deliberate, not a silent gap: those tests talk to a live deployment.
+      - name: Test suite
+        run: pnpm test
+
+      - name: Solidity tests
+        run: forge test
+        working-directory: contracts

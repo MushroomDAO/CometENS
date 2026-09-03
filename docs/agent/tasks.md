@@ -31,9 +31,50 @@
 「可干净合并」只说明文本不打架,不说明**合并后的仓库仍然成立**。守卫、断言、
 从源码推导的清单,都是跨文件的性质,它们只在合并后的那棵树上才有意义。
 
-  git rebase origin/preview && pnpm vitest run test/unit/ && npx tsc -p tsconfig.json --noEmit
+  git fetch origin && git rebase origin/preview && pnpm test && npx tsc -p tsconfig.json --noEmit
 
 先合的那个 PR 从不含违规内容,后合的那个从不含守卫 —— 这个不对称是这类故障的全部来源。
+
+两处此前写错了,都是 pr-daemon 指出的:
+
+- **`pnpm vitest run test/unit/` 漏掉整个 e2e + integration(28 文件/600 条 vs 34/644)**,
+  而被漏掉的 `e2e/upstream-api.test.ts` 恰好是 #45 那格 CONTRACT INVARIANT 的所在。
+  直接写 `pnpm test`,也不会随新增目录过期。
+- **原来没有 `git fetch`**。没 fetch 的 rebase 用的是可能已落后的本地跟踪引用 ——
+  正是本协议要防的错误,发生在上一层。
+
+**但这条协议现在主要由 CI 执行,而不是由人记得。** `.github/workflows/test.yml` 在
+`pull_request` 事件上跑,GitHub 为该事件检出的是 `refs/pull/N/merge` —— **合并结果**,
+不是分支头。上面这段留在这里,是为了解释**为什么 CI 必须跑在合并结果上**:
+协议解释理由,机器执行时刻。
+
+本地那条命令仍然有用(推之前就知道,不用等 CI),但它回答的只是
+「**此刻**把这个分支合到**此刻**的 tip 通不通过」,而这个答案在下一个 PR 合并的瞬间失效。
+
+#### 提前知道用的,不是门禁
+
+下面这段的**唯一价值是速度**:推之前就知道,省一个来回。它**不是**判词。
+
+**唯一可引用的判词是 CI 在 `refs/pull/N/merge` 上的那个 check。** 本地跑出来的绿是一个
+**上一秒就可能过期的读数** —— 下一个 PR 合并的瞬间它就不再描述任何现存的树。
+风险不在于有人误以为它是门禁,而在于有人会在消息或 PR 描述里写
+「我跑过合并前检查,绿的」—— 那句话读起来像结论,实际是个过期读数。
+
+#### ⚠️ 别用 rebase 做这件事 —— 它会作废 review
+
+我第一版协议写的是 `git rebase origin/preview && …`,**那和「合并前先测」是冲突的**:
+rebase 改变 sha,而 APPROVE 记在旧 sha 上,于是"照协议做"反而让这个 PR 需要重新评审。
+(我们已经为这个吃过一次亏:#38 的 APPROVE 记在 rebase 前的 sha,合进去的那棵树没人批过。)
+
+协议要的是**测合并结果**,不是 rebase。造一次一次性的试合并就够,且不动分支:
+
+  git fetch origin
+  git checkout --detach origin/preview
+  git merge --no-commit --no-ff origin/<你的分支>
+  pnpm test && npx tsc -p tsconfig.json --noEmit
+  git merge --abort
+
+**只有真的有冲突时才需要 rebase**,那时 sha 无论如何都要变,重新评审是应付的代价。
 
 ### 变异测试规程(FU-3)
 
