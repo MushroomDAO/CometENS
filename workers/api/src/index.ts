@@ -454,20 +454,14 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
   const payload = await parseJson(request)
   const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
 
-  // Recover the signer early so we can rate-limit before doing any writes.
-  // handleV1Register() will re-verify and check the allowedSigners list.
-  if (payload.signature && payload.label && payload.owner && payload.timestamp) {
-    const message = `CometENS:register:${String(payload.label).trim().toLowerCase()}:${payload.owner}:${payload.timestamp}`
-    try {
-      // Recovered early so a rate limiter could key on the signer before any write. The
-      // recovery is advisory here — handleV1Register re-does it and owns the verdict — so a
-      // malformed signature must not escape as a 500 from this pre-pass.
-      await recoverMessageAddress({ message, signature: payload.signature as Hex })
-      // await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)  // D7: disabled — auth chain provides sufficient protection
-    } catch {
-      // Deliberately swallowed: handleV1Register below rejects it with 401.
-    }
-  }
+  // The signer used to be recovered here so a rate limiter could key on it before any write.
+  // That rate-limit call is D7 and was commented out, so the block recovered an address and
+  // threw it away — handleV1Register recovers it again and owns the verdict.
+  //
+  // In #49 I wrapped it in try/catch to stop a malformed signature escaping as 500. That made
+  // dead code safe rather than removing it: the right fix for a block whose only remaining
+  // effect is a possible exception is deletion. When D7 lands, the recovery comes back next to
+  // the limiter that needs it.
 
   const writer = buildWriter(env)
 
