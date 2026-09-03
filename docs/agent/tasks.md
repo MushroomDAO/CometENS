@@ -104,7 +104,7 @@
 
 ## F1.2 — 自部署路径
 
-### T1.2.1 preflight 配置校验器  `READY`
+### T1.2.1 preflight 配置校验器  `PR_OPEN`
 - **优先级**:high
 - **目标**:部署前就把错配拦下来,而不是运行时炸。
 - **开发范围**:按 spec.md §1 实现 `scripts/preflight.ts`(检查项、人话建议、
@@ -114,7 +114,7 @@
 - **明确不做**:不自动修改任何配置文件,只报告。
 - **硬性安全要求**:**绝不打印私钥原值**,只能输出存在性/格式/派生地址/掩码。
 - **依赖**:无
-- **交付物**:`scripts/preflight.ts` + `pnpm preflight` + 单测
+- **交付物**:`scripts/preflight.mjs` + `pnpm preflight` + `test/unit/preflight.test.ts`
 - **验收命令**:`pnpm vitest run test/unit/preflight.test.ts && pnpm preflight --json`
   (单测必须覆盖:缺变量 FAIL、VITE_ 私钥 FAIL、密钥复用 WARN、合法配置 PASS,
   并断言**输出中不含任何 64 位 hex 私钥串**)

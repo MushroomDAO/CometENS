@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "abi:sync": "node scripts/sync-abi.mjs",
-    "check:chain": "node scripts/check-chain.mjs"
+    "check:chain": "node scripts/check-chain.mjs",
+    "preflight": "node scripts/preflight.mjs"
   },
   "dependencies": {
     "viem": "^2.37.13"
