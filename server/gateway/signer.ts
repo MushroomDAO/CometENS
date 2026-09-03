@@ -63,6 +63,7 @@ export function resolveKeySource(
  * pasted reports, and this repo has already shipped one credential leak that way (#30).
  */
 export function createSigner(role: SignerRole, env: Record<string, string | undefined>): Account {
+  assertNoConflictingKeys(role, env)
   const source = resolveKeySource(role, env)
   if (!source) {
     throw new SignerError(
@@ -78,6 +79,52 @@ export function createSigner(role: SignerRole, env: Record<string, string | unde
     )
   }
   return privateKeyToAccount(raw as Hex)
+}
+
+/**
+ * Refuse to start when two names for the same role hold DIFFERENT keys.
+ *
+ * Before this module existed, the gateway read `PRIVATE_KEY_SUPPLIER` directly and
+ * `GATEWAY_SIGNER_KEY` was inert. Introducing the preference order makes the new name an
+ * effective input — so **the same set of secrets means something different before and after
+ * the upgrade**. If both are present with different values, deploying silently swaps the
+ * signing key.
+ *
+ * The three roles are not equally exposed, and the gateway one is the dangerous one:
+ *   writer  — a wrong key fails loudly on the next write
+ *   owner   — a wrong key reverts on onlyOwner, equally visible
+ *   gateway — a wrong key is simply not in the resolver's `signers` allowlist, so
+ *             `_verifySignature` reverts and resolution fails NETWORK-WIDE, while the deploy
+ *             side reports nothing: /health does not sign, so health checks stay green.
+ *             The failure only appears to users.
+ *
+ * Same value under both names is fine — that is what a careful migration looks like. An
+ * operator genuinely switching keys deletes the old secret, which this permits.
+ */
+export function conflictingNames(
+  role: SignerRole,
+  env: Record<string, string | undefined>,
+): string[] | null {
+  const present = ROLE_ENV_VARS[role]
+    .map((name) => ({ name, value: env[name] }))
+    .filter((e): e is { name: string; value: string } => e.value !== undefined && e.value !== '')
+  if (present.length < 2) return null
+
+  const addresses = new Set<string>()
+  for (const e of present) {
+    if (!PRIVATE_KEY_RE.test(e.value)) continue
+    addresses.add(privateKeyToAccount(e.value as Hex).address.toLowerCase())
+  }
+  return addresses.size > 1 ? present.map((e) => e.name) : null
+}
+
+function assertNoConflictingKeys(role: SignerRole, env: Record<string, string | undefined>): void {
+  const names = conflictingNames(role, env)
+  if (!names) return
+  throw new SignerError(
+    `${names.join(' and ')} are both set but hold different keys`,
+    `refusing to start: which one wins changed with this upgrade, so deploying would silently swap the ${role} signer. Delete the one you are not using.`,
+  )
 }
 
 /** Like createSigner but returns null instead of throwing, for optional paths. */
@@ -98,12 +145,30 @@ export function tryCreateSigner(
  * Used by preflight to report whether the roles are actually separated. Roles with no key
  * configured are omitted rather than reported as a shared address, because "not visible here"
  * and "same as another role" are different facts (see preflight check 3b).
+ *
+ * A CONFLICTING role is a third fact again, and this function CANNOT express it: the conflict
+ * makes `createSigner` throw, `tryCreateSigner` swallows that, and the role comes back looking
+ * exactly like an unconfigured one — reported as "not configured" by the very tool whose job is
+ * to say what IS configured. That is not fixable here without changing the return type, so
+ * **callers must consult `signerConflicts` as well**; preflight check 3b does.
  */
 export function signerAddresses(env: Record<string, string | undefined>): Partial<Record<SignerRole, string>> {
   const out: Partial<Record<SignerRole, string>> = {}
   for (const role of Object.keys(ROLE_ENV_VARS) as SignerRole[]) {
     const account = tryCreateSigner(role, env)
     if (account) out[role] = account.address
+  }
+  return out
+}
+
+/** Roles whose two variable names hold different keys. Empty when the config is coherent. */
+export function signerConflicts(
+  env: Record<string, string | undefined>,
+): Partial<Record<SignerRole, string[]>> {
+  const out: Partial<Record<SignerRole, string[]>> = {}
+  for (const role of Object.keys(ROLE_ENV_VARS) as SignerRole[]) {
+    const names = conflictingNames(role, env)
+    if (names) out[role] = names
   }
   return out
 }

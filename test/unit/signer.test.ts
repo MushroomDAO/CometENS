@@ -7,6 +7,7 @@ import {
   signerAddresses,
   ROLE_ENV_VARS,
   SignerError,
+  signerConflicts,
 } from '../../server/gateway/signer'
 
 // Synthetic keys — deliberately not real or well-known ones, since this file asserts that
@@ -126,5 +127,81 @@ describe('signerAddresses — diagnostics without key material', () => {
   it('contains no key material', () => {
     const out = signerAddresses({ WRITER_KEY: KEY_WRITER, GATEWAY_SIGNER_KEY: KEY_GATEWAY })
     expect(JSON.stringify(out)).not.toMatch(/0x[0-9a-fA-F]{64}/)
+  })
+})
+
+describe('createSigner — refuses a silent key swap on upgrade', () => {
+  // Before this module, the gateway read PRIVATE_KEY_SUPPLIER directly and GATEWAY_SIGNER_KEY
+  // was inert. Introducing a preference order makes the new name an effective input, so the
+  // SAME set of secrets means something different before and after the upgrade. If both are
+  // present with different values, deploying silently swaps the signing key — and for the
+  // gateway role that breaks resolution network-wide while /health stays green, because
+  // /health does not sign anything.
+  it('throws when both names are set with DIFFERENT keys', () => {
+    expect(() =>
+      createSigner('gateway', { GATEWAY_SIGNER_KEY: KEY_GATEWAY, PRIVATE_KEY_SUPPLIER: KEY_WRITER }),
+    ).toThrow(SignerError)
+  })
+
+  it('names both variables and says why it refused', () => {
+    try {
+      createSigner('gateway', { GATEWAY_SIGNER_KEY: KEY_GATEWAY, PRIVATE_KEY_SUPPLIER: KEY_WRITER })
+    } catch (e) {
+      expect((e as SignerError).message).toContain('GATEWAY_SIGNER_KEY')
+      expect((e as SignerError).message).toContain('PRIVATE_KEY_SUPPLIER')
+      expect((e as SignerError).hint).toMatch(/silently swap/)
+    }
+  })
+
+  // THE CONTROL. Without it, a fix that refused whenever both names were present would pass
+  // the two assertions above while breaking every careful migration.
+  it('ACCEPTS both names when they hold the SAME key (must-pass control)', () => {
+    const account = createSigner('gateway', {
+      GATEWAY_SIGNER_KEY: KEY_GATEWAY,
+      PRIVATE_KEY_SUPPLIER: KEY_GATEWAY,
+    })
+    expect(account.address).toBe(privateKeyToAccount(KEY_GATEWAY as `0x${string}`).address)
+  })
+
+  it('still accepts a single name (control)', () => {
+    expect(createSigner('gateway', { PRIVATE_KEY_SUPPLIER: KEY_GATEWAY }).address).toBeTruthy()
+    expect(createSigner('gateway', { GATEWAY_SIGNER_KEY: KEY_GATEWAY }).address).toBeTruthy()
+  })
+
+  it('applies to every role, not just gateway', () => {
+    for (const [role, [newName, legacy]] of Object.entries(ROLE_ENV_VARS)) {
+      expect(() =>
+        createSigner(role as any, { [newName]: KEY_WRITER, [legacy]: KEY_OWNER }),
+      ).toThrow(SignerError)
+    }
+  })
+})
+
+describe('a conflict must not be reported as "not configured"', () => {
+  const conflicted = { GATEWAY_SIGNER_KEY: KEY_GATEWAY, PRIVATE_KEY_SUPPLIER: KEY_WRITER }
+
+  it('signerConflicts names the role and both variables', () => {
+    expect(signerConflicts(conflicted).gateway).toEqual(['GATEWAY_SIGNER_KEY', 'PRIVATE_KEY_SUPPLIER'])
+  })
+
+  // THE POINT, and the reason signerConflicts has to exist: a conflict makes createSigner
+  // throw, tryCreateSigner swallows that, and the role comes back indistinguishable from an
+  // unconfigured one. signerAddresses genuinely cannot express the third state — so this test
+  // pins that signerConflicts is where a caller learns about it, not that signerAddresses
+  // handles it. (I first "fixed" this with a skip inside signerAddresses; mutating it away
+  // left all 25 tests green, because the throw already produced the same result. Dead code.)
+  it('a conflicting role is absent from signerAddresses AND present in signerConflicts', () => {
+    expect(signerAddresses(conflicted).gateway).toBeUndefined()
+    expect(signerConflicts(conflicted).gateway).toBeDefined()
+  })
+
+  it('a genuinely unconfigured role appears in NEITHER (control)', () => {
+    // Without this, "always report a conflict" would pass the assertion above.
+    expect(signerAddresses({}).gateway).toBeUndefined()
+    expect(signerConflicts({}).gateway).toBeUndefined()
+  })
+
+  it('a coherent config reports no conflicts (control)', () => {
+    expect(signerConflicts({ GATEWAY_SIGNER_KEY: KEY_GATEWAY, PRIVATE_KEY_SUPPLIER: KEY_GATEWAY })).toEqual({})
   })
 })
