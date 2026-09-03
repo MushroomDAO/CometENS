@@ -94,7 +94,7 @@ rebase 改变 sha,而 APPROVE 记在旧 sha 上,于是"照协议做"反而让这
 正确形式往往只多几个字符,却换成了同一问题的全体形式:
 
   git ls-files -s contracts/lib | awk '{print $1}' | sort | uniq -c
-  npx tsc … | grep -oE "error TS[0-9]+" | sort | uniq -c
+  npx tsc -p tsconfig.json --noEmit 2>&1 | grep -oE "error TS[0-9]+" | sort | uniq -c
   gh run list --json databaseId,workflowName -q '.[] | select(.workflowName=="Tests")'
 
 **这条和「对照挡得住坏仪器,挡不住错推理」是同一族的第三面**:
