@@ -36,6 +36,7 @@ import {
   buildDomain,
   RegisterTypes,
   ApproveApplicationTypes,
+  ApplyTypes,
   SetAddrTypes,
   SetTextTypes,
   SetContenthashTypes,
@@ -155,7 +156,7 @@ export default {
       // ── POST endpoints ────────────────────────────────────────────────────
       if (request.method === 'POST') {
         if (path === '/v1/register')     { response = await handleV1RegisterEndpoint(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
-        if (path === '/apply')           { response = await handleApply(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/apply')           { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/approve')         { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/register')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/set-addr')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
@@ -488,39 +489,6 @@ async function readApplication(env: Env, id: string): Promise<Application | null
   return raw ? (JSON.parse(raw) as Application) : null
 }
 
-/**
- * Submit an application.
- *
- * In `auto` mode this grants immediately, which is byte-for-byte the behaviour the deployed
- * worker had before this endpoint existed — that is why `auto` is the default: upgrading
- * changes nothing until an operator opts into review.
- */
-async function handleApply(request: Request, env: Env): Promise<Response> {
-  const payload = await parseJson(request)
-  try {
-    const mode = resolveMode(env.APPROVAL_MODE)
-    const app = buildApplication(payload as any, getRootDomains(env), Math.floor(Date.now() / 1000))
-
-    const existing = await readApplication(env, app.id)
-    const resub = checkResubmission(existing)
-    if (!resub.ok) throw resub.error
-
-    if (decideOnSubmit(mode) === 'queue') {
-      await applicationStore(env).put(applicationKey(app.id), JSON.stringify(app))
-      return json({ ...publicView(app), mode })
-    }
-
-    // auto: approve and grant in one step.
-    const approved = applyDecision(app, 'approve', 'auto', Math.floor(Date.now() / 1000))
-    const granted = await grantApplication(env, approved)
-    await applicationStore(env).put(applicationKey(granted.id), JSON.stringify(granted))
-    return json({ ...publicView(granted), mode })
-  } catch (e: any) {
-    if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
-    throw e
-  }
-}
-
 /** Perform the on-chain grant for an approved application. */
 async function grantApplication(env: Env, app: Application): Promise<Application> {
   const writer = requireWriter(env)
@@ -773,6 +741,61 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   }
 
   // ── /add-registrar ────────────────────────────────────────────────────────
+  // ── /apply ────────────────────────────────────────────────────────────────
+  //
+  // Authenticated exactly like /register. APPROVAL_MODE decides WHEN a verified request is
+  // granted (now, or after review) — it must never decide WHETHER the request is verified.
+  // The first version skipped auth entirely in `auto` mode, which meant anyone could make
+  // the operator pay gas to mint any name to any address, anonymously and unthrottled.
+  if (path === '/apply') {
+    const msg = payload.message ?? {}
+    const message = {
+      parent: String(msg.parent ?? '').trim().toLowerCase(),
+      label: String(msg.label ?? '').trim().toLowerCase(),
+      owner: msg.owner as Address,
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
+    }
+    if (!isAddress(message.owner)) throw badReq('Invalid owner address')
+    checkDeadline(message.deadline)
+
+    // A distinct primaryType, so an Apply signature cannot be replayed as a Register.
+    //
+    // Wrapped in try/catch because a MALFORMED signature makes viem throw rather than return
+    // false, and an uncaught throw here surfaces as 500 — telling the caller "our fault" when
+    // the truth is "your signature is unusable". The other write endpoints share the bare
+    // pattern and have the same wrong status; recorded as a followup rather than changed here.
+    let applyOk = false
+    try {
+      applyOk = await verifyTypedData({ address: from, domain, primaryType: 'Apply', types: ApplyTypes as any, message: message as any, signature })
+    } catch {
+      applyOk = false
+    }
+    if (!applyOk) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
+
+    try {
+      const mode = resolveMode(env.APPROVAL_MODE)
+      const app = buildApplication(message, getRootDomains(env), Math.floor(Date.now() / 1000))
+
+      const existing = await readApplication(env, app.id)
+      const resub = checkResubmission(existing)
+      if (!resub.ok) throw resub.error
+
+      if (decideOnSubmit(mode) === 'queue') {
+        await applicationStore(env).put(applicationKey(app.id), JSON.stringify(app))
+        return json({ ...publicView(app), mode })
+      }
+      const approved = applyDecision(app, 'approve', from, Math.floor(Date.now() / 1000))
+      const granted = await grantApplication(env, approved)
+      await applicationStore(env).put(applicationKey(granted.id), JSON.stringify(granted))
+      return json({ ...publicView(granted), mode })
+    } catch (e: any) {
+      if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
+      throw e
+    }
+  }
+
   // ── /approve ──────────────────────────────────────────────────────────────
   if (path === '/approve') {
     const msg = payload.message ?? {}

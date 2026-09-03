@@ -20,7 +20,12 @@ const NOW = 1_760_000_000
 const valid = () => buildApplication({ label: 'alice', parent: 'community.eth', owner: OWNER }, PARENTS, NOW)
 
 describe('resolveMode', () => {
-  it('defaults to auto so an existing deployment behaves identically after upgrading', () => {
+  it('defaults to auto when unset or empty', () => {
+    // The title says only what is asserted. An earlier version was titled "…so an existing
+    // deployment behaves identically after upgrading", which claimed a behavioural property
+    // this assertion does not check — and it was FALSE at the time, because /apply skipped
+    // authentication entirely in auto mode. Endpoint behaviour is asserted in
+    // test/unit/apply-auth.test.ts, where the auth actually lives.
     expect(resolveMode(undefined)).toBe('auto')
     expect(resolveMode('')).toBe('auto')
   })
