@@ -16,6 +16,19 @@ import { join, dirname, resolve } from 'node:path'
 const DOCS = resolve(__dirname, '../../docs')
 const REPO = resolve(__dirname, '../..')
 
+/**
+ * Root-level markdown, which lives outside docs/ but is the most-read file in the repo.
+ *
+ * The guard scanned docs/ only, so README.md — the first thing anyone opens — was outside it.
+ * Same shape as the page list that used to be hardcoded: the coverage claimed by the file's
+ * title was wider than what it checked.
+ */
+function rootMarkdown(): string[] {
+  return ['README.md', 'CHANGELOG.md']
+    .map((f) => join(REPO, f))
+    .filter((f) => existsSync(f))
+}
+
 function markdownFiles(dir: string): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -49,7 +62,7 @@ function relativeLinks(mdRaw: string): string[] {
 }
 
 describe('docs — relative links resolve', () => {
-  const files = markdownFiles(DOCS)
+  const files = [...markdownFiles(DOCS), ...rootMarkdown()]
 
   it('does not mistake code for links (control)', () => {
     // Array indexing inside a snippet matches the markdown link pattern character for
@@ -66,7 +79,7 @@ describe('docs — relative links resolve', () => {
   })
 
   it.each(
-    markdownFiles(DOCS).map((f) => [f.replace(`${REPO}/`, ''), f] as const),
+    [...markdownFiles(DOCS), ...rootMarkdown()].map((f) => [f.replace(`${REPO}/`, ''), f] as const),
   )('%s has no dangling relative links', (_label, file) => {
     const broken = relativeLinks(readFileSync(file, 'utf8')).filter(
       (href) => !existsSync(resolve(dirname(file), href)),

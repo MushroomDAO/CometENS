@@ -17,6 +17,11 @@ import { join, resolve } from 'node:path'
 const ROOT = resolve(__dirname, '../..')
 const DOCS = join(ROOT, 'docs')
 
+/** Root-level markdown — README is the most-read file and was outside this guard. */
+function rootMarkdown(): string[] {
+  return ['README.md', 'CHANGELOG.md'].map((f) => join(ROOT, f)).filter((f) => existsSync(f))
+}
+
 function markdownFiles(dir: string): string[] {
   const out: string[] = []
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -56,7 +61,7 @@ function scriptFilesIn(md: string): string[] {
   return [...new Set([...md.matchAll(/(?:bash |node |forge script )([\w/.-]+\.(?:sh|mjs|ts|sol))/g)].map((m) => m[1]))]
 }
 
-describe.each(markdownFiles(DOCS).map((f) => [f.replace(`${ROOT}/`, ''), f] as const))(
+describe.each([...markdownFiles(DOCS), ...rootMarkdown()].map((f) => [f.replace(`${ROOT}/`, ''), f] as const))(
   '%s',
   (label, file) => {
     const md = readFileSync(file, 'utf8')
@@ -90,7 +95,7 @@ describe('the extractors actually find things (must-find controls)', () => {
   })
 
   it('reads a non-empty set out of the real docs', () => {
-    const all = markdownFiles(DOCS).flatMap((f) => pnpmScriptsIn(readFileSync(f, 'utf8')))
+    const all = [...markdownFiles(DOCS), ...rootMarkdown()].flatMap((f) => pnpmScriptsIn(readFileSync(f, 'utf8')))
     expect(all.length).toBeGreaterThan(0)
   })
 
