@@ -159,12 +159,12 @@ export default {
       const status = e?.status ?? 500
       trackEvent(env.ANALYTICS, path, status)
       if (status === 429) {
-        return new Response(JSON.stringify({ error: e.message }), {
+        return new Response(JSON.stringify({ error: sanitiseErrorMessage(String(e?.message ?? e)) }), {
           status: 429,
           headers: { 'content-type': 'application/json', 'Retry-After': '60', ...corsHeaders() },
         })
       }
-      return jsonError(e?.message ?? String(e), status)
+      return jsonError(sanitiseErrorMessage(String(e?.message ?? e)), status)
     }
   },
 }
@@ -947,4 +947,35 @@ function json(data: unknown, status = 200): Response {
 
 function jsonError(message: string, status: number, code?: string): Response {
   return json(code ? { error: message, code } : { error: message }, status)
+}
+
+/**
+ * Sanitise an exception before its text is returned to a caller.
+ *
+ * viem embeds the full RPC URL in `error.message`, and provider keys live in that URL's path
+ * (`/v2/<key>`). The worker used to hand `e.message` straight back, so an anonymous GET to
+ * /check-label returned the Alchemy API key to whoever asked — verified against the deployed
+ * testnet worker, not inferred.
+ *
+ * Also strips the echoed request body: it adds nothing an API consumer can act on and is a
+ * second place for internals to escape.
+ */
+export function sanitiseErrorMessage(raw: string): string {
+  return raw
+    // Any URL, not just known providers: a self-hoster's endpoint may embed credentials too.
+    .replace(/https?:\/\/[^\s"']+/g, (u) => {
+      try {
+        const parsed = new URL(u)
+        const hasPathOrQuery = parsed.pathname.replace(/^\/+|\/+$/g, '').length > 0 || parsed.search.length > 0
+        return hasPathOrQuery ? `${parsed.protocol}//${parsed.host}/…(redacted)` : `${parsed.protocol}//${parsed.host}`
+      } catch {
+        return '(redacted URL)'
+      }
+    })
+    // Private keys should never reach an error string, but if one ever does, do not print it.
+    .replace(/0x[0-9a-fA-F]{64}/g, '0x…(redacted)')
+    // viem appends "Request body: {...}" and "Raw Call Arguments:" blocks — internals.
+    .replace(/\n*Request body:[\s\S]*/i, '')
+    .replace(/\n*Raw Call Arguments:[\s\S]*/i, '')
+    .trim()
 }
