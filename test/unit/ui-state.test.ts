@@ -72,3 +72,34 @@ describe('explorerTxUrl', () => {
     expect(explorerTxUrl(999999, '0xabc')).toBeUndefined()
   })
 })
+
+describe('explainError — contract errors are found wherever viem puts them', () => {
+  // These branches were DEAD before: the matcher read `shortMessage ?? message`, and for a
+  // revert shortMessage is just "execution reverted" — so the chain short-circuited on the
+  // least informative field. It self-tested as working because the wallet-level branches
+  // (User rejected / insufficient funds / deadline) match plain text and did fire.
+  //
+  // Identical `||` short-circuit had been fixed in scripts/delegate.mjs one PR earlier and
+  // was reintroduced here, so each shape below is pinned separately.
+
+  it('finds the name on cause.data.errorName (direct viem contract call)', () => {
+    const e = { shortMessage: 'execution reverted', message: 'long RPC dump', cause: { data: { errorName: 'Unauthorized' } } }
+    expect(explainError(e).message).toContain('权限')
+  })
+
+  it('finds the name in message when only that carries it', () => {
+    const e = { shortMessage: 'execution reverted', message: 'reverted with AlreadyRegistered()' }
+    expect(explainError(e).message).toContain('已经被注册')
+  })
+
+  it('finds the name in a plain Error from the API layer', () => {
+    // Errors reach the browser as `new Error(json.error)` — no shortMessage at all.
+    expect(explainError(new Error('QuotaExceeded()')).message).toContain('配额')
+  })
+
+  it('a bare "execution reverted" still falls through to passthrough', () => {
+    // Control: without it, a matcher that returned a Chinese branch for everything would
+    // look identical to one that works.
+    expect(explainError({ shortMessage: 'execution reverted' }).message).toContain('execution reverted')
+  })
+})

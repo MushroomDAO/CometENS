@@ -41,36 +41,62 @@ export function explorerTxUrl(chainId: number, hash: string): string | undefined
  * a wrong-but-visible message beats a confident "something went wrong".
  */
 export function explainError(e: unknown): { message: string; hint?: string } {
-  const raw = String((e as any)?.shortMessage ?? (e as any)?.message ?? e ?? '')
+  const err = e as any
 
-  if (/User rejected|user rejected|ACTION_REJECTED|4001/.test(raw)) {
+  /**
+   * Search ACROSS every field, rather than `shortMessage ?? message`.
+   *
+   * viem puts the decoded custom-error name on `cause.data.errorName`, and `shortMessage`
+   * for a revert is just "execution reverted" — so a `??` chain short-circuits on the
+   * least informative field and every contract-error branch below becomes dead code. That
+   * is not hypothetical: the identical `||` short-circuit was fixed in scripts/delegate.mjs
+   * one PR earlier and reintroduced here, and it self-tests as working because the three
+   * wallet-level branches match on plain text and do fire.
+   *
+   * Errors also arrive from the API as a plain `Error(json.error)` with no shortMessage at
+   * all, so both shapes have to be covered by the same matcher.
+   */
+  const haystack = [
+    err?.cause?.data?.errorName,
+    err?.data?.errorName,
+    err?.shortMessage,
+    err?.message,
+    typeof e === 'string' ? e : undefined,
+  ]
+    .filter(Boolean)
+    .join(' | ')
+
+  // What gets shown when nothing matches: prefer the concise field, fall back to the rest.
+  const raw = String(err?.shortMessage ?? err?.message ?? e ?? '')
+
+  if (/User rejected|user rejected|ACTION_REJECTED|4001/.test(haystack)) {
     return { message: '你在钱包里取消了签名', hint: '没有发生任何变更,可以重新提交。' }
   }
-  if (/Unauthorized/.test(raw)) {
+  if (/Unauthorized/.test(haystack)) {
     return {
       message: '这个地址没有权限执行该操作',
       hint: '记录只能由该子域名的持有者修改;registrar 相关操作只有合约 owner 能做。',
     }
   }
-  if (/AlreadyRegistered/.test(raw)) {
+  if (/AlreadyRegistered/.test(haystack)) {
     return { message: '这个名字已经被注册了', hint: '换一个标签,或用查询确认它当前归谁。' }
   }
-  if (/QuotaExceeded/.test(raw)) {
+  if (/QuotaExceeded/.test(haystack)) {
     return { message: 'registrar 的配额已用尽', hint: '提高该 registrar 的配额,或改用 owner 身份发放。' }
   }
-  if (/RegistrarExpired/.test(raw)) {
+  if (/RegistrarExpired/.test(haystack)) {
     return { message: 'registrar 的授权已过期', hint: '重新授权并设置一个更晚的到期时间。' }
   }
-  if (/InvalidLabel|LabelMismatch/.test(raw)) {
+  if (/InvalidLabel|LabelMismatch/.test(haystack)) {
     return { message: '标签不合法', hint: '只能用小写字母、数字和连字符,长度 1–63。' }
   }
-  if (/ZeroAddress/.test(raw)) {
+  if (/ZeroAddress/.test(haystack)) {
     return { message: '地址不能是全零地址', hint: '检查填入的目标地址。' }
   }
-  if (/insufficient funds/i.test(raw)) {
+  if (/insufficient funds/i.test(haystack)) {
     return { message: '执行账户余额不足', hint: '给运营钱包充值后重试。' }
   }
-  if (/deadline/i.test(raw)) {
+  if (/deadline/i.test(haystack)) {
     return { message: '签名已过期', hint: '签名有有效期,请重新签一次。' }
   }
   // Never echo a URL back: provider keys live in RPC URL paths and this text is copied

@@ -18,12 +18,34 @@ import { join } from 'node:path'
 const ROOT = join(__dirname, '../..')
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8')
 
-/** ids the script actually looks up, i.e. byId('…') / getElementById('…'). */
-function referencedIds(ts: string): Set<string> {
+/**
+ * Strip comments before any extraction.
+ *
+ * Without this the checks below are wrong in both directions: a commented-out `byId('x')`
+ * invents a requirement that does not exist, and — worse — a comment merely *mentioning*
+ * `el.id = 'querySource'` silently exempts a genuinely missing id. Verified: renaming an id
+ * made the suite fail, and adding one comment line made it pass again.
+ *
+ * This is the same root cause as the acceptance command that scans admin.ts for `alert(` and
+ * cannot tell code from a comment describing it.
+ */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
+/**
+ * ids the script actually looks up.
+ *
+ * Covers the result-panel helpers as well as raw byId: showResult/clearResult take an id and
+ * do `byId(elId); if (!el) return` internally — the exact silent no-op this file guards
+ * against. Matching only literal `byId(...)` left all eight result containers uncovered,
+ * i.e. the guard claimed more than it verified.
+ */
+function referencedIds(tsRaw: string): Set<string> {
+  const ts = stripComments(tsRaw)
   const ids = new Set<string>()
-  for (const m of ts.matchAll(/(?:byId(?:<[^>]*>)?|getElementById)\(\s*['"]([A-Za-z0-9_-]+)['"]/g)) {
-    ids.add(m[1])
-  }
+  const pattern = /(?:byId(?:<[^>]*>)?|getElementById|showResult|clearResult)\(\s*['"]([A-Za-z0-9_-]+)['"]/g
+  for (const m of ts.matchAll(pattern)) ids.add(m[1])
   return ids
 }
 
@@ -38,7 +60,8 @@ function declaredIds(html: string): Set<string> {
  * `existingBanner` and `resolveCountdown` on demand, and flagging them would report a fault
  * that does not exist. Found by this test's own first run — the judge was the broken part.
  */
-function selfCreatedIds(ts: string): Set<string> {
+function selfCreatedIds(tsRaw: string): Set<string> {
+  const ts = stripComments(tsRaw)
   return new Set([...ts.matchAll(/\.id\s*=\s*['"]([A-Za-z0-9_-]+)['"]/g)].map((m) => m[1]))
 }
 
@@ -65,6 +88,25 @@ describe.each(PAGES)('%s ↔ %s wiring', (htmlPath, tsPath) => {
     // start reporting phantom faults and the exemption would look like it was never needed.
     const sample = "const n = document.createElement('div'); n.id = 'someDynamicId'"
     expect(selfCreatedIds(sample).has('someDynamicId')).toBe(true)
+  })
+
+  it('ids used via showResult/clearResult are covered too', () => {
+    // These helpers hide a byId() call behind a parameter. Before this, admin.ts's eight
+    // result containers were outside the guard entirely.
+    if (tsPath !== 'src/admin.ts') return
+    const ids = referencedIds(ts)
+    expect(ids.has('registerResult')).toBe(true)
+    expect(ids.has('transferSubdomainResult')).toBe(true)
+  })
+
+  it('comments cannot create or exempt a requirement', () => {
+    const commented = "// byId('ghostId')\n/* clearResult('anotherGhost') */"
+    expect(referencedIds(commented).size).toBe(0)
+    const fakeExempt = "// this mentions el.id = 'notReallyCreated'"
+    expect(selfCreatedIds(fakeExempt).size).toBe(0)
+    // Control: real code is still seen after stripping.
+    expect(referencedIds("byId('realId')").has('realId')).toBe(true)
+    expect(selfCreatedIds("n.id = 'realCreated'").has('realCreated')).toBe(true)
   })
 
   it('the extractor actually finds ids (must-find control)', () => {
