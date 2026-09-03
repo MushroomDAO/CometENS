@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 /**
@@ -36,37 +37,49 @@ const RETRACTED: Array<{ phrase: string; why: string; where: string }> = [
   },
 ]
 
-const ROOTS = ['docs', 'README.md', 'src', 'server', 'workers', 'scripts', 'test']
+/**
+ * Every tracked text file, from `git ls-files`.
+ *
+ * The first version walked a hand-listed set of ROOTS. pr-daemon falsified the claim this
+ * suite makes: `.html` was in the extension list while ROOTS reached no `.html` file at all —
+ * two configs that did not agree — so `admin.html`, `MANUAL.md`, `CHANGELOG.md`, `DEPLOY.md`
+ * and every other top-level document were outside the scan. Dropping a retracted sentence into
+ * MANUAL.md left the suite green.
+ *
+ * That is the worst way for THIS guard in particular to fail. Its `describe` says "anywhere in
+ * the repo" — a falsifiable claim — so a hole does not merely miss something, it tells the
+ * reader the question was asked. `git ls-files` removes the hand-maintained half: the file set
+ * is now whatever the repo actually tracks.
+ */
+const TEXT_EXT = /\.(md|ts|mjs|js|html|css|toml)$/
 const SKIP_SELF = 'retracted-claims.test.ts'
+const REPO = join(__dirname, '..', '..')
 
-function textFiles(): string[] {
-  const out: string[] = []
-  const walk = (p: string) => {
-    let st
-    try {
-      st = statSync(p)
-    } catch {
-      return
-    }
-    if (st.isDirectory()) {
-      if (/node_modules|\.git|dist|out$/.test(p)) return
-      for (const e of readdirSync(p)) walk(join(p, e))
-    } else if (/\.(md|ts|mjs|js|html|css|toml)$/.test(p) && !p.endsWith(SKIP_SELF)) {
-      out.push(p)
-    }
-  }
-  const repo = join(__dirname, '..', '..')
-  for (const r of ROOTS) walk(join(repo, r))
-  return out
+function trackedTextFiles(): string[] {
+  return execFileSync('git', ['ls-files', '-z'], { cwd: REPO, encoding: 'utf8' })
+    .split('\0')
+    .filter((f) => f && TEXT_EXT.test(f) && !f.endsWith(SKIP_SELF))
+    .map((f) => join(REPO, f))
 }
 
 describe('retracted claims do not survive anywhere in the repo', () => {
-  const files = textFiles()
+  const files = trackedTextFiles()
 
-  it('the file scan is non-trivial (control)', () => {
-    // Without this, a walker that returned nothing would make every claim vacuously absent.
-    expect(files.length).toBeGreaterThan(40)
-    expect(files.some((f) => f.endsWith('UPSTREAM-API.md'))).toBe(true)
+  it('the scan covers every tracked text file, including the ones the old walker missed', () => {
+    // A floor plus one known hit is what the previous version had, and it could not see the
+    // scan shrink — the same shape as the `>= 2` floor in #48. Compare against an independent
+    // enumeration instead: git's own file list, filtered the same way.
+    const expected = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, encoding: 'utf8' })
+      .split('\0')
+      .filter((f) => f && TEXT_EXT.test(f) && !f.endsWith(SKIP_SELF))
+    expect(files).toHaveLength(expected.length)
+
+    // Named explicitly because these are exactly the files the hand-listed ROOTS could not
+    // reach, and they are the ones a retracted claim is most likely to survive in.
+    const names = files.map((f) => f.slice(REPO.length + 1))
+    for (const f of ['MANUAL.md', 'CHANGELOG.md', 'DEPLOY.md', 'admin.html', 'README.md']) {
+      expect(names).toContain(f)
+    }
   })
 
   for (const { phrase, why, where } of RETRACTED) {
@@ -76,8 +89,9 @@ describe('retracted claims do not survive anywhere in the repo', () => {
     })
   }
 
-  it('a phrase that IS present would be caught (must-fail control)', () => {
-    // Proves the scan reads content rather than the corpus simply lacking these strings.
+  it('the scan reads file CONTENT, not just names (positive control)', () => {
+    // Not a must-fail control — it is the positive half: a string that IS present must be
+    // found, so "absent" above means the content was read rather than the files being empty.
     const present = files.filter((f) => readFileSync(f, 'utf8').includes('CometENS'))
     expect(present.length).toBeGreaterThan(0)
   })
@@ -88,7 +102,7 @@ describe('markdown tables are not left orphaned', () => {
   // the section rule, leaving `---|---|---|` with no header above it. Cheap structural check.
   it('every table separator line has a header row directly above it', () => {
     const offenders: string[] = []
-    for (const f of textFiles().filter((f) => f.endsWith('.md'))) {
+    for (const f of trackedTextFiles().filter((f) => f.endsWith('.md'))) {
       const lines = readFileSync(f, 'utf8').split('\n')
       lines.forEach((l, i) => {
         if (!/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(l.trim())) return
