@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // @ts-expect-error — plain .mjs module, no type declarations (see scripts/preflight.mjs header)
-import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, readEnvFiles, LOOKS_LIKE_KEY, KEY_ROLES } from '../../scripts/preflight.mjs'
+import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, readEnvFiles, LOOKS_LIKE_KEY, KEY_ROLES, separationSeverity } from '../../scripts/preflight.mjs'
 
 // Synthetic 32-byte keys. Deliberately NOT real or well-known test keys: this file asserts
 // that key material never reaches the output, so it must not itself ship anything that a
@@ -384,12 +384,17 @@ describe('preflight 3b — three roles, three keys', () => {
     expect(c.level).toBe('PASS')
   })
 
-  it('an unrecognised PREFLIGHT_KEY_SEPARATION value does not silently mean strict', () => {
-    const c = check3b({
-      WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.writer, OWNER_KEY: K.writer,
-      PREFLIGHT_KEY_SEPARATION: 'yes',
-    })
-    expect(c.level).toBe('WARN')
+  it('an unrecognised PREFLIGHT_KEY_SEPARATION value stops the run', () => {
+    // This test used to assert WARN, and that was the wrong property to pin. It checked that a
+    // typo does not silently mean STRICT — but the dangerous direction is the other one: a
+    // typo silently meaning WARN leaves a delegated operator believing the gate is on. The
+    // assertion was true and useless, which is worse than absent.
+    expect(() =>
+      check3b({
+        WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.writer, OWNER_KEY: K.writer,
+        PREFLIGHT_KEY_SEPARATION: 'yes',
+      }),
+    ).toThrow(/Refusing to guess/)
   })
 
   it('legacy names still resolve, and are reported separately from separation', () => {
@@ -454,5 +459,72 @@ describe('preflight and the workers must read the SAME variables', () => {
     const { ROLE_ENV_VARS } = await import('../../server/gateway/signer')
     expect(Object.keys(ROLE_ENV_VARS).length).toBe(3)
     expect(KEY_ROLES.length).toBe(3)
+  })
+})
+
+describe('separationSeverity refuses to guess, like resolveMode does', () => {
+  // pr-daemon: this was inconsistent with my own approval.ts, whose comment reads "refusing to
+  // guess, because guessing wrong hands out names you meant to review". That sentence applies
+  // verbatim here — and the direction of a wrong guess is DOWNGRADING a safety gate.
+  it('unset and empty mean the default, not an error', () => {
+    expect(separationSeverity({})).toBe('WARN')
+    expect(separationSeverity({ PREFLIGHT_KEY_SEPARATION: '' })).toBe('WARN')
+  })
+
+  it('accepts both explicit values, case-insensitively', () => {
+    expect(separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'strict' })).toBe('FAIL')
+    expect(separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'STRICT' })).toBe('FAIL')
+    expect(separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'warn' })).toBe('WARN')
+  })
+
+  it('THROWS on a typo rather than silently downgrading', () => {
+    // `stict` used to yield WARN — a delegated operator would believe strict was on while
+    // preflight stayed green on a shared key.
+    expect(() => separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'stict' })).toThrow(/Refusing to guess/)
+    expect(() => separationSeverity({ PREFLIGHT_KEY_SEPARATION: '1' })).toThrow()
+    expect(() => separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'true' })).toThrow()
+  })
+
+  it('the error names the variable and the accepted values (control)', () => {
+    try {
+      separationSeverity({ PREFLIGHT_KEY_SEPARATION: 'zzz' })
+    } catch (e: any) {
+      expect(e.message).toContain('PREFLIGHT_KEY_SEPARATION')
+      expect(e.message).toContain('strict')
+      expect(e.message).toContain('warn')
+    }
+  })
+})
+
+describe('the severity knob is validated because it was SET, not because it was needed', () => {
+  it('a typo is caught even when the keys are already separate', () => {
+    // Called lazily it only ran when a shared key was found, so an operator whose keys happened
+    // to be separate got no signal — and would meet the silent downgrade later, at the exact
+    // moment a key started being shared. Found by running preflight for real; the unit tests
+    // above all passed while this hole was open.
+    expect(() =>
+      staticChecks({
+        NETWORK: 'testnet',
+        L2_RECORDS_ADDRESS: `0x${'ab'.repeat(20)}`,
+        ROOT_DOMAIN: 'community.eth',
+        WRITER_KEY: `0x${'11'.repeat(32)}`,
+        GATEWAY_SIGNER_KEY: `0x${'22'.repeat(32)}`,
+        OWNER_KEY: `0x${'33'.repeat(32)}`,
+        PREFLIGHT_KEY_SEPARATION: 'stict',
+      }),
+    ).toThrow(/Refusing to guess/)
+  })
+
+  it('and with NO keys visible at all (control)', () => {
+    // The emptiest possible input still validates the knob — nothing short-circuits past it.
+    expect(() =>
+      staticChecks({ NETWORK: 'testnet', PREFLIGHT_KEY_SEPARATION: 'stict' }),
+    ).toThrow(/Refusing to guess/)
+  })
+
+  it('a correct value never throws, in either shape (control)', () => {
+    const base = { NETWORK: 'testnet', ROOT_DOMAIN: 'community.eth', L2_RECORDS_ADDRESS: `0x${'ab'.repeat(20)}` }
+    expect(() => staticChecks({ ...base, PREFLIGHT_KEY_SEPARATION: 'strict' })).not.toThrow()
+    expect(() => staticChecks(base)).not.toThrow()
   })
 })
