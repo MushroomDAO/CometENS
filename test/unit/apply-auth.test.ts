@@ -211,6 +211,40 @@ describe('manual mode must actually govern /register, not just /apply', () => {
     expect(mayRegisterDirectly('manual', undefined, OWNER).ok).toBe(false)
   })
 
+  it('an unreadable owner says "could not verify", NOT "you are not the owner"', () => {
+    // The earlier message told the REAL owner that /register is limited to the contract owner,
+    // sending them to audit their own key while the actual cause was an RPC that did not
+    // answer. A response must not assert what it does not know.
+    const r = mayRegisterDirectly('manual', OWNER, undefined)
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.status).toBe(503)
+    expect(r.code).toBe('OWNER_UNVERIFIABLE')
+    expect(r.message).not.toMatch(/limited to the contract owner/)
+  })
+
+  it('the two refusals are distinguishable (control)', () => {
+    // Without this, collapsing both into one 409 would still satisfy "fails closed" above,
+    // and the operator would keep chasing the wrong cause.
+    const unverifiable = mayRegisterDirectly('manual', OWNER, undefined)
+    const notOwner = mayRegisterDirectly('manual', STRANGER, OWNER)
+    expect(unverifiable.ok || notOwner.ok).toBe(false)
+    if (unverifiable.ok || notOwner.ok) return
+    expect(unverifiable.status).not.toBe(notOwner.status)
+    expect(unverifiable.code).not.toBe(notOwner.code)
+  })
+
+  it('the refusal does NOT tell a registrar they lack permission', () => {
+    // onlyOwnerOrRegistrar on L2RecordsV3.registerSubnode: an authorised registrar can issue
+    // names by calling the contract directly. Saying "you lack permission" would be false —
+    // what is actually limited is who the operator pays gas for.
+    const r = mayRegisterDirectly('manual', STRANGER, OWNER)
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.hint).toMatch(/registrar/)
+    expect(r.hint).toMatch(/gas/)
+  })
+
   it('but an unreadable owner does NOT break auto mode (control)', () => {
     // Without this, "fail closed everywhere" would pass the assertion above and break every
     // auto-mode deployment whose RPC blipped.

@@ -225,13 +225,36 @@ export function mayRegisterDirectly(
   mode: ApprovalMode,
   caller: string | undefined,
   contractOwner: string | undefined,
-): { ok: true } | { ok: false; status: number; message: string; hint: string } {
+): { ok: true } | { ok: false; status: number; code: string; message: string; hint: string } {
   if (mode === 'auto') return { ok: true }
+
+  // "I could not check" is not "you are not the owner".
+  //
+  // When owner() cannot be read, the earlier version told the REAL owner that /register is
+  // "limited to the contract owner" — so they would go and audit their own key while the
+  // actual cause was an RPC that did not answer. The response asserted something it did not
+  // know. Same family as the fake provenance label in #22 and the false PASS in #24.
+  if (!contractOwner) {
+    return {
+      ok: false,
+      status: 503,
+      code: 'OWNER_UNVERIFIABLE',
+      message: 'Could not verify the contract owner',
+      hint: 'the L2 RPC did not answer, so this request is refused rather than guessed. Retry; if it persists, check the OP RPC endpoint. This is not a statement about who you are.',
+    }
+  }
+
   if (isAuthorisedApprover(caller, contractOwner)) return { ok: true }
+
+  // The hint says what is actually true. A registrar authorised on-chain CAN issue names —
+  // `onlyOwnerOrRegistrar` on L2RecordsV3.registerSubnode — completely bypassing this Worker.
+  // Refusing them here buys no security; the only real difference is that the API path spends
+  // the operator's WORKER_EOA gas. Telling a registrar "you lack permission" would be false.
   return {
     ok: false,
     status: 409,
-    message: 'This deployment requires approval before a name is issued',
-    hint: 'POST /apply instead — it queues the request for review. Direct /register is limited to the contract owner while APPROVAL_MODE=manual.',
+    code: 'APPROVAL_REQUIRED',
+    message: 'This deployment reviews requests before a name is issued',
+    hint: 'POST /apply instead — it queues the request for review. Direct /register is limited to the contract owner while APPROVAL_MODE=manual, because that is the path the operator pays gas for. An address authorised as a registrar on-chain can still issue names by calling the contract directly.',
   }
 }

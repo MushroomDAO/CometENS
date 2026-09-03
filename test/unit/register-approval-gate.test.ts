@@ -141,7 +141,9 @@ describe('/register under APPROVAL_MODE=manual', () => {
       return Promise.resolve('0x0000000000000000000000000000000000000000')
     })
     const manual = await postRegister(await signedRegister(owner, 'frank'), makeEnv({ APPROVAL_MODE: 'manual' }))
-    expect(manual.status).toBe(409)
+    // 503, not 409: refused because we could not check, not because of who they are.
+    expect(manual.status).toBe(503)
+    expect((await manual.json() as any).error).toMatch(/Could not verify/)
     const auto = await postRegister(await signedRegister(owner, 'grace'), makeEnv({ APPROVAL_MODE: 'auto' }))
     expect(auto.status).not.toBe(409)
   })

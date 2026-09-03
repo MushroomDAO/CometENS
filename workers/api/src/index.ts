@@ -655,7 +655,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
         contractOwner = undefined // fails closed in manual mode, by design
       }
       const gate = mayRegisterDirectly(mode, from, contractOwner)
-      if (!gate.ok) return jsonError(`${gate.message} — ${gate.hint}`, gate.status, 'APPROVAL_REQUIRED')
+      if (!gate.ok) return jsonError(`${gate.message} — ${gate.hint}`, gate.status, gate.code)
     }
 
     // The Worker EOA (WORKER_EOA_PRIVATE_KEY) is the on-chain registrar and
