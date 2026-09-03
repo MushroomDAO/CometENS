@@ -144,7 +144,7 @@
 - **涉及文件**:`scripts/bootstrap-community.ts`、`package.json`
 - **证据**:
 
-### T1.2.3 SELF-HOSTING.md 自部署指南  `PR_OPEN`
+### T1.2.3 SELF-HOSTING.md 自部署指南  `DONE`
 - **优先级**:high
 - **目标**:陌生开发者照着能在 2 小时内跑通,全程不需要联系我们。
 - **开发范围**:基于 T1.2.2 的**实跑结果**写(不是凭空写):前置条件 → preflight →
@@ -276,7 +276,7 @@
 - **涉及文件**:`scripts/rotate-gateway-signer.ts`、`docs/KEY-ROTATION.md`、`package.json`
 - **证据**:
 
-### T1.5.1 抽象签名器接口 + env-key 实现  `READY`
+### T1.5.1 抽象签名器接口 + env-key 实现  `PR_OPEN`
 - **优先级**:high
 - **目标**:把"用哪把钥匙、怎么签"从业务逻辑里剥离,为 KMS 留出插槽,
   同时保证自部署者只需一个环境变量即可运行。

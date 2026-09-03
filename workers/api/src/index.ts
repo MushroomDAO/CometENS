@@ -50,6 +50,7 @@ import {
   applicationKey, publicView, isAuthorisedApprover, APPLICATION_PREFIX,
   ApprovalError, type Application,
 } from '../../../server/gateway/approval'
+import { tryCreateSigner } from '../../../server/gateway/signer'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
@@ -80,8 +81,13 @@ export interface Env {
   APPROVAL_MODE?: string
   /** Optimism RPC URL */
   OP_RPC_URL: string
-  /** EOA private key that submits L2 transactions (wrangler secret) */
+  /**
+   * EOA private key that submits L2 transactions (wrangler secret).
+   * Prefer WRITER_KEY; this name is kept working so an upgrade cannot take a deployment down.
+   */
   WORKER_EOA_PRIVATE_KEY?: string
+  /** Role-specific name for the writer key — preferred over WORKER_EOA_PRIVATE_KEY. */
+  WRITER_KEY?: string
   /** Comma-separated addresses allowed to call /v1/register */
   UPSTREAM_ALLOWED_SIGNERS?: string
   /** Gateway Worker URL (used by /resolve-status to query proof status) */
@@ -1003,9 +1009,10 @@ function makePublicClient(env: Env) {
 }
 
 function buildWriter(env: Env): L2RecordsWriterV2 | undefined {
-  const pk = env.WORKER_EOA_PRIVATE_KEY as Hex | undefined
-  if (!pk) return undefined
-  const account = privateKeyToAccount(pk)
+  // Which key the writer role uses, and how it signs, now live behind one seam
+  // (server/gateway/signer.ts) so a KMS backend can replace it without touching this file.
+  const account = tryCreateSigner('writer', env as unknown as Record<string, string | undefined>)
+  if (!account) return undefined
   return new L2RecordsWriterV2(account, getChain(env), env.OP_RPC_URL, env.L2_RECORDS_ADDRESS as Hex)
 }
 
