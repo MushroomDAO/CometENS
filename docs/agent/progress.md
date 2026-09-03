@@ -2,20 +2,14 @@
 
 > 每推进一步就更新这份文件。`run` 持续维护。
 
-## 此刻状态(2026-09-04,run 第 1 轮进行中)
+## 此刻状态(2026-09-04,run 循环进行中)
 
-- **规划层已落地**:PR #21 已由 `pr-daemon-fe` APPROVE @ `92b01783` 并合并进 `preview`
-  (经 3 轮评审:Codex 对抗 review 1 轮 + pr-daemon 2 轮 REQUEST_CHANGES,
-  共修掉 8 条恒真/空验收命令与 1 处引用归属错误)
-- **进行中**:T1.0.1(配置漂移修正),分支 `fix/T1.0.1-chain-config-drift`,worktree `../CometENS-F1.0`
-- **跟进账本**:1 个 OPEN(FU-1)
-
-## 历史状态(2026-09-03,plan 阶段刚结束)
-
-- **分支**:`main`(干净),无 open PR,无 open issue
-- **集成分支**:`preview` ✅ 已创建并推送 origin(与 main 同点)
-- **版本**:v0.7.0(测试网发行)
-- **在做**:无(等待用户确认后启动 `pilot run`)
+- **DONE**:T1.0.1(PR #22 已合并)、T1.1.1(PR #23 已合并)
+- **PR_OPEN**:T1.2.1 → PR #24;T1.5.0 → 本分支
+- **规划层**:PR #21 已合并进 `preview`,`preview` 现为集成分支
+- **跟进账本**:3 个 OPEN(FU-1 计数过期、FU-2 守卫覆盖面、FU-3 变异测试规程)
+- **可清理的 worktree**(safe-cleanup 已列出,**删除由人执行**):
+  `CometENS-F1.0`、`CometENS-F1.1`、`CometENS-plan`
 
 ## 实测基线(2026-09-03 本机实跑)
 
