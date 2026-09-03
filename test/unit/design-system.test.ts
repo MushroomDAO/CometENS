@@ -166,7 +166,14 @@ describe('design system — token coverage', () => {
     // Without this, a selector regex that matched nothing would make the loop below vacuous —
     // zero assertions, all green.
     const selectors = backgroundRules().map((r) => r.selector)
-    expect(selectors.length).toBeGreaterThanOrEqual(2)
+    // A FLOOR, not a count, was the wrong assertion: `>= 2` is exactly the size of the
+    // hardcoded list this derivation replaced, so degrading the prefix predicate back to
+    // `^\.btn-primary|^\.btn:hover` left the suite fully green while `.btn-ghost:hover` —
+    // the rule FU-2 was filed to cover — dropped silently out of scope. pr-daemon measured it:
+    // 27 passed on that mutation. And `>= 2` was dead anyway, implied by the toContain lines.
+    //
+    // Pinning the exact count means any change to what is covered has to be acknowledged here.
+    expect(selectors).toHaveLength(9)
     expect(selectors).toContain('.btn-primary')
     // Named explicitly because these two were the ones the comment-stripping bug hid, and
     // FU-2's whole point is that a hand-picked list misses what nobody remembered.

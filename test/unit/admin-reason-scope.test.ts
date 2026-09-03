@@ -38,6 +38,11 @@ describe('the reject reason has no shared element to collide over', () => {
     // byId() lookup the assertion above would still pass, because the id could live in JS.
     const SRC = readFileSync(join(__dirname, '..', '..', 'src', 'admin-queue.ts'), 'utf8')
     expect(SRC).toMatch(/createElement\('input'\)/)
+    // Both lookup spellings, written out. The previous version was `/byId\(...reason/i` and the
+    // `/i` happened to also stop a direct `getElementById` — an accident, not a design, and
+    // anyone "tidying up" the flag would have narrowed the guard without noticing.
     expect(SRC).not.toMatch(/byId\([^)]*reason/i)
+    expect(SRC).not.toMatch(/getElementById\([^)]*reason/i)
+    expect(SRC).not.toMatch(/querySelector[^(]*\([^)]*reason/i)
   })
 })
