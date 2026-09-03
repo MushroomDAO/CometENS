@@ -2,7 +2,7 @@ import { createWalletClient, createPublicClient, http, custom } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { namehash } from 'viem/ens'
 import { config } from './config'
-import { RegisterTypes, ApplyTypes, buildDomain } from '../server/gateway/manage/schemas'
+import { ApplyTypes, buildDomain } from '../server/gateway/manage/schemas'
 import { OpPanel } from './ui-state'
 import {
   classifyOutcome, describeOutcome, isNameUsable, submitLabel,

@@ -7,7 +7,7 @@
  *
  * The pure logic lives here and is unit-tested; DOM wiring is at the bottom.
  */
-import { OpPanel, explainError, type ResultField } from './ui-state'
+import { OpPanel, type ResultField } from './ui-state'
 import { config } from './config'
 
 export type QueryKind = 'address' | 'name' | 'empty' | 'invalid'

@@ -388,11 +388,11 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
     (u) => !u.value || REFERENCE_HOSTS.some((h) => String(u.value).includes(h)),
   )
   if (pointingAtUs.length) {
-    add('3d', 'WARN', 'frontend points at the reference deployment',
+    add('3d', 'WARN', 'frontend targets your own workers',
       pointingAtUs.map((u) => (u.value ? `${u.name}=${u.value}` : `${u.name} unset → defaults to ${u.fallback}`)).join(', '),
       'a self-hosted frontend built like this routes resolution and writes through OUR workers. Set both to your own deployed workers. (If you ARE working on this repo, this warning is expected.)')
   } else {
-    add('3d', 'PASS', 'frontend points at the reference deployment', 'both URLs point somewhere else')
+    add('3d', 'PASS', 'frontend targets your own workers', 'neither URL points at the reference deployment')
   }
 
   // 8 — root domain shape

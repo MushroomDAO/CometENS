@@ -18,7 +18,6 @@ import {
   createPublicClient,
   http,
   verifyTypedData,
-  recoverMessageAddress,
   isAddress,
   isHex,
   namehash,
