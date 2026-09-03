@@ -68,7 +68,8 @@ pilot 规定「一个 Feature = 一个专属 worktree」,所以**每开一个新
 
 ```bash
 # 快(推荐):链接主 checkout 的 node_modules
-ln -s /Users/jason/Dev/mycelium/CometENS/node_modules <worktree>/node_modules
+# <主checkout> 换成你自己这个仓库主 clone 的绝对路径(symlink 不能用相对路径可靠解析)
+ln -s <主checkout>/node_modules <worktree>/node_modules
 
 # 或:老实安装(慢,但完全独立)
 cd <worktree> && pnpm install

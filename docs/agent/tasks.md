@@ -9,6 +9,13 @@
 > (`0xbA692Cdf…`),不要信 `.env.local` 里的 `0x8836E89D…`**。
 > 私钥绝不写入任何提交文件、日志或 PR 描述,**任何脚本不得打印私钥原值**。
 
+> **验收命令的硬规矩(两轮评审各拦下一批,记死)**:命令必须在**任务尚未完成时是红的**,
+> 否则分不出"做了"和"没做"。因此:①**不要**拿"跑既有测试套件"(`pnpm vitest run test/unit/`、
+> `pnpm typecheck`、`pnpm build`)当闸门——它们今天就 exit 0;要指向**本任务新增的**测试文件。
+> ②**不要**用 `vitest -t '<用例名>'` 钉用例——过滤器不匹配时 exit **0**(实测),
+> 要钉到用例粒度只能用 `grep -q 'function <名字>'`。③反向判据(如"不含 alert")
+> 在目标文件本来就没有该模式时是**空的**,要先确认它今天是红的,否则改用正向锚。
+
 **不可退化的基线**(每个 PR 都要保持):Foundry 198 passed · TS unit 101 passed · `pnpm typecheck` 干净。
 
 ---
@@ -70,8 +77,10 @@
   空状态与错误说人话。
 - **明确不做**:不连钱包、不做写操作。
 - **依赖**:T1.1.1
-- **交付物**:查询页 + 对应 TS 逻辑 + 单测(输入校验与状态机)
-- **验收命令**:`pnpm vitest run test/unit/ && pnpm build && pnpm typecheck`
+- **交付物**:查询页 + 对应 TS 逻辑 + 新增单测 `test/unit/lookup.test.ts`(输入校验与状态机)
+- **验收命令**:`pnpm vitest run test/unit/lookup.test.ts && pnpm build && pnpm typecheck`
+  (必须指向**本任务新增的**测试文件;指向整个 `test/unit/` 今天就是 exit 0,
+  分不出"做了"和"没做")
 - **涉及文件**:`index.html` 或新页、`src/`、`test/unit/`
 - **证据**:
 
@@ -263,9 +272,10 @@
   把 API worker 的写路径与 gateway 的 EIP-3668 应答签名改为经此接口获取签名者。
 - **明确不做**:本任务**不实现 KMS**(见 T1.5.3);不改任何链上合约。
 - **依赖**:无
-- **交付物**:signer 接口 + `EnvKeySigner` + 两个 worker 接入 + 单测
-- **验收命令**:`pnpm vitest run test/unit/ && pnpm typecheck`
-  (单测须覆盖:接口契约、EnvKeySigner 派生地址正确、缺钥时报错清晰)
+- **交付物**:signer 接口 + `EnvKeySigner` + 两个 worker 接入 + 新增 `test/unit/signer.test.ts`
+- **验收命令**:`pnpm vitest run test/unit/signer.test.ts && pnpm typecheck`
+  (该文件当前不存在 → 今天 exit 1,fail-closed;
+  须覆盖:接口契约、EnvKeySigner 派生地址正确、缺钥时报错清晰)
 - **风险/回滚**:改动签名路径,**必须保证现有 e2e 解析仍通过**;
   不得改变已部署合约与线上 Worker 的对外行为。
 - **涉及文件**:`workers/api/src/`、`workers/gateway/src/`、`test/unit/`
@@ -305,10 +315,10 @@
   队列复用现有 KV 命名空间,不引入新依赖。
 - **明确不做**:不做用户账号/登录;不做邮件通知;不引入数据库。
 - **依赖**:无
-- **交付物**:端点 + KV schema + 单测
-- **验收命令**:`pnpm vitest run test/unit/ && pnpm typecheck`
-  (单测须覆盖:auto 模式直接发放、manual 模式落队列、重复申请、
-  未授权者不能批准、批准后状态流转)
+- **交付物**:端点 + KV schema + 新增 `test/unit/approval.test.ts`
+- **验收命令**:`pnpm vitest run test/unit/approval.test.ts && pnpm typecheck`
+  (该文件当前不存在 → 今天 exit 1;须覆盖:auto 模式直接发放、manual 模式落队列、
+  重复申请、**未授权者不能批准**、批准后状态流转)
 - **风险/回滚**:`APPROVAL_MODE` 默认 `auto` 等价于当前行为,**向后兼容**,不影响线上。
 - **涉及文件**:`workers/api/src/index.ts`、`test/unit/`
 - **证据**:
@@ -321,7 +331,10 @@
 - **明确不做**:不做登录;不做账号体系。
 - **依赖**:T1.1.1、T1.6.1
 - **交付物**:改造后的 `register.html` + `src/register.ts`
-- **验收命令**:`pnpm build && pnpm typecheck && node -e "const s=require('fs').readFileSync('src/register.ts','utf8'); if(/\balert\(/.test(s)) throw new Error('仍在用 alert 做用户反馈')"`
+- **验收命令**:`pnpm build && pnpm typecheck && grep -q '申请' register.html`
+  (原来的 alert 判据是**空的** —— `src/register.ts` 现在就有 0 处 `alert(`,永远为真;
+  换成正向锚:`register.html` 现在 0 处"申请" → 今天 exit 1。
+  注:同一条 alert 判据在 T1.1.4 里**是有效的**,因为 `src/admin.ts` 现有 1 处)
 - **涉及文件**:`register.html`、`src/register.ts`
 - **证据**:
 
@@ -331,8 +344,9 @@
 - **开发范围**:在管理控制台增加"待审批"分区:列表、批准、拒绝、空状态、四态反馈。
 - **明确不做**:不做角色权限系统(沿用现有 EIP-712 管理员鉴权)。
 - **依赖**:T1.1.4、T1.6.1
-- **交付物**:admin 审批区 + 单测
-- **验收命令**:`pnpm build && pnpm typecheck && pnpm vitest run test/unit/`
+- **交付物**:admin 审批区 + 新增 `test/unit/admin-queue.test.ts`
+- **验收命令**:`pnpm vitest run test/unit/admin-queue.test.ts && pnpm build && pnpm typecheck`
+  (该文件当前不存在 → 今天 exit 1)
 - **涉及文件**:`admin.html`、`src/admin.ts`
 - **证据**:
 
