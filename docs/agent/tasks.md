@@ -22,7 +22,7 @@
 
 ## F1.0 — 环境与配置修正(必须最先做,否则链上任务全挂)
 
-### T1.0.1 修正 RPC 与合约地址的配置漂移  `READY`
+### T1.0.1 修正 RPC 与合约地址的配置漂移  `PR_OPEN`
 - **优先级**:critical
 - **目标**:让后续所有链上任务连得上正确的网络与正确的合约。
 - **开发范围**:①`.env.op-sepolia` 示例与文档里把 OP Sepolia 默认 RPC 改为
@@ -34,14 +34,14 @@
 - **交付物**:更新的 env 示例/文档 + `pnpm check:chain`
 - **验收命令**:`pnpm check:chain` 必须成功输出 chainId=11155420 且
   `owner()` 非零(用公共 RPC,不依赖 Alchemy)
-- **涉及文件**:`.env.op-sepolia`、`scripts/`、`package.json`、`README.md`
-- **证据**:
+- **涉及文件**:`.env.op-sepolia`、`scripts/check-chain.mjs`、`package.json`
+- **证据**:分支 `fix/T1.0.1-chain-config-drift` → PR(见 progress.md)
 
 ---
 
 ## F1.1 — 主干流程 UI 产品化
 
-### T1.1.1 建立统一设计系统  `READY`
+### T1.1.1 建立统一设计系统  `PR_OPEN`
 - **优先级**:high
 - **目标**:用一套共享 CSS token + 组件类取代各页内联 `<style>`,成为唯一样式来源。
 - **开发范围**:按 spec.md §4 建 `src/styles/design-system.css`,定义全部 token
@@ -51,9 +51,12 @@
 - **依赖**:无
 - **交付物**:`src/styles/design-system.css` + `index.html` 接入
 - **验收命令**:
-  `pnpm build && pnpm typecheck && test "$(grep -c '^[[:space:]]*--c-' src/styles/design-system.css)" -ge 10`
+  `pnpm vitest run test/unit/design-system.test.ts && pnpm build && pnpm typecheck && test "$(grep -c '^[[:space:]]*--c-' src/styles/design-system.css)" -ge 10`
   (`grep -c` 单独用只能区分 0 与非 0——1 个 token 也会 exit 0 让整条链通过,
-  必须用 `test … -ge 10` 才真的检查数量)
+  必须用 `test … -ge 10` 才真的检查数量。
+  **另加 design-system.test.ts:token 数量与 build 都查不到「token 组合出来的效果」**——
+  PR #23 评审实测出每个按钮 hover 时文字与背景同色、对比度 1.00,而 build 绿、
+  token 数也绿。该测试断言所有前景/背景配对满足 WCAG AA,并自带必失败对照)
 - **涉及文件**:`src/styles/design-system.css`、`index.html`、`vite.config.ts`(如需)
 - **证据**:
 
