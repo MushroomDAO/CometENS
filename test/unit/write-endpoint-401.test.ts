@@ -181,12 +181,15 @@ describe('a malformed signature is 401, never 5xx', () => {
     expect(res.status).toBe(404)
   })
 
-  it('read-only and write together cover every dispatched route (control)', () => {
-    // The partition must be total: a route in neither list would be checked by nobody, and no
-    // assertion here would notice.
-    const all = allDispatchedPaths()
-    const readOnlyPresent = all.filter((p) => READ_ONLY.has(p))
-    expect(readOnlyPresent.length + endpoints.length).toBe(all.length)
+  it('the write list is pinned, not floored', () => {
+    // What this replaced was `|all ∩ RO| + |all \ RO| == |all|` — a construction property of
+    // `filter`, true for ANY contents. Emptying READ_ONLY left it green while every per-route
+    // assertion went red, so it was serving as a safety net that could not catch anything.
+    //
+    // An exact count is the version with teeth: moving a route into READ_ONLY, or a dispatch
+    // line changing shape so the regex stops seeing it, both land here. Same lesson as the
+    // `>= 2` floor in #48 — a bound that equals today's value cannot detect shrinkage.
+    expect(endpoints).toHaveLength(10)
   })
 
   for (const path of endpoints) {
