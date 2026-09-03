@@ -57,6 +57,25 @@ KMS(TEE)保管密钥 + 三角色密钥分离 + owner 冷存不用于日常写入
 - `.env.local` 的 `VITE_L2_RECORDS_ADDRESS=0x8836E89D…` 与线上 wrangler 的
   `0xbA692Cdf…` **不一致**。以 wrangler.toml 为准。
 
+## ⚠️ 执行须知(run 每次开 worktree 都会撞,必读)
+
+**新建的 worktree 里没有 `node_modules`**,于是 `pnpm run build` 报
+`sh: vite: command not found` → `preflight.sh run` 失败 → **`git-guard.sh pr-create` 被拒,PR 开不出来**。
+pilot 规定「一个 Feature = 一个专属 worktree」,所以**每开一个新 worktree 都会撞一次**。
+本次 plan 阶段已实测复现两次。
+
+**建 worktree 之后、跑 preflight 之前,必须先补依赖**,二选一:
+
+```bash
+# 快(推荐):链接主 checkout 的 node_modules
+ln -s /Users/jason/Dev/mycelium/CometENS/node_modules <worktree>/node_modules
+
+# 或:老实安装(慢,但完全独立)
+cd <worktree> && pnpm install
+```
+
+漏了这一步的表现是 preflight FAIL 而非报缺依赖,容易误判成"代码有问题",别往那个方向查。
+
 ## 凭据可用性(已核实,未打印任何值)
 
 | 需要 | 来源 | 状态 |
