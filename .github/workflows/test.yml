@@ -29,12 +29,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # Submodules deliberately NOT fetched. I first wrote `submodules: recursive` on the
-      # assumption that contracts/lib/* were submodules — they are not, they are committed
-      # files (mode 100644), and `forge build` succeeds from a plain checkout. The real
-      # submodules are vendor/unruggable-gateways and eval/* (several large reference repos),
-      # and nothing under test/, src/, server/, sdk/ or scripts/ imports from them.
       - uses: actions/checkout@v4
+
+      # Two of contracts/lib/* ARE submodules and the contracts import them:
+      #
+      #   git ls-files -s contracts/lib  →  67×100644  1×100755  2×160000
+      #   the 160000 pair: openzeppelin-contracts, unruggable-gateways
+      #   HybridResolver.sol / OPResolver.sol import "@unruggable/…", remapped to lib/
+      #
+      # Fetched HERE rather than left to `forge build`, which silently runs
+      # `git submodule update --init` when they are missing ("Missing dependencies found.
+      # Installing now…", visible in this job's own earlier logs). That worked, but it made the
+      # gate depend on cloning two external repos at build time without saying so: if either
+      # remote is unreachable or rate-limited the gate goes red for a reason unrelated to the
+      # code under review. Doing it at checkout makes the dependency declared and fails in the
+      # step whose name explains it.
+      #
+      # NOT `submodules: recursive` — that would also pull vendor/ and eval/* (several large
+      # reference repos that nothing in test/, src/, server/, sdk/ or scripts/ imports).
+      - name: Fetch the two submodules the contracts import
+        run: git submodule update --init --depth 1 contracts/lib/openzeppelin-contracts contracts/lib/unruggable-gateways
 
       - uses: pnpm/action-setup@v4
         with:
