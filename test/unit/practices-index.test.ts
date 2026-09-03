@@ -61,8 +61,17 @@ describe('the practices index is complete and exact', () => {
     expect(rows.filter((r) => !headings.includes(r))).toEqual([])
   })
 
-  it('no protocol is listed twice', () => {
+  it('no protocol is listed twice in the index', () => {
     expect(rows.length).toBe(new Set(rows).size)
+  })
+
+  it('no protocol heading appears twice in practices.md', () => {
+    // The gap this guard had until a real merge exposed it: it checked the INDEX for
+    // duplicates and said nothing about the source. Rebasing #71 across #70's rename split one
+    // protocol into two sections with the same heading — the set comparison stayed green,
+    // because `includes` is happy to match the same row twice.
+    const dupes = headings.filter((h, i) => headings.indexOf(h) !== i)
+    expect(dupes).toEqual([])
   })
 
   it('the extractors discriminate (must-fail control)', () => {
