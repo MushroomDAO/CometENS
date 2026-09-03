@@ -167,6 +167,7 @@ costs effectively nothing — the L1 side needs a single `setResolver`.
 Two ways to run it: **self-host** (you hold every key, you trust nobody) or **delegated**
 (one `setResolver`, revocable at any time — but read
 [DELEGATED-HOSTING.md](docs/DELEGATED-HOSTING.md) first: the operator retains the technical
-ability to overwrite records, reclaim NFTs, and forge resolution responses).
+ability to overwrite records, reclaim NFTs, and forge resolution responses — **the last of
+which proof mode does not prevent**).
 
 Start here: [SELF-HOSTING.md](docs/SELF-HOSTING.md) · [UPSTREAM-API.md](docs/UPSTREAM-API.md)
