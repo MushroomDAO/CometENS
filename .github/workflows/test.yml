@@ -12,6 +12,10 @@
 # answer expires the moment the next PR lands. Only the merge result, checked at merge time, is
 # the right measurement at the right moment.
 #
+# It also removes a conflict in the human half of the protocol: "rebase before merging" changes
+# the branch sha, which invalidates the review that was recorded against the old one. With this
+# workflow the merge result is tested without anyone having to touch the branch at all.
+#
 # See docs/agent/tasks.md「合并前协议」for the reasoning; this file is what enforces it.
 name: Tests
 

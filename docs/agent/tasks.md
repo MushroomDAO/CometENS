@@ -51,6 +51,22 @@
 本地那条命令仍然有用(推之前就知道,不用等 CI),但它回答的只是
 「**此刻**把这个分支合到**此刻**的 tip 通不通过」,而这个答案在下一个 PR 合并的瞬间失效。
 
+#### ⚠️ 别用 rebase 做这件事 —— 它会作废 review
+
+我第一版协议写的是 `git rebase origin/preview && …`,**那和「合并前先测」是冲突的**:
+rebase 改变 sha,而 APPROVE 记在旧 sha 上,于是"照协议做"反而让这个 PR 需要重新评审。
+(我们已经为这个吃过一次亏:#38 的 APPROVE 记在 rebase 前的 sha,合进去的那棵树没人批过。)
+
+协议要的是**测合并结果**,不是 rebase。造一次一次性的试合并就够,且不动分支:
+
+  git fetch origin
+  git checkout --detach origin/preview
+  git merge --no-commit --no-ff origin/<你的分支>
+  pnpm test && npx tsc -p tsconfig.json --noEmit
+  git merge --abort
+
+**只有真的有冲突时才需要 rebase**,那时 sha 无论如何都要变,重新评审是应付的代价。
+
 ### 变异测试规程(FU-3)
 
 每组变异都必须配一格**不该失败的对照**。
