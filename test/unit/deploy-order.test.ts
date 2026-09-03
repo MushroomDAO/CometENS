@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import {
   requiredEndpoints, classify, redact, readFrontendSources,
   countApiMentions, countPathHits, unreadableCallSites,
+  DEFINITION_MODULE,
 } from '../../scripts/check-deploy-order.mjs'
 
 /**
@@ -117,6 +118,30 @@ describe('two independent counts of the same call sites', () => {
     expect(countPathHits(src)).toBe(3)
     expect(requiredEndpoints(src)).toHaveLength(2) // deduplicated
     expect(countApiMentions(src)).toBe(3)
+  })
+
+  it('a STRING-CONCATENATED call is seen by both instruments', () => {
+    // pr-daemon's counter-example, and the input that showed the two counts were not actually
+    // independent: `config.apiUrl + '/zz'` contains no `apiUrl}` at all, so with the narrow
+    // anchor it was invisible to all four functions AT ONCE — it did not even register as a
+    // call site that could not be read.
+    //
+    // The test for independence is not "are the algorithms different" but "is there an input
+    // on which they disagree". This is that input.
+    const src = ["fetch(config.apiUrl + '/zz-new-endpoint')"]
+    expect(countPathHits(src)).toBe(0)
+    expect(countApiMentions(src)).toBe(1)
+    expect(unreadableCallSites(src)).toHaveLength(1)
+    expect(unreadableCallSites(src)[0]).toContain('zz-new-endpoint')
+  })
+
+  it('the definition module is excluded, or every comparison carries a constant offset', () => {
+    // config.ts declares and assigns `apiUrl`; those two mentions are the definition, not
+    // calls. Counting them put +2 into the gap and broke the identity below.
+    expect(DEFINITION_MODULE).toBe('config.ts')
+    const withDefinition = ['  apiUrl: string', "  apiUrl: (env.VITE_API_URL || 'https://x')"]
+    expect(countApiMentions(withDefinition)).toBe(2)
+    expect(countPathHits(withDefinition)).toBe(0)
   })
 
   it('a call the path pattern cannot read still gets counted as a mention', () => {
