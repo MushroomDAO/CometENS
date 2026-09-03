@@ -129,14 +129,15 @@ L1 解析按记录年龄自动路由 —— 新记录（< ~7 天）走签名模�
 
 **已部署合约（Ethereum Sepolia，2026-04-04 C3' redeploy）**：
 
+> ⚠️ 下表是**里程碑 C 当时**的部署，**不是现值**。限定写在表前而不是表后——
+> 读者读完一张表之后才看到"其实这些都过期了"，那句限定已经太晚。
+
 | 合约 | 地址 |
 |---|---|
 | EthVerifierHooks | `0x68E526600e89aDD227B0912b075E02B394a23DCf` |
 | OPFaultGameFinder | `0x21e35d3Ef6511B34C6c0D1e6893c587e8d4420d2` |
 | OPFaultVerifier | `0x0954FD2908c06182127b6bed0A964e9eEA41a7EA` |
 | OPResolver | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
-
-> ⚠️ 上表是**里程碑 C 当时**的部署，**不是现值**。
 
 **~~`aastar.eth` 和 `forest.aastar.eth` resolver 均已指向 OPResolver。~~ 这句话现在是错的。**
 2026-09-04 链上实测（Sepolia ENS Registry `resolver()`）：
