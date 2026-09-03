@@ -528,3 +528,46 @@ describe('the severity knob is validated because it was SET, not because it was 
     expect(() => staticChecks(base)).not.toThrow()
   })
 })
+
+describe('preflight 3d — a self-hosted frontend must not silently point at us', () => {
+  // Acceptance A4 is "no step needs our worker". src/config.ts falls back to OUR workers when
+  // VITE_API_URL / VITE_GATEWAY_URL are unset, and SELF-HOSTING.md never mentioned either —
+  // so a self-hoster following the guide built a frontend routed through our infrastructure
+  // with nothing in the output saying so. I had recorded A4 as SATISFIED on the evidence that
+  // our domain appears 0 times in that guide; the 0 was real and the conclusion backwards.
+  const base = { NETWORK: 'testnet', L2_RECORDS_ADDRESS: `0x${'ab'.repeat(20)}`, ROOT_DOMAIN: 'community.eth' }
+  const check3d = (env: Record<string, string>) =>
+    staticChecks({ ...base, ...env }).find((c: any) => String(c.id) === '3d')
+
+  it('unset means the default, and the default is us', () => {
+    const c = check3d({})
+    expect(c.level).toBe('WARN')
+    expect(c.detail).toMatch(/unset/)
+  })
+
+  it('explicitly set to our worker is the same finding', () => {
+    // Someone who copied .env from this repo has it set, not unset — the check has to look at
+    // the value, not just at presence.
+    expect(check3d({
+      VITE_API_URL: 'https://cometens-api.jhfnetboy.workers.dev',
+      VITE_GATEWAY_URL: 'https://mine.workers.dev',
+    }).level).toBe('WARN')
+  })
+
+  it('both pointing elsewhere PASSes (control)', () => {
+    // Without this, a check that always warned would satisfy both assertions above and tell a
+    // correctly-configured self-hoster they are misconfigured — which is how guards get muted.
+    expect(check3d({
+      VITE_API_URL: 'https://mine.workers.dev',
+      VITE_GATEWAY_URL: 'https://mine2.workers.dev',
+    }).level).toBe('PASS')
+  })
+
+  it('one of the two is enough to warn (control)', () => {
+    // The gateway alone routes every resolution through us even if writes go elsewhere.
+    expect(check3d({
+      VITE_API_URL: 'https://mine.workers.dev',
+      VITE_GATEWAY_URL: 'https://cometens-gateway.jhfnetboy.workers.dev',
+    }).level).toBe('WARN')
+  })
+})
