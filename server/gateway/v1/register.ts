@@ -99,7 +99,17 @@ export async function handleV1Register(
   }
 
   const message = `CometENS:register:${label}:${owner}:${timestamp}`
-  const recovered = await recoverMessageAddress({ message, signature })
+  // A malformed signature makes recoverMessageAddress THROW rather than return a wrong
+  // address, and an uncaught throw here surfaces as 500 — "our fault" for what is entirely
+  // the caller's unusable input. Same defect FU-6 fixed on the EIP-712 endpoints; this one
+  // survived because it recovers a personal_sign rather than verifying typed data, so the
+  // shape-matching enumeration in write-endpoint-401.test.ts never saw it.
+  let recovered: string
+  try {
+    recovered = await recoverMessageAddress({ message, signature })
+  } catch {
+    throw Object.assign(new Error('Invalid signature'), { status: 401 })
+  }
   if (!allowedSigners.map(a => a.toLowerCase()).includes(recovered.toLowerCase())) {
     throw Object.assign(
       new Error(`Signer ${recovered} is not in the allowed list`),

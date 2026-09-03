@@ -458,8 +458,15 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
   // handleV1Register() will re-verify and check the allowedSigners list.
   if (payload.signature && payload.label && payload.owner && payload.timestamp) {
     const message = `CometENS:register:${String(payload.label).trim().toLowerCase()}:${payload.owner}:${payload.timestamp}`
-    const signerAddress = await recoverMessageAddress({ message, signature: payload.signature as Hex })
+    try {
+      // Recovered early so a rate limiter could key on the signer before any write. The
+      // recovery is advisory here — handleV1Register re-does it and owns the verdict — so a
+      // malformed signature must not escape as a 500 from this pre-pass.
+      await recoverMessageAddress({ message, signature: payload.signature as Hex })
       // await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)  // D7: disabled — auth chain provides sufficient protection
+    } catch {
+      // Deliberately swallowed: handleV1Register below rejects it with 401.
+    }
   }
 
   const writer = buildWriter(env)
