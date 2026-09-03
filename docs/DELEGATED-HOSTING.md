@@ -56,8 +56,42 @@
 和 `test_ownerBypassesRegistrarQuota`。评审时把这三处逃生舱逐个从合约里拆掉,该测试都会转红
 —— 所以这不是"文档这么写",是被验证过的性质。
 
+4. **改任意地址的反向解析**(`setPrimaryNode`,`L2RecordsV3.sol:237`,`onlyOwner`)。
+
 **API 层确实做了 EIP-712 验签和链上归属校验**,日常路径是安全的。但那是 off-chain 约束:
 持有 owner 私钥的人可以绕开整个 Worker 直接发交易。
+
+### 还有一条性质不同的:让任何名字解析到任何地址
+
+上面四条要的是 **owner 私钥**(文档说它该冷存)。这一条不同 —— 它要的是**网关签名钥**,
+也就是那把 **7×24 在线**的钥匙:
+
+> **持有网关签名钥的人,可以让任何名字对任何查询者解析到任何地址。**
+
+原因在合约里:
+
+- `HybridResolver.hybridCallback` 从**应答**里解出模式
+  (`(uint8 mode, bytes payload) = abi.decode(response, …)`)——
+  **走签名还是走证明,是应答方自己决定的**。所以网关 `/health` 报的 `proofMode: true`
+  是网关侧的偏好,**不是合约侧的约束**;一个不老实的应答方永远选签名模式即可。
+- `_verifySignature` 只校验 `signers[recovered]`,签名绑定的是
+  `address(this) / expires / keccak(data) / keccak(result)` ——
+  **`result` 里是什么,它不检查**,也不与 L2 上的实际记录交叉核对。
+
+这条与前四条的区别值得说清楚:
+
+| | owner 私钥那四条 | 网关签名钥这一条 |
+|---|---|---|
+| 用的是哪把钥匙 | owner(应冷存) | 网关签名钥(**7×24 在线**) |
+| 链上痕迹 | 有(交易可查) | **没有**(只是一次应答) |
+| 影响范围 | 所有人 | **可以只针对某个查询者** |
+| proof 模式能挡吗 | 不相关 | **挡不住**(模式由应答方选) |
+
+所以文档里"网关签名钥策略上只允许签应答、永不允许签交易"这句,
+**不是一种限制** —— 签应答正是这条能力的全部内容。
+
+我们对这把钥匙能做的收敛是**缩短它的暴露窗口**:它可以热轮换,见
+[KEY-ROTATION.md](KEY-ROTATION.md)。但在任一时刻,持有它的人拥有上述能力。
 
 ### 一个常见的误解
 
@@ -107,11 +141,22 @@
 
 1. **你**:在 Ethereum 上把 `你的社区.eth` 的 resolver 指向运营方给你的 Resolver 地址。
 2. **运营方**:把 `你的社区.eth` 加进服务端的 `ROOT_DOMAINS`。
-3. **验证**:随便发一个子域,然后**用运营方界面之外的东西**解析它。
+3. **验证** —— 而且要用**真正独立**的方式,这一步比看上去讲究。
 
-   最省事的是任何支持 ENS 的第三方工具/浏览器扩展 —— 重点是那条路径不经过运营方的前端。
-   本仓库里的脚本也可以,但它需要你先在 `.env.local` 里配好
-   `VITE_L1_SEPOLIA_RPC_URL`、`VITE_L1_OFFCHAIN_RESOLVER_ADDRESS`、`VITE_ROOT_DOMAIN`:
+   ⚠️ **换一个 ENS 客户端是不够的。** 任何客户端做 CCIP-Read 都会去 `gatewayUrl` 取应答,
+   仍然经过运营方的**网关**,拿到的是同一个(按上一节,可能被伪造的)答案。
+   绕开前端不等于绕开网关。
+
+   **真正独立的验证是直接读 L2 合约,再和解析结果比对**:
+
+   ```
+   pnpm check:chain                                   # 合约与 owner
+   cast call <L2Records> 'subnodeOwner(bytes32)(address)' <namehash> --rpc-url <OP RPC>
+   ```
+
+   两者不一致,说明解析路径上有人在给你不同的答案。
+
+   本仓库的端到端脚本也可以跑,但它走的是网关,所以它验证的是"链路通",不是"答案真":
 
    ```
    bash scripts/resolve-testnet.sh alice.你的社区.eth
