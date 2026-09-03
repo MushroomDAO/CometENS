@@ -1,0 +1,10 @@
+# pilot 仓库配置 — CometENS
+base_branch: main
+# main 受保护(enforce_admins=true)但 required_approving_review_count=0。
+# pilot 的 --allow-trunk 对「0 审批要求」是 fail-closed 拒绝的,
+# 因此改用集成分支流:feature PR → preview,由人把 preview 合进 main。
+integration_branch: preview
+protect_patterns: [release, hotfix]
+remote: origin
+docs_dir: docs/agent
+planning_source: docs
