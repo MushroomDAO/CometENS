@@ -144,7 +144,7 @@
 - **涉及文件**:`scripts/bootstrap-community.ts`、`package.json`
 - **证据**:
 
-### T1.2.3 SELF-HOSTING.md 自部署指南  `PR_OPEN`
+### T1.2.3 SELF-HOSTING.md 自部署指南  `DONE`
 - **优先级**:high
 - **目标**:陌生开发者照着能在 2 小时内跑通,全程不需要联系我们。
 - **开发范围**:基于 T1.2.2 的**实跑结果**写(不是凭空写):前置条件 → preflight →
@@ -162,7 +162,7 @@
 
 ## F1.3 — 委托托管闭环(管理权/所有权分离)
 
-### T1.3.1 delegate CLI + 撤销的**诚实**链上验证  `PR_OPEN`
+### T1.3.1 delegate CLI + 撤销的**诚实**链上验证  `DONE`
 - **优先级**:high
 - **目标**:把 registrar 授权/查询/撤销做成可用命令(**模式 A 用**),
   并用测试**同时证明它有效、和它的边界在哪**。
@@ -195,7 +195,7 @@
 - **涉及文件**:`scripts/delegate.ts`、`contracts/test/L2RecordsV3.t.sol`、`package.json`
 - **证据**:
 
-### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `PR_OPEN`
+### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `DONE`
 - **优先级**:mid
 - **目标**:让社区看懂"我交出了什么、保留了什么、怎么收回";让上游系统能照着接 API。
 - **开发范围**:写 `docs/DELEGATED-HOSTING.md`(所有权 vs 管理权、授权/撤销流程、
@@ -227,7 +227,7 @@
 
 ## F1.4 — 文档与规划一致性
 
-### T1.4.1 同步 docs/roadmap.md 到真实状态  `READY`
+### T1.4.1 同步 docs/roadmap.md 到真实状态  `PR_OPEN`
 - **优先级**:mid
 - **目标**:消除"文档说 v0.6.0、实际 v0.7.0 且已上测试网"的脱节。
 - **开发范围**:更新 `docs/roadmap.md`:补 HybridResolver、Cloudflare 部署、
@@ -238,7 +238,7 @@
 - **涉及文件**:`docs/roadmap.md`
 - **证据**:
 
-### T1.4.2 README 重写为开源自部署定位  `PR_OPEN`
+### T1.4.2 README 重写为开源自部署定位  `DONE`
 - **优先级**:mid
 - **目标**:README 第一屏说清"这是可自部署的开源社区 ENS 域名组件",而不是项目日志。
 - **开发范围**:重写 README:一句话定位、核心用户旅程图、两种模式、
@@ -276,7 +276,7 @@
 - **涉及文件**:`scripts/rotate-gateway-signer.ts`、`docs/KEY-ROTATION.md`、`package.json`
 - **证据**:
 
-### T1.5.1 抽象签名器接口 + env-key 实现  `READY`
+### T1.5.1 抽象签名器接口 + env-key 实现  `PR_OPEN`
 - **优先级**:high
 - **目标**:把"用哪把钥匙、怎么签"从业务逻辑里剥离,为 KMS 留出插槽,
   同时保证自部署者只需一个环境变量即可运行。
@@ -336,7 +336,7 @@
 - **涉及文件**:`workers/api/src/index.ts`、`test/unit/`
 - **证据**:
 
-### T1.6.2 register.html 改造为申请入口  `READY`
+### T1.6.2 register.html 改造为申请入口  `PR_OPEN`
 - **优先级**:mid
 - **目标**:页面语义从"自己注册"改为"提交申请",并如实显示当前审批模式。
 - **开发范围**:用设计系统重做;`auto` 模式下体验仍是即时拿到名字,
@@ -351,7 +351,7 @@
 - **涉及文件**:`register.html`、`src/register.ts`
 - **证据**:
 
-### T1.6.3 admin 审批队列页面  `PR_OPEN`
+### T1.6.3 admin 审批队列页面  `DONE`
 - **优先级**:mid
 - **目标**:管理员能看到待审列表,逐条批准/拒绝。
 - **开发范围**:在管理控制台增加"待审批"分区:列表、批准、拒绝、空状态、四态反馈。

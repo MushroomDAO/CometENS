@@ -185,10 +185,16 @@ pnpm vitest run test/integration/
 
 ## 现有测试网部署(参考 / 回退)
 
+> ⚠️ **地址已于 2026-09-04 校正。**下表原本列的是 `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc`(L2RecordsV3)
+> 与 `0xA54D63a6223B66EDED35286522336e45F21BE512`(OPResolver),那是**已被取代的旧部署** —— 旧的 L2Records 在 OP Sepolia 上
+> 仍有代码,所以照着它集成不会报错,只会**什么都查不到**。
+> 现值的唯一事实来源是 `workers/*/wrangler.toml`,`pnpm check:chain` 会读它并核对链上状态。
+
+
 | 项 | 地址 |
 |----|------|
-| L2RecordsV3 (OP Sepolia) | `0x8836E89D654141a858f680e995CA86f6644A29a5` |
-| OPResolver (Eth Sepolia) | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
+| L2RecordsV3 (OP Sepolia) | `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc` |
+| HybridResolver (Eth Sepolia) | `0xA54D63a6223B66EDED35286522336e45F21BE512` |
 | Gateway | `https://cometens-gateway.jhfnetboy.workers.dev` |
 | API | `https://cometens-api.jhfnetboy.workers.dev` |
 | ASR (Sepolia) | `0xa1Cec548926eb5d69aa3B7B57d371EdBdD03e64b` |
