@@ -35,6 +35,7 @@ import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 import {
   buildDomain,
   RegisterTypes,
+  ApproveApplicationTypes,
   SetAddrTypes,
   SetTextTypes,
   SetContenthashTypes,
@@ -43,6 +44,11 @@ import {
   TransferSubnodeTypes,
 } from '../../../server/gateway/manage/schemas'
 import { handleV1Register } from '../../../server/gateway/v1/register'
+import {
+  resolveMode, buildApplication, decideOnSubmit, checkResubmission, applyDecision,
+  applicationKey, publicView, isAuthorisedApprover, APPLICATION_PREFIX,
+  ApprovalError, type Application,
+} from '../../../server/gateway/approval'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
@@ -69,6 +75,8 @@ export interface Env {
   ROOT_DOMAIN: string
   /** Comma-separated list of all supported root domains, e.g. 'forest.aastar.eth,game.aastar.eth' */
   ROOT_DOMAINS?: string
+  /** "auto" (default, matches pre-existing behaviour) | "manual" */
+  APPROVAL_MODE?: string
   /** Optimism RPC URL */
   OP_RPC_URL: string
   /** EOA private key that submits L2 transactions (wrangler secret) */
@@ -139,11 +147,16 @@ export default {
         if (path === '/lookup')         { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/resolve-status') { response = await handleResolveStatus(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/root-domains')   { response = json({ domains: getRootDomains(env) }); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/application')    { response = await handleGetApplication(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/applications')   { response = await handleListApplications(env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/approval-mode')  { response = json({ mode: resolveMode(env.APPROVAL_MODE) }); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
       if (request.method === 'POST') {
         if (path === '/v1/register')     { response = await handleV1RegisterEndpoint(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/apply')           { response = await handleApply(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/approve')         { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/register')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/set-addr')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/set-text')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
@@ -462,6 +475,80 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
 // ─── POST /register, /set-addr, /set-text, /set-contenthash,
 //         /add-registrar, /remove-registrar — EIP-712 signed ─────────────────
 
+// ─── Applications (T1.6.1) ────────────────────────────────────────────────────
+
+function applicationStore(env: Env): KVNamespace {
+  const kv = env.REGISTRY ?? env.RECORD_CACHE
+  if (!kv) throw Object.assign(new Error('No KV namespace bound — applications cannot be stored'), { status: 503 })
+  return kv
+}
+
+async function readApplication(env: Env, id: string): Promise<Application | null> {
+  const raw = await applicationStore(env).get(applicationKey(id))
+  return raw ? (JSON.parse(raw) as Application) : null
+}
+
+/**
+ * Submit an application.
+ *
+ * In `auto` mode this grants immediately, which is byte-for-byte the behaviour the deployed
+ * worker had before this endpoint existed — that is why `auto` is the default: upgrading
+ * changes nothing until an operator opts into review.
+ */
+async function handleApply(request: Request, env: Env): Promise<Response> {
+  const payload = await parseJson(request)
+  try {
+    const mode = resolveMode(env.APPROVAL_MODE)
+    const app = buildApplication(payload as any, getRootDomains(env), Math.floor(Date.now() / 1000))
+
+    const existing = await readApplication(env, app.id)
+    const resub = checkResubmission(existing)
+    if (!resub.ok) throw resub.error
+
+    if (decideOnSubmit(mode) === 'queue') {
+      await applicationStore(env).put(applicationKey(app.id), JSON.stringify(app))
+      return json({ ...publicView(app), mode })
+    }
+
+    // auto: approve and grant in one step.
+    const approved = applyDecision(app, 'approve', 'auto', Math.floor(Date.now() / 1000))
+    const granted = await grantApplication(env, approved)
+    await applicationStore(env).put(applicationKey(granted.id), JSON.stringify(granted))
+    return json({ ...publicView(granted), mode })
+  } catch (e: any) {
+    if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
+    throw e
+  }
+}
+
+/** Perform the on-chain grant for an approved application. */
+async function grantApplication(env: Env, app: Application): Promise<Application> {
+  const writer = requireWriter(env)
+  const parentNode = namehash(app.parent) as Hex
+  const lh = labelhash(app.label) as Hex
+  const txHash = await writer.registerSubnode(parentNode, lh, app.owner as Address, app.label, app.owner as Hex)
+  if (env.REGISTRY) await registryAppendName(env.REGISTRY, app.owner.toLowerCase(), app.name)
+  return { ...app, txHash }
+}
+
+async function handleGetApplication(url: URL, env: Env): Promise<Response> {
+  const id = url.searchParams.get('id')?.trim()
+  if (!id) return jsonError('Missing id param', 400)
+  const app = await readApplication(env, id)
+  if (!app) return json({ found: false })
+  return json({ found: true, ...publicView(app) })
+}
+
+async function handleListApplications(env: Env): Promise<Response> {
+  const list = await applicationStore(env).list({ prefix: APPLICATION_PREFIX })
+  const apps: unknown[] = []
+  for (const k of list.keys) {
+    const raw = await applicationStore(env).get(k.name)
+    if (raw) apps.push(publicView(JSON.parse(raw) as Application))
+  }
+  return json({ applications: apps })
+}
+
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
   const payload = await parseJson(request)
 
@@ -686,6 +773,47 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   }
 
   // ── /add-registrar ────────────────────────────────────────────────────────
+  // ── /approve ──────────────────────────────────────────────────────────────
+  if (path === '/approve') {
+    const msg = payload.message ?? {}
+    const id = String(msg.id ?? '').trim()
+    const decision = String(msg.decision ?? '')
+    if (!id) throw badReq('Missing application id')
+    if (decision !== 'approve' && decision !== 'reject') throw badReq('decision must be "approve" or "reject"')
+
+    const message = {
+      id,
+      decision,
+      reason: String(msg.reason ?? ''),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
+    }
+    checkDeadline(message.deadline)
+
+    const ok = await verifyTypedData({ address: from, domain, primaryType: 'ApproveApplication', types: ApproveApplicationTypes as any, message: message as any, signature })
+    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+
+    // Only the contract owner decides. Read the owner rather than trusting anything supplied.
+    const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
+    if (!isAuthorisedApprover(from, contractOwner as string)) {
+      throw Object.assign(new Error('Only the contract owner can decide on applications'), { status: 403 })
+    }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
+
+    const existing = await readApplication(env, id)
+    if (!existing) throw Object.assign(new Error(`No application with id "${id}"`), { status: 404 })
+
+    try {
+      let decided = applyDecision(existing, decision, from, Math.floor(Date.now() / 1000), message.reason || undefined)
+      if (decision === 'approve') decided = await grantApplication(env, decided)
+      await applicationStore(env).put(applicationKey(decided.id), JSON.stringify(decided))
+      return json(publicView(decided))
+    } catch (e: any) {
+      if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
+      throw e
+    }
+  }
+
   if (path === '/add-registrar') {
     const msg = payload.message ?? {}
     if (!isHex(msg.parentNode)) throw badReq('Invalid parentNode')

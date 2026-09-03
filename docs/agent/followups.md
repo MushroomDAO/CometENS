@@ -8,3 +8,4 @@
 - [ ] FU-2 · B · src=PR#23 · 2026-09-04 · design-system.test.ts 的「显式 color 声明」守卫只硬编码了 .btn-primary 与 .btn-primary:hover 两条,.btn:hover 与 .btn-ghost:hover 删掉 color 不会被抓到(评审已变异验证:两者均 23 passed)。改成数组遍历五条选择器
 - [ ] FU-3 · B · src=PR#23 · 2026-09-04 · 变异测试规程补一条:每组变异都要配一格「不该失败的对照」(如只动间距 token),否则「变异全红」与「该套测试恒红」分不开
 - [ ] FU-4 · B · src=PR#26 · 2026-09-04 · package.json 的 scripts 段已连撞四次冲突,且全部发生在新增行、顺序无语义。建议按字母排序并在规划里给每个任务预占脚本名,让 git 行级合并大多数时候能自动处理
+- [ ] FU-5 · B · src=T1.6.1 · 2026-09-04 · pnpm typecheck 的 tsconfig 只 include src/,workers/ 完全不在类型检查范围内——包括 #30 那个安全修复改的 workers/api/src/index.ts。唯一会编译 worker 的是 wrangler deploy。建议把 wrangler --dry-run 加进 preflight 检查链,或给 workers 单独配 tsconfig

@@ -23,6 +23,24 @@ export type RegisterMessage = {
   deadline: bigint
 }
 
+export const ApproveApplicationTypes = {
+  ApproveApplication: [
+    { name: 'id', type: 'string' },
+    { name: 'decision', type: 'string' },
+    { name: 'reason', type: 'string' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const
+
+export type ApproveApplicationMessage = {
+  id: string
+  decision: string
+  reason: string
+  nonce: bigint
+  deadline: bigint
+}
+
 export const SetAddrTypes = {
   SetAddr: [
     { name: 'node', type: 'bytes32' },
