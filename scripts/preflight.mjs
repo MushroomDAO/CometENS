@@ -53,7 +53,19 @@ export const KEY_ROLES = [
  * Set PREFLIGHT_KEY_SEPARATION=strict there (docs/DELEGATED-HOSTING.md says to).
  */
 export function separationSeverity(env) {
-  return String(env.PREFLIGHT_KEY_SEPARATION ?? '').toLowerCase() === 'strict' ? 'FAIL' : 'WARN'
+  const raw = env.PREFLIGHT_KEY_SEPARATION
+  if (raw === undefined || raw === '') return 'WARN'
+  const v = String(raw).toLowerCase()
+  if (v === 'strict') return 'FAIL'
+  if (v === 'warn') return 'WARN'
+  // Refusing to guess, for the same reason resolveMode does in server/gateway/approval.ts:
+  // guessing wrong here silently DOWNGRADES a safety gate. The person who sets this variable
+  // is a delegated operator at the exact moment they care most that separation is enforced —
+  // a typo like `stict` must not leave them believing strict is on while preflight stays green.
+  throw new Error(
+    `Invalid PREFLIGHT_KEY_SEPARATION "${raw}" — expected "strict" or "warn" (or unset). ` +
+      'Refusing to guess: guessing wrong turns a hard gate into a warning.',
+  )
 }
 
 /** First non-empty variable for a role, mirroring resolveKeySource in signer.ts. */
@@ -303,6 +315,14 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
   // the NORMAL case for the deployment shape TB.3 recommends (owner key cold, the rest held as
   // Workers secrets) — precisely the configuration whose separation most needs stating
   // honestly. Shaped like check 2, which already gets the "nothing to look at" case right.
+  // Validate the severity knob BEFORE anything can short-circuit past it.
+  //
+  // Called lazily it only ran when a shared key was actually found — so an operator who typed
+  // `stict` while their keys happened to be separate got no signal at all, and would meet the
+  // downgrade later, at the exact moment a key started being shared. The knob has to be
+  // checked because it was SET, not because it was needed.
+  const severity = separationSeverity(env)
+
   // A CONFLICT outranks everything else here: the workers will not start at all, so reporting
   // anything about separation first would bury the finding that stops the deployment dead.
   const conflicts = roleKeyConflicts(env)
@@ -331,7 +351,7 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
   const shared = [...byAddress.entries()].filter(([, roles]) => roles.length > 1)
   if (shared.length) {
     const [addr, roles] = shared[0]
-    add('3b', separationSeverity(env), 'key role separation', `${addr} serves ${roles.length} roles: ${roles.join(', ')}`,
+    add('3b', severity, 'key role separation', `${addr} serves ${roles.length} roles: ${roles.join(', ')}`,
       'one leak of this key compromises every role at once. Use a separate key per role; keep the owner key cold and out of the routine write path. Delegated deployments should set PREFLIGHT_KEY_SEPARATION=strict so this fails instead of warning.')
   } else if (byAddress.size === 0) {
     add('3b', 'WARN', 'key role separation', 'not verified — no signing keys visible here',
@@ -498,7 +518,18 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (committed === null) {
     console.error('note: could not read the committed wrangler.toml (no git?) — cannot tell your values from the repo\'s examples')
   }
-  const findings = staticChecks(env, envName, committed ?? undefined)
+  // A misconfigured variable is the user's mistake, not a crash. Without this a typo in
+  // PREFLIGHT_KEY_SEPARATION printed a Node stack trace — which reads as "the tool is broken",
+  // exactly the wrong conclusion when the tool is in fact refusing to guess on their behalf.
+  let findings
+  try {
+    findings = staticChecks(env, envName, committed ?? undefined)
+  } catch (e) {
+    const msg = e?.message ?? String(e)
+    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }, null, 2))
+    else console.error(`preflight: ${msg}`)
+    process.exit(2)
+  }
   findings.push(...(await probeChain(env, envName)))
 
   const output = render(findings, asJson)
