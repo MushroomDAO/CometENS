@@ -100,7 +100,7 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
 export function renderQueue(
   container: HTMLElement,
   apps: QueuedApplication[],
-  onDecide: (id: string, decision: 'approve' | 'reject') => void,
+  onDecide: (id: string, decision: 'approve' | 'reject', reason: string) => void,
 ): void {
   container.textContent = ''
   const pending = pendingFirst(apps)
@@ -128,6 +128,19 @@ export function renderQueue(
     meta.textContent = `授予给 ${app.owner} · 申请于 ${new Date(app.createdAt * 1000).toLocaleString()}`
     card.appendChild(meta)
 
+    // The reason box lives on the card rather than behind a prompt() dialog. prompt()
+    // collapses "cancelled" and "gave no reason" into the same value (null ?? '' === ''), so
+    // hitting Escape produced exactly the outcome the reject handler is written to avoid: a
+    // rejection the applicant cannot act on. Here there is no cancel path that produces a
+    // decision at all — clicking 拒绝 IS the confirmation.
+    const reason = document.createElement('input')
+    reason.type = 'text'
+    reason.className = 'input'
+    reason.placeholder = '拒绝理由(会展示给申请人;批准时忽略)'
+    reason.dataset.role = 'reason'
+    reason.style.marginTop = 'var(--sp-3)'
+    card.appendChild(reason)
+
     const actions = document.createElement('div')
     actions.className = 'row'
     actions.style.marginTop = 'var(--sp-3)'
@@ -139,7 +152,7 @@ export function renderQueue(
       b.type = 'button'
       b.className = cls
       b.textContent = label
-      b.addEventListener('click', () => onDecide(app.id, decision))
+      b.addEventListener('click', () => onDecide(app.id, decision, reason.value.trim()))
       actions.appendChild(b)
     }
     card.appendChild(actions)

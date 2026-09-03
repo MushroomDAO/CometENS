@@ -338,13 +338,12 @@ async function loadQueue(): Promise<void> {
 }
 
 /** Sign a decision and submit it. Only the contract owner's signature is accepted server-side. */
-async function decideOnApplication(id: string, decision: 'approve' | 'reject'): Promise<void> {
+async function decideOnApplication(
+  id: string,
+  decision: 'approve' | 'reject',
+  reason: string,
+): Promise<void> {
   const panel = new OpPanel(byId('queueResult')!, byId<HTMLButtonElement>('queueRefreshBtn'), '刷新')
-  let reason: string | undefined
-  if (decision === 'reject') {
-    // A rejection with no reason leaves the applicant with nothing to act on.
-    reason = window.prompt('拒绝理由(会展示给申请人,可留空):') ?? undefined
-  }
   try {
     panel.pending(decision === 'approve' ? '等待签名并发放…' : '等待签名…')
     const from = await ensureConnected()
