@@ -22,7 +22,7 @@
 
 ## F1.0 — 环境与配置修正(必须最先做,否则链上任务全挂)
 
-### T1.0.1 修正 RPC 与合约地址的配置漂移  `READY`
+### T1.0.1 修正 RPC 与合约地址的配置漂移  `PR_OPEN`
 - **优先级**:critical
 - **目标**:让后续所有链上任务连得上正确的网络与正确的合约。
 - **开发范围**:①`.env.op-sepolia` 示例与文档里把 OP Sepolia 默认 RPC 改为
@@ -34,8 +34,8 @@
 - **交付物**:更新的 env 示例/文档 + `pnpm check:chain`
 - **验收命令**:`pnpm check:chain` 必须成功输出 chainId=11155420 且
   `owner()` 非零(用公共 RPC,不依赖 Alchemy)
-- **涉及文件**:`.env.op-sepolia`、`scripts/`、`package.json`、`README.md`
-- **证据**:
+- **涉及文件**:`.env.op-sepolia`、`scripts/check-chain.mjs`、`package.json`
+- **证据**:分支 `fix/T1.0.1-chain-config-drift` → PR(见 progress.md)
 
 ---
 
