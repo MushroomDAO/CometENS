@@ -103,3 +103,17 @@ describe('explainError — contract errors are found wherever viem puts them', (
     expect(explainError({ shortMessage: 'execution reverted' }).message).toContain('execution reverted')
   })
 })
+
+describe('explainError — websocket URLs are redacted too', () => {
+  // Same gap fixed worker-side in #30: providers issue a wss:// endpoint carrying the same
+  // key. This is the LAST redaction before text reaches a public page.
+  it('redacts a key in a wss:// URL', () => {
+    const secret = 'WSS_CLIENT_SENTINEL'
+    const out = explainError(new Error(`socket failed: wss://opt-sepolia.g.alchemy.com/v2/${secret}`))
+    expect(out.message).not.toContain(secret)
+  })
+
+  it('the sentinel is detectable unsanitised (must-leak control)', () => {
+    expect('wss://h/v2/WSS_CLIENT_SENTINEL').toContain('WSS_CLIENT_SENTINEL')
+  })
+})

@@ -3,57 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CometENS 控制台</title>
-    <!-- Design system is the single source of styling truth. This page carries no
-         colour/spacing/type rules of its own; only layout glue lives below. -->
+    <title>CometENS — 社区域名分发</title>
     <link rel="stylesheet" href="/src/styles/design-system.css">
     <style>
         /* Layout glue only — every value comes from a design-system token. */
-        .entry { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
-        .entry > div { min-width: 0; }
-        .page-head { padding: var(--sp-6) 0 var(--sp-4); }
+        .hero { padding: var(--sp-8) 0 var(--sp-6); text-align: center; }
+        .hero h1 { margin: 0 0 var(--sp-3); font-size: var(--fs-2xl); line-height: 1.25; }
+        .hero p { margin: 0 auto; max-width: 46ch; color: var(--c-text-muted); }
+        .hero .row { justify-content: center; margin-top: var(--sp-5); }
+
+        /* The core loop, drawn rather than described. */
+        .flow { display: grid; gap: var(--sp-3); }
+        .flow-step { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-3); align-items: baseline; }
+        .flow-step .n {
+            width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center;
+            background: var(--c-accent); color: var(--c-accent-fg);
+            font-size: var(--fs-xs); font-weight: 600;
+        }
+        .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-4); }
+        .modes .card { margin-top: 0; display: flex; flex-direction: column; }
+        .modes .card .grow { flex: 1; }
+        .section-title { margin: var(--sp-7) 0 var(--sp-3); font-size: var(--fs-lg); font-weight: 600; }
+        .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-3); }
+        .links a { display: block; text-decoration: none; color: inherit; }
+        .links a:hover .card { border-color: var(--c-text-muted); }
+        footer { margin: var(--sp-8) 0 var(--sp-6); font-size: var(--fs-xs); color: var(--c-text-muted); text-align: center; }
     </style>
 </head>
 <body>
 
 <div class="container">
 
-    <header class="page-head">
-        <h2 class="card-title">CometENS 控制台</h2>
-        <p class="card-sub">选择你要管理的分支与域名体系</p>
+    <header class="hero">
+        <h1>给社区成员一个属于他们自己的名字</h1>
+        <p>
+            社区拥有一个 <code>.eth</code> 域名,成员加入时获得它下面的一个子域名。
+            这个名字归成员本人所有,社区收不回去。
+        </p>
+        <div class="row">
+            <a class="btn btn-primary" href="/lookup.html">查一个名字</a>
+            <a class="btn" href="#modes">怎么用起来</a>
+        </div>
+        <p style="margin-top: var(--sp-4)">
+            <span class="badge badge-warn">当前仅测试网</span>
+        </p>
     </header>
 
-    <div class="card entry">
-        <div>
-            <strong>.box（OP / my.box）</strong>
-            <div class="muted">现有 ENS-tool 的 .box 流程（等待官方接口答复）。</div>
+    <div class="card">
+        <h2 class="card-title">它是怎么运作的</h2>
+        <p class="card-sub">三步,没有别的。</p>
+        <div class="flow">
+            <div class="flow-step">
+                <span class="n">1</span>
+                <div>
+                    社区拥有一级域名,比如 <code>community.eth</code>。
+                    <div class="muted">这是社区在 ENS 上正常持有的名字,不需要交给任何人。</div>
+                </div>
+            </div>
+            <div class="flow-step">
+                <span class="n">2</span>
+                <div>
+                    成员加入时被授予一个子域名,比如 <code>alice.community.eth</code>。
+                    <div class="muted">由系统自动授予,或由管理员手动发放。成员不需要注册账号、不需要登录。</div>
+                </div>
+            </div>
+            <div class="flow-step">
+                <span class="n">3</span>
+                <div>
+                    这个名字全网可解析,而且<strong>归成员自己所有</strong>。
+                    <div class="muted">
+                        它是一枚 ERC-721,成员可以自己改记录、可以转让。社区跑路了,名字还在他手里。
+                    </div>
+                </div>
+            </div>
         </div>
-        <a class="btn btn-primary" href="/box.html">进入 .box 管理</a>
     </div>
 
-    <div class="card entry">
-        <div>
-            <strong>Register Subdomain</strong>
-            <div class="muted">User-facing subdomain registration under the configured root domain.</div>
+    <h2 class="section-title" id="modes">两种用法</h2>
+    <div class="modes">
+        <div class="card">
+            <h3 class="card-title">自己部署</h3>
+            <p class="card-sub">你掌握所有钥匙,不需要信任任何人。</p>
+            <div class="grow muted">
+                拿这个仓库跑一套,合约 owner 是你的地址。发放、改记录、解析全在你手里。
+                代价是这些钥匙要你自己保管。
+            </div>
+            <div class="row" style="margin-top: var(--sp-4)">
+                <span class="badge">Apache-2.0 开源</span>
+            </div>
         </div>
-        <a class="btn btn-primary" href="/register.html">Register</a>
+
+        <div class="card">
+            <h3 class="card-title">交给运营方代跑</h3>
+            <p class="card-sub">域名所有权仍是你的,解析去向随时可收回。</p>
+            <div class="grow muted">
+                只需在 ENS 上做一次 <code>setResolver</code>。但要清楚:
+                <strong>已发出的子域,运营方在技术上仍能覆写和收回</strong> ——
+                这是那套架构的必然结果,不是可以承诺掉的东西。
+            </div>
+            <div class="row" style="margin-top: var(--sp-4)">
+                <a class="btn btn-ghost" href="https://github.com/MushroomDAO/CometENS/blob/main/docs/DELEGATED-HOSTING.md">先读清楚你交出了什么 →</a>
+            </div>
+        </div>
     </div>
 
-    <div class="card entry">
-        <div>
-            <strong>Admin Management</strong>
-            <div class="muted">Owner-facing interface: query records, set addr, set text via EIP-712.</div>
-        </div>
-        <a class="btn btn-primary" href="/admin.html">Admin</a>
+    <h2 class="section-title">入口</h2>
+    <div class="links">
+        <a href="/lookup.html">
+            <div class="card">
+                <strong>查询域名</strong>
+                <div class="muted">输入名字看归属与解析状态。免登录,不连钱包。</div>
+            </div>
+        </a>
+        <a href="/admin.html">
+            <div class="card">
+                <strong>管理控制台</strong>
+                <div class="muted">运营者手动授予子域、管理 registrar 授权、查改记录。</div>
+            </div>
+        </a>
+        <a href="/api-docs.html">
+            <div class="card">
+                <strong>API 文档</strong>
+                <div class="muted">上游系统在用户加入时自动为他申领子域名。</div>
+            </div>
+        </a>
+        <a href="/box.html">
+            <div class="card">
+                <strong>.box 管理</strong>
+                <div class="muted">现有 ENS-tool 的 .box 流程(等待官方接口开放)。</div>
+            </div>
+        </a>
     </div>
 
-    <div class="card entry">
-        <div>
-            <strong>Upstream API</strong>
-            <div class="muted">Machine-to-machine API for apps that register subdomains programmatically.</div>
-        </div>
-        <a class="btn btn-primary" href="/api-docs.html">API Docs</a>
-    </div>
+    <footer>
+        当前部署仅覆盖测试网(OP Sepolia / Ethereum Sepolia)。主网尚未上线。<br>
+        Apache-2.0 · <a href="https://github.com/MushroomDAO/CometENS">源码</a>
+    </footer>
 
 </div>
 

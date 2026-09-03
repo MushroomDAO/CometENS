@@ -101,7 +101,10 @@ export function explainError(e: unknown): { message: string; hint?: string } {
   }
   // Never echo a URL back: provider keys live in RPC URL paths and this text is copied
   // into chat logs and bug reports.
-  return { message: raw.replace(/https?:\/\/[^\s"']+/g, '(已隐去 URL)') || '操作失败' }
+  // wss:// included for the same reason as the worker-side sanitiser (#30): providers
+  // issue a websocket endpoint alongside the HTTP one, carrying the same key. This is the
+  // LAST redaction before text reaches a public page.
+  return { message: raw.replace(/(?:https?|wss?):\/\/[^\s"']+/g, '(已隐去 URL)') || '操作失败' }
 }
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
