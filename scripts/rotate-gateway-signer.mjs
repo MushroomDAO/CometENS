@@ -226,6 +226,18 @@ if (revokeOld && (!newSigner || !/^0x[0-9a-fA-F]{40}$/.test(newSigner))) {
     'the replacement must be named so this script can verify it is authorised BEFORE revoking. Revoking the last signer takes resolution down.',
   )
 }
+// The "replacement is authorised" guard below is individually correct but does not imply
+// "replacement is a DIFFERENT key from the one being revoked". Passing the same address twice
+// satisfies it — signers(new) is true precisely because it IS the old signer — and the revoke
+// then removes the only authorised signer, taking resolution down while every check reports
+// success. The two addresses sit side by side on screen during a rotation; copying the wrong
+// one is an ordinary slip, not an exotic input.
+if (revokeOld && newSigner.toLowerCase() === oldSigner.toLowerCase()) {
+  bail(
+    '--new-signer and --old-signer are the same address',
+    'revoking it would remove the only authorised signer and take global resolution down immediately',
+  )
+}
 if (!rpcUrl) bail(`${net.rpcVar} is not set`, 'an L1 RPC is required to send these transactions')
 
 const ownerKey = process.env.RESOLVER_OWNER_PRIVATE_KEY ?? process.env.PRIVATE_KEY_JASON
@@ -260,7 +272,19 @@ if (revokeOld) {
   await pub.waitForTransactionReceipt({ hash: tx })
   const stillOn = await pub.readContract({ address: resolver, abi: RESOLVER_ABI, functionName: 'signers', args: [oldSigner] })
   if (stillOn) bail('removeSigner did not take effect', 'signers(old) is still true — investigate before assuming the old key is retired')
-  console.log(`  ok — signers(${oldSigner}) = false   tx ${tx}`)
+
+  // Assert the invariant we actually care about, directly, AFTER the write: a valid signer
+  // still exists. The pre-checks are pairwise reasoning about inputs; this reads the chain.
+  // If it ever trips, resolution is already down and the operator needs to know now rather
+  // than discover it from a user report.
+  const replacementLive = await pub.readContract({ address: resolver, abi: RESOLVER_ABI, functionName: 'signers', args: [newSigner] })
+  if (!replacementLive) {
+    console.error('CRITICAL  the revoke succeeded but no authorised signer remains.')
+    console.error(`          Restore immediately:  addSigner(${oldSigner})`)
+    console.error('          Resolution is DOWN until a signer is authorised again.')
+    process.exit(1)
+  }
+  console.log(`  ok — signers(${oldSigner}) = false, signers(${newSigner}) = true   tx ${tx}`)
   console.log('')
   console.log('Rotation complete. Destroy the old private key and re-run `pnpm preflight`')
   console.log('to confirm the key-role-reuse warning has changed.')
