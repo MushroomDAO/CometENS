@@ -39,6 +39,7 @@ import {
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
+import { createSigner } from '../../../server/gateway/signer'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -363,7 +364,9 @@ async function handleResolveSigned(
   const result = await handleResolve(calldata, env)
   const expires = BigInt(Math.floor(Date.now() / 1000) + 3600)
 
-  const signer = privateKeyToAccount(env.PRIVATE_KEY_SUPPLIER as Hex)
+  // Same seam as the API worker: role → account, so the gateway signing key can move to a
+  // KMS backend (TB.3) without changing the EIP-3668 logic below.
+  const signer = createSigner('gateway', env as unknown as Record<string, string | undefined>)
 
   const messageHash = keccak256(
     encodePacked(
