@@ -75,32 +75,23 @@ jobs:
       # Installed before the suite because test/e2e spawns `anvil`. Without it those files fail
       # rather than skip, and e2e is where the contract-invariant assertions live (#45).
       #
-      # Retried because this step is the gate's only unavoidable network dependency, and it has
-      # already failed once for `curl: (35) Recv failure: Connection reset by peer` — a red gate
-      # for a reason with nothing to do with the code under review. That failure mode is the
-      # corrosive kind: it teaches people to re-run until green, and that action is
-      # indistinguishable from ignoring a real failure.
+      # ⚠️ THIS STEP DOWNLOADS FROM github.com ON EVERY RUN (foundryup, then the toolchain).
+      # It has already reddened the gate once with
+      #   foundryup-init: curl: (35) Recv failure: Connection reset by peer
+      # and nothing else ran, so the failure had nothing to do with the code under review.
       #
-      # Three attempts, and the step still FAILS if all three do — no `continue-on-error`, which
-      # would trade a flaky gate for a silent one.
-      # Plain bash rather than a retry action: this repo carries one runtime dependency on
-      # purpose, and a third-party action for a six-line loop does not fit that. The loop below
-      # is written so that exhausting the attempts FAILS — the naive `for … done` version exits
-      # 0 after the last failed attempt, which would turn a flaky gate into a silent one.
+      # **If this step fails with a curl / connection error, suspect the download, not the
+      # code** — attribute first, then re-run. Blind re-running is what turns a flaky gate into
+      # a habit of ignoring real failures; re-running a failure already pinned to this line is
+      # not the same act.
+      #
+      # I tried replacing this with a hand-rolled `curl | bash` + retry loop so the transient
+      # case would self-heal. It failed three attempts in a row on
+      # `~/.foundry/bin/foundryup: No such file or directory` — the installer does not put it
+      # where I assumed. That traded a rare network flake for a permanent breakage I owned, so
+      # it went back. If a retry is added later, wrap THIS action rather than reimplementing it.
       - name: Install Foundry
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if curl -fsSL https://foundry.paradigm.xyz | bash && "$HOME/.foundry/bin/foundryup"; then
-              echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
-              exit 0
-            fi
-            echo "foundry install attempt $attempt failed"
-            sleep 15
-          done
-          echo "::error::foundry install failed after 3 attempts"
-          exit 1
-
+        uses: foundry-rs/foundry-toolchain@v1
       - name: Contracts must compile before the e2e suite deploys them
         run: forge build
         working-directory: contracts
