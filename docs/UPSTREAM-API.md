@@ -190,15 +190,3 @@ export async function grantSubdomain(label: string, owner: string) {
 `/v1/register` 的调用方是机器,至少一次投递、重试是正常行为,一个重复投递不该变成
 集成方必须特判的错误。`/register` 的调用方是人,重复提交是误操作 —— 静默"成功"会让
 他以为发生了什么事。所以两者语义不同是**刻意的**,不是遗漏。
-
----|---|---|
-| 未注册 | 正常注册 | `200 { ok, name, node, txHash }` |
-| **已属于同一个 owner** | **幂等,不发交易** | `200 { ok, name, node, alreadyRegistered: true }`(无 `txHash`) |
-| 已属于**别人** | 拒绝 | `409 LABEL_TAKEN` |
-
-幂等那一档是刻意的:上游系统会重试,一个重复投递不该变成集成方必须特判的错误。
-但它**可区分** —— 没有 `txHash` 且带 `alreadyRegistered: true`,
-集成方能分清「本来就已经是这样」和「写入静默没发生」。
-
-> 合约层挡不住这个:worker EOA 就是合约 owner,链上没有任何东西阻止覆写。
-> 这条规则是唯一能存在的守卫。
