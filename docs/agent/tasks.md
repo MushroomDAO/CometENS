@@ -87,7 +87,7 @@
 - **涉及文件**:`index.html` 或新页、`src/`、`test/unit/`
 - **证据**:
 
-### T1.1.4 管理控制台产品化(管理员手动授予)  `READY`
+### T1.1.4 管理控制台产品化(管理员手动授予)  `PR_OPEN`
 - **优先级**:high
 - **目标**:把 `admin.html` 从 demo 表单堆变成运营者用得下去的控制台。
 - **开发范围**:用设计系统重做;把"手动授予子域"做成第一动作(标签 + 目标地址 → 授予);
@@ -96,7 +96,12 @@
 - **明确不做**:不做用户账号体系;不改后端端点契约。
 - **依赖**:T1.1.1
 - **交付物**:产品级 `admin.html` + `src/admin.ts` 重构
-- **验收命令**:`pnpm build && pnpm typecheck && pnpm vitest run test/unit/ && node -e "const s=require('fs').readFileSync('src/admin.ts','utf8'); if(/\balert\(/.test(s)) throw new Error('仍在用 alert 做用户反馈')"`
+- **验收命令**:
+  `pnpm vitest run test/unit/ui-state.test.ts test/unit/page-wiring.test.ts && pnpm build && pnpm typecheck && node -e "const s=require('fs').readFileSync('src/admin.ts','utf8'); if(/\balert\(/.test(s)) throw new Error('仍在用 alert 做用户反馈')"`
+  (原来那半是 `pnpm vitest run test/unit/`,今天就 exit 0,分不出做没做;
+  改指向本任务新增的 `test/unit/ui-state.test.ts`。
+  alert 那条判据**本身有效**——`src/admin.ts` 改前确有 1 处,反例对照也命中;
+  但它是纯文本匹配,分不清代码与注释,写注释时要避开 `alert(` 字面量)
 - **涉及文件**:`admin.html`、`src/admin.ts`
 - **证据**:
 
@@ -104,7 +109,7 @@
 
 ## F1.2 — 自部署路径
 
-### T1.2.1 preflight 配置校验器  `PR_OPEN`
+### T1.2.1 preflight 配置校验器  `DONE`
 - **优先级**:high
 - **目标**:部署前就把错配拦下来,而不是运行时炸。
 - **开发范围**:按 spec.md §1 实现 `scripts/preflight.ts`(检查项、人话建议、
@@ -243,7 +248,7 @@
 
 ## F1.5 — 签名器抽象与密钥分离(TB.3 落地)
 
-### T1.5.0 网关签名钥轮换脚本 + runbook(**不依赖任何待决事项**)  `PR_OPEN`
+### T1.5.0 网关签名钥轮换脚本 + runbook(**不依赖任何待决事项**)  `DONE`
 - **优先级**:high
 - **目标**:把三钥复用里**最容易解掉的一把**先解掉:那把 7×24 在线的 CCIP-Read 签名钥。
 - **为什么现在就能做**:网关签名用 `PRIVATE_KEY_SUPPLIER`
