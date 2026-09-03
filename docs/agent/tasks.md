@@ -211,15 +211,17 @@
 - **涉及文件**:`docs/DELEGATED-HOSTING.md`、`docs/UPSTREAM-API.md`
 - **证据**:
 
-### T1.3.3 上游授予路径 e2e 测试  `READY`
+### T1.3.3 上游授予路径 e2e 测试  `PR_OPEN`
 - **优先级**:mid
 - **目标**:证明「上游签名 → 子域真的 mint 给目标地址」,而不是只测了签名校验。
 - **开发范围**:补 `test/e2e/` 用例:构造 personal_sign 请求打 `/v1/register`,
   断言返回 `{name,node,txHash}` 且 `subnodeOwner(node)` == 目标地址;
   覆盖失败分支(签名者不在白名单 / parent 不在白名单 / 标签已占用)。
 - **依赖**:无
-- **交付物**:`test/e2e/upstream-grant.test.ts`
-- **验收命令**:`pnpm vitest run test/e2e/upstream-grant.test.ts`
+- **交付物**:~~`test/e2e/upstream-grant.test.ts`~~ → **改为扩充已有的 `test/e2e/upstream-api.test.ts`**。
+  立项时假设"没有覆盖",实际上它已经断言了 `subnodeOwner(node) == 目标地址`等 7 条。
+  新建文件会是重复造(plan.md §A.3)。真正缺的是台账列的另外两条分支,已补。
+- **验收命令**:`pnpm vitest run test/e2e/upstream-api.test.ts test/unit/v1-register-existing.test.ts`
 - **涉及文件**:`test/e2e/upstream-grant.test.ts`
 - **证据**:
 

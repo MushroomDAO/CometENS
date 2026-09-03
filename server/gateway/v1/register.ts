@@ -25,7 +25,40 @@ export interface V1RegisterResult {
   ok: boolean
   name: string
   node: Hex
-  txHash: Hex | undefined
+  txHash?: Hex | undefined
+  /** True when the name already belonged to the requested owner and nothing was written. */
+  alreadyRegistered?: boolean
+}
+
+/** Reads the current on-chain owner of a node. Zero address means unregistered. */
+export type SubnodeOwnerReader = (node: Hex) => Promise<string>
+
+const ZERO = '0x0000000000000000000000000000000000000000'
+
+/**
+ * What to do about a label that already exists.
+ *
+ * Exported and pure so the rule is testable without a chain. The three cases are genuinely
+ * different and collapsing any two of them is a bug:
+ *
+ *   unregistered      → register it
+ *   already the same  → idempotent success. Upstream systems retry, and a duplicate job must
+ *                       not turn into an error the integrator has to special-case.
+ *   someone ELSE's    → refuse. This endpoint previously overwrote it and returned ok:true,
+ *                       silently transferring a member's name to a different address — which
+ *                       contradicts the one thing this product promises about subdomains.
+ */
+export function decideOnExisting(
+  existingOwner: string,
+  requestedOwner: string,
+): { action: 'register' | 'noop' } | { action: 'refuse'; status: number; message: string } {
+  if (!existingOwner || existingOwner.toLowerCase() === ZERO) return { action: 'register' }
+  if (existingOwner.toLowerCase() === requestedOwner.toLowerCase()) return { action: 'noop' }
+  return {
+    action: 'refuse',
+    status: 409,
+    message: `Label is already registered to ${existingOwner}. Refusing to reassign it.`,
+  }
 }
 
 export async function handleV1Register(
@@ -33,6 +66,7 @@ export async function handleV1Register(
   allowedSigners: string[],
   rootDomain: string,
   writer: L2RecordsWriter | undefined,
+  readSubnodeOwner: SubnodeOwnerReader,
 ): Promise<V1RegisterResult> {
   const { signature, timestamp } = payload
 
@@ -81,6 +115,21 @@ export async function handleV1Register(
   const addrTarget = (payload.addr && isAddress(payload.addr) ? payload.addr : owner) as Address
   // Address is a validated 20-byte hex string; viem encodes it correctly for `bytes calldata`.
   const addrBytes = addrTarget as Hex
+
+  // Refuse to reassign someone else's name. Checked here rather than relying on the contract:
+  // the worker EOA is the contract owner, so on-chain nothing stops the overwrite — the only
+  // guard that can exist is this one.
+  const existing = await readSubnodeOwner(node)
+  const decision = decideOnExisting(existing, owner)
+  if (decision.action === 'refuse') {
+    throw Object.assign(new Error(decision.message), { status: decision.status, code: 'LABEL_TAKEN' })
+  }
+  if (decision.action === 'noop') {
+    // Already exactly what was asked for. Report success without a transaction rather than
+    // paying gas to write the same value, and say so — an integrator seeing no txHash should
+    // be able to tell "already done" from "the write silently did not happen".
+    return { ok: true, name: fullName, node, alreadyRegistered: true }
+  }
 
   if (!writer) {
     throw Object.assign(new Error('Writer not configured on server'), { status: 503 })
