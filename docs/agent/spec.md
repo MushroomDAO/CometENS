@@ -130,7 +130,8 @@ CometENS 是组件,不做用户登录。子域名由**授予**产生,共两条�
 ```
 POST /v1/register
 鉴权:personal_sign,recover 出的签名者必须 ∈ UPSTREAM_ALLOWED_SIGNERS
-入参:{ label, owner, parent }
+入参:{ label, owner, addr?, timestamp, signature } —— **没有 parent**,
+父域名恒取服务端的 ROOT_DOMAIN(此前写成含 parent,与实现不符,已更正)
 返回:{ ok: true, name, node, txHash }
 ```
 本轮要补的**不是**端点,而是:
