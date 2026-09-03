@@ -92,18 +92,125 @@ describe('design system — token coverage', () => {
     expect([...dark].filter((t) => !light.has(t))).toEqual([])
   })
 
-  it('every accent surface states its own foreground', () => {
-    // Guards the regression directly: if a future edit drops `color` from either accent rule,
-    // `a:hover` takes over again and the label disappears on hover.
-    // `color:` alone is NOT a usable matcher — `border-color:` contains it, so the assertion
-    // passes even when the declaration is absent. Verified by deleting the hover `color` line:
-    // the naive version stayed green. Anchor on a declaration boundary instead.
-    const COLOR_DECL = /(^|[;{]\s*)color\s*:/m
-    const primary = CSS.match(/\.btn-primary \{([^}]*)\}/)![1]
-    const primaryHover = CSS.match(/\.btn-primary:hover:not\(:disabled\) \{([^}]*)\}/)![1]
-    expect(primary).toMatch(COLOR_DECL)
-    expect(primaryHover).toMatch(COLOR_DECL)
-    // Control: the matcher must reject a block that only has border-color.
+  // `color:` alone is NOT a usable matcher — `border-color:` contains it, so the assertion
+  // passes even when the declaration is absent. Verified by deleting the hover `color` line:
+  // the naive version stayed green. Anchor on a declaration boundary instead.
+  // The `\s*` must sit OUTSIDE the alternation. Written as `(^|[;{]\s*)` the `^` branch
+  // demands `color` at column 0, so a declaration that is FIRST in its block — captured
+  // without the opening brace — is missed. Today `.btn-primary` passes only because `color`
+  // happens to come third, after a `;`. Reordering the declarations would turn this guard red
+  // for no real reason, and a guard that cries wolf gets deleted.
+  const COLOR_DECL = /(^|[;{])\s*color\s*:/m
+
+  /**
+   * Every rule that paints a background, DERIVED from the stylesheet.
+   *
+   * FU-2: this used to name `.btn-primary` and its `:hover` explicitly, so `.btn:hover` and
+   * `.btn-ghost:hover` — which have the same exposure — were never checked. A hand-written
+   * list guards the rules someone remembered; the bug it exists to catch is precisely the one
+   * nobody remembered.
+   */
+  /** Selectors in scope for a given stylesheet — exported shape so the predicate is testable. */
+  function inScope(css: string): string[] {
+    return rulesIn(css).map((r) => r.selector)
+  }
+
+  function backgroundRules(): Array<{ selector: string; body: string }> {
+    return rulesIn(CSS)
+  }
+
+  function rulesIn(source: string): Array<{ selector: string; body: string }> {
+    const out: Array<{ selector: string; body: string }> = []
+    // Comments must go first. A `/* … */` block sitting above a rule gets swallowed into the
+    // selector capture, so `.btn-primary:hover` and `.badge` — both of which carry explanatory
+    // comments — were silently absent from the derived set. Exactly the failure the control
+    // exists for, and it only showed up when I checked the list against the stylesheet by eye.
+    const cssNoComments = source.replace(/\/\*[\s\S]*?\*\//g, '')
+    for (const m of cssNoComments.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = m[1].trim()
+      const body = m[2]
+      // Same anchor bug as COLOR_DECL, opposite consequence: here the predicate decides
+      // whether a rule is IN SCOPE, so getting it wrong selected nothing at all and the loop
+      // ran zero assertions. A selection predicate fails silent; an assertion predicate fails
+      // loud. The control below is what surfaced it.
+      // In scope: anything that CHANGES the background, plus `:hover` — never `:focus`.
+      //
+      // The question is "does this rule change the background", not "is it a hover or a focus".
+      // `:hover` earns its place because it has a concrete opponent: the global `a:hover` will
+      // come for the foreground. `:focus-visible` has no such opponent, and most designs
+      // deliberately change only the outline and inherit the base colour — demanding an
+      // explicit `color` there punishes the correct way to write it.
+      //
+      // The false-positive side is the expensive one: a rule that keeps accusing good code
+      // gets disabled, and everything it legitimately caught goes with it. Same lesson as the
+      // address guard in #41, arrived at from the other direction.
+      const paints = /(^|[;{])\s*background(-color)?\s*:/m.test(body)
+      const isHover = /:hover/.test(selector)
+      if (!paints && !isHover) continue
+      // Only interactive surfaces carrying text: those are what `a:hover` can repaint.
+      // Deliberately loose on the pseudo-class tail — an earlier strict pattern failed to
+      // match `.btn:hover:not(:disabled)` and silently selected nothing, which the control
+      // below caught. Grouped selectors are skipped: their bodies are shared, so attributing
+      // a missing `color` to one of them would be arbitrary.
+      if (!/^\.(btn|badge|chip)/.test(selector)) continue
+      if (selector.includes(',')) continue
+      // A transparent background paints nothing, so it cannot trap text against itself —
+      // unless it is also a hover state, where a:hover still applies.
+      if (!isHover && /transparent|none/.test(body.match(/background(-color)?\s*:([^;]*)/)?.[2] ?? '')) continue
+      out.push({ selector, body })
+    }
+    return out
+  }
+
+  it('the derived rule set is non-empty and includes the known ones (control)', () => {
+    // Without this, a selector regex that matched nothing would make the loop below vacuous —
+    // zero assertions, all green.
+    const selectors = backgroundRules().map((r) => r.selector)
+    // A FLOOR, not a count, was the wrong assertion: `>= 2` is exactly the size of the
+    // hardcoded list this derivation replaced, so degrading the prefix predicate back to
+    // `^\.btn-primary|^\.btn:hover` left the suite fully green while `.btn-ghost:hover` —
+    // the rule FU-2 was filed to cover — dropped silently out of scope. pr-daemon measured it:
+    // 27 passed on that mutation. And `>= 2` was dead anyway, implied by the toContain lines.
+    //
+    // Pinning the exact count means any change to what is covered has to be acknowledged here.
+    expect(selectors).toHaveLength(9)
+    expect(selectors).toContain('.btn-primary')
+    // Named explicitly because these two were the ones the comment-stripping bug hid, and
+    // FU-2's whole point is that a hand-picked list misses what nobody remembered.
+    expect(selectors).toContain('.btn-primary:hover:not(:disabled)')
+    expect(selectors).toContain('.btn:hover:not(:disabled)')
+  })
+
+  it.each(backgroundRules().map((r) => r.selector))(
+    '%s states its own foreground',
+    (selector) => {
+      // If a painted surface omits `color`, the global `a:hover` rule (specificity 0,1,1) takes
+      // over and the label disappears against the new background.
+      const rule = backgroundRules().find((r) => r.selector === selector)!
+      expect(rule.body).toMatch(COLOR_DECL)
+    },
+  )
+
+  // pr-daemon's two rows for the focus question. The first is the load-bearing one: it is the
+  // only input on which "flag every interactive state" and "flag whatever changes the
+  // background" give DIFFERENT answers. The second gives the same answer either way, so on its
+  // own it cannot tell the two rules apart — which is exactly why it is here as a pair.
+  it('a focus rule that only changes the outline is NOT in scope', () => {
+    const css = '.btn:focus-visible { outline: 2px solid var(--c-ring); }'
+    expect(inScope(css)).toEqual([])
+  })
+
+  it('a focus rule that DOES change the background IS in scope (control)', () => {
+    const css = '.btn:focus-visible { background: var(--c-accent); }'
+    expect(inScope(css)).toEqual(['.btn:focus-visible'])
+  })
+
+  it('a hover rule with no background is still in scope — it has a:hover to fight', () => {
+    const css = '.btn:hover { color: var(--c-text); }'
+    expect(inScope(css)).toEqual(['.btn:hover'])
+  })
+
+  it('the matcher rejects a block that only has border-color (control)', () => {
     expect('  background: red;\n  border-color: blue;\n').not.toMatch(COLOR_DECL)
   })
 })
