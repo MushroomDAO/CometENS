@@ -185,7 +185,7 @@
 - **涉及文件**:`scripts/delegate.ts`、`contracts/test/L2RecordsV3.t.sol`、`package.json`
 - **证据**:
 
-### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `READY`
+### T1.3.2 DELEGATED-HOSTING.md + 上游 API 接入文档  `PR_OPEN`
 - **优先级**:mid
 - **目标**:让社区看懂"我交出了什么、保留了什么、怎么收回";让上游系统能照着接 API。
 - **开发范围**:写 `docs/DELEGATED-HOSTING.md`(所有权 vs 管理权、授权/撤销流程、
