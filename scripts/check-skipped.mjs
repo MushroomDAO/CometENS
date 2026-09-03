@@ -96,7 +96,14 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
 
   const n = skippedCount(report)
   if (n === EXPECTED_SKIPPED) {
-    console.log(`check-skipped: ${n} skipped of ${total} (>= ${MIN_TOTAL}), as expected`)
+    // Headroom on the SUCCESS path on purpose. MIN_TOTAL is an ABSOLUTE floor: tightest
+    // today, looser every time a test is added. At total 900 against a floor of 664 you could
+    // delete 236 assertions and still pass. Nobody goes looking for that — but a number that
+    // has grown absurd gets noticed by whoever reads this line, which is the point of putting
+    // a future misreading where it will actually be read.
+    console.log(
+      `check-skipped: ${n} skipped of ${total} (floor ${MIN_TOTAL}, headroom ${total - MIN_TOTAL}), as expected`,
+    )
     process.exit(0)
   }
   console.error(
