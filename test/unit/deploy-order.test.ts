@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { getChain } from '../../workers/api/src/index'
 // @ts-expect-error — plain .mjs module, no type declarations
 import {
   requiredEndpoints, classify, redact, readFrontendSources,
@@ -171,5 +172,30 @@ describe('two independent counts of the same call sites', () => {
     // Ties the pinned number to the arithmetic: if the gap list and the count difference ever
     // disagree, one of the three functions is measuring something else.
     expect(countApiMentions(sources) - countPathHits(sources)).toBe(unreadableCallSites(sources).length)
+  })
+})
+
+describe('NETWORK=local is opt-in by exact string, never a fallback', () => {
+  // This property had NO criterion: mutating the branch into a fallback left the whole suite
+  // green, and it could not have been otherwise — the only test that sets NETWORK sets it to
+  // 'local'. A property nothing can falsify is not guarded, it is just asserted in a comment.
+  //
+  // It matters because the chain id is baked into the EIP-712 domain: a typo in NETWORK on a
+  // real deployment would silently point it at a devnet chain id, and every signature would
+  // then be verified against the wrong domain.
+  it('an unrecognised NETWORK still resolves to OP Sepolia', () => {
+    // THE load-bearing row. A fallback implementation returns 31337 here.
+    expect(getChain({ NETWORK: 'locl' } as any).id).toBe(11155420)
+    expect(getChain({} as any).id).toBe(11155420)
+  })
+
+  it('the exact string opts in (control)', () => {
+    // Without this, "always OP Sepolia" would satisfy the assertion above and make the local
+    // branch dead code.
+    expect(getChain({ NETWORK: 'local' } as any).id).toBe(31337)
+  })
+
+  it('mainnet is still reachable (control)', () => {
+    expect(getChain({ NETWORK: 'op-mainnet' } as any).id).toBe(10)
   })
 })

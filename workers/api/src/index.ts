@@ -27,7 +27,7 @@ import {
   type Hex,
   type Address,
 } from 'viem'
-import { optimismSepolia, optimism } from 'viem/chains'
+import { optimismSepolia, optimism, foundry } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { L2RecordsWriterV2 } from '../../../server/gateway/writer/L2RecordsWriterV2'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
@@ -1023,8 +1023,28 @@ function getRootDomains(env: Env): string[] {
   return env.ROOT_DOMAIN ? [env.ROOT_DOMAIN] : []
 }
 
-function getChain(env: Env) {
-  return env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
+/**
+ * Which chain this deployment writes to.
+ *
+ * `local` is opt-in by exact string and never a fallback: an unrecognised NETWORK still lands
+ * on OP Sepolia, as before. Making it a fallback would mean a typo in NETWORK silently pointed
+ * a real deployment at a devnet chain id, and every signature would then verify against the
+ * wrong EIP-712 domain.
+ *
+ * It exists because the chain id is baked into the EIP-712 domain, so nothing that signs can
+ * be exercised end-to-end against a local node without it — the approval flow included.
+ *
+ * Not a test hook, by this test: does the branch change WHAT THE CODE DOES for a given
+ * (chain, signature), or only WHICH CHAIN was selected? Only the latter — `getChain` was
+ * already a deployment axis switching on NETWORK and this adds a third value to it. A test
+ * hook is dangerous because it makes the thing under test differ from the thing that ships;
+ * a configuration axis does not create that fork, so "is there a second user" need not be
+ * answered.
+ */
+export function getChain(env: Env) {
+  if (env.NETWORK === 'op-mainnet') return optimism
+  if (env.NETWORK === 'local') return { ...foundry, id: 31337 }
+  return optimismSepolia
 }
 
 function getChainId(env: Env): number {
