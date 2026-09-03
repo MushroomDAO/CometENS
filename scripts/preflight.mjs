@@ -41,10 +41,24 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 /** wrangler.toml carries a zero-address placeholder for undeployed envs — not a real value. */
 const nonZero = (v) => (v && v.toLowerCase() !== ZERO_ADDRESS ? v : undefined)
 
-/** Load .env.local into a plain object without touching process.env — keeps checks pure. */
-export function readEnvFile(root = REPO_ROOT) {
+/**
+ * Load Vite's dotenv files into a plain object without touching process.env.
+ *
+ * Reading only .env.local left the detection surface narrower than the exposure surface:
+ * Vite also loads .env and .env.[mode], so a VITE_-prefixed key placed in .env would have
+ * been reported PASS. Precedence follows Vite's own (more specific wins).
+ */
+export function readEnvFiles(root = REPO_ROOT, mode = 'production') {
+  const files = ['.env', `.env.${mode}`, '.env.local', `.env.${mode}.local`]
+  let out = {}
+  for (const f of files) out = { ...out, ...readOneEnvFile(join(root, f)) }
+  return out
+}
+
+/** Load a single dotenv file into a plain object. */
+export function readOneEnvFile(path) {
   try {
-    const raw = readFileSync(join(root, '.env.local'), 'utf8')
+    const raw = readFileSync(path, 'utf8')
     const out = {}
     for (const line of raw.split('\n')) {
       const m = line.match(/^([A-Z_][A-Z0-9_]*)=["']?(.*?)["']?\s*$/)
@@ -55,6 +69,9 @@ export function readEnvFile(root = REPO_ROOT) {
     return {}
   }
 }
+
+/** Back-compat alias — .env.local only. */
+export const readEnvFile = (root = REPO_ROOT) => readOneEnvFile(join(root, '.env.local'))
 
 /**
  * Read the [env.<name>.vars] block of a wrangler.toml.
@@ -121,7 +138,6 @@ export function staticChecks(env, envName = 'testnet') {
   const required = [
     ['L2_RECORDS_ADDRESS', nonZero(env.L2_RECORDS_ADDRESS || env.OP_L2_RECORDS_ADDRESS || env.VITE_L2_RECORDS_ADDRESS)],
     ['ROOT_DOMAIN', env.ROOT_DOMAIN || env.VITE_ROOT_DOMAIN],
-    ['RPC URL', env.OP_SEPOLIA_RPC_URL || env.VITE_L2_RPC_URL || net?.defaultRpc],
   ]
   const missing = required.filter(([, v]) => !v).map(([k]) => k)
   if (missing.length) {
@@ -130,6 +146,13 @@ export function staticChecks(env, envName = 'testnet') {
   } else {
     add(1, 'PASS', 'required configuration', 'all present')
   }
+
+  // The RPC is reported separately rather than listed as a "required" variable: there is
+  // always a working public default, so folding it into the missing-list made that entry
+  // impossible to ever trigger — a check that cannot fail is not a check.
+  const explicitRpc = env.OP_SEPOLIA_RPC_URL || env.VITE_L2_RPC_URL
+  add('1b', 'PASS', 'RPC endpoint',
+    explicitRpc ? 'configured explicitly' : `not configured — using the public default (${net?.defaultRpc})`)
 
   // 2 — private key format. Report the KEY NAME and validity, never the value.
   const badFormat = []
@@ -162,10 +185,20 @@ export function staticChecks(env, envName = 'testnet') {
 
   // 3b — role separation. One key for all three roles means a single leak lets an attacker
   // both forge resolution responses and seize subdomains.
+  //
+  // Crucially this must distinguish "checked, and they are separate" from "only one role was
+  // visible from here". Reporting PASS on a single visible key is a false assurance, and it is
+  // the NORMAL case for the deployment shape TB.3 recommends (owner key cold, the rest held as
+  // Workers secrets) — precisely the configuration whose separation most needs stating
+  // honestly. Shaped like check 2, which already gets the "nothing to look at" case right.
   const byAddress = new Map()
+  const unseen = []
   for (const { env: name, role } of KEY_ROLES) {
     const addr = addressOf(env[name])
-    if (!addr) continue
+    if (!addr) {
+      unseen.push(name)
+      continue
+    }
     if (!byAddress.has(addr)) byAddress.set(addr, [])
     byAddress.get(addr).push(role)
   }
@@ -174,8 +207,14 @@ export function staticChecks(env, envName = 'testnet') {
     const [addr, roles] = shared[0]
     add('3b', 'WARN', 'key role separation', `${addr} serves ${roles.length} roles: ${roles.join(', ')}`,
       'one leak of this key compromises every role at once. Use a separate key per role; keep the owner key cold and out of the routine write path.')
-  } else if (byAddress.size > 0) {
-    add('3b', 'PASS', 'key role separation', `${byAddress.size} distinct key(s)`)
+  } else if (byAddress.size === 0) {
+    add('3b', 'WARN', 'key role separation', 'not verified — no signing keys visible here',
+      'all three keys live elsewhere (Workers secrets / cold storage). Separation cannot be checked from this machine; verify it where the keys are held.')
+  } else if (unseen.length) {
+    add('3b', 'WARN', 'key role separation', `only ${byAddress.size} of ${KEY_ROLES.length} roles visible — not verified for: ${unseen.join(', ')}`,
+      'the keys not visible here may or may not differ from the ones that are. This is normal when they live in Workers secrets, but it means separation is unverified, not confirmed.')
+  } else {
+    add('3b', 'PASS', 'key role separation', `${byAddress.size} distinct key(s) across all ${KEY_ROLES.length} roles`)
   }
 
   // 8 — root domain shape
@@ -302,7 +341,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const envName = i !== -1 ? argv[i + 1] : 'testnet'
 
   if (!NETWORKS[envName]) {
-    console.error(`unknown --env "${envName}" (expected: ${Object.keys(NETWORKS).join(' | ')})`)
+    // Honour --json even on usage errors, or a caller piping into jq dies on the one path
+    // it cannot anticipate. Same fix already applied to check-chain.mjs.
+    const msg = `unknown --env "${envName}" (expected: ${Object.keys(NETWORKS).join(' | ')})`
+    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }, null, 2))
+    else console.error(msg)
     process.exit(2)
   }
 
@@ -310,7 +353,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // overrides) < exported shell variables (explicit, one-off). Matching the rest of the repo.
   const env = {
     ...deploymentVars(envName),
-    ...readEnvFile(),
+    ...readEnvFiles(),
     ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v)),
   }
 

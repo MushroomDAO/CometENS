@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // @ts-expect-error — plain .mjs module, no type declarations (see scripts/preflight.mjs header)
-import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, LOOKS_LIKE_KEY } from '../../scripts/preflight.mjs'
+import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, readEnvFiles, LOOKS_LIKE_KEY } from '../../scripts/preflight.mjs'
 
 // Synthetic 32-byte keys. Deliberately NOT real or well-known test keys: this file asserts
 // that key material never reaches the output, so it must not itself ship anything that a
@@ -91,6 +91,65 @@ describe('preflight — key role separation', () => {
     const f = find(staticChecks(VALID), '3b')
     expect(f.level).toBe('PASS')
     expect(f.detail).toMatch(/3 distinct/)
+  })
+
+  // A PASS here must mean "checked, and they are separate" — never "only one role happened
+  // to be visible". The single-visible-key case is the NORMAL shape for the recommended
+  // deployment (owner cold, the rest as Workers secrets), so reporting it as separation
+  // verified is a false assurance about exactly the thing under review.
+  it('does NOT claim separation when only one role is visible', () => {
+    const partial = { ...VALID, PRIVATE_KEY_SUPPLIER: undefined, PRIVATE_KEY_JASON: undefined }
+    const f = find(staticChecks(partial), '3b')
+    expect(f.level).toBe('WARN')
+    expect(f.detail).toMatch(/only 1 of 3/)
+    expect(f.detail).toMatch(/PRIVATE_KEY_SUPPLIER/)
+    expect(f.detail).not.toMatch(/distinct/)
+  })
+
+  it('does NOT disappear when no key is visible at all', () => {
+    const none = {
+      ...VALID,
+      WORKER_EOA_PRIVATE_KEY: undefined,
+      PRIVATE_KEY_SUPPLIER: undefined,
+      PRIVATE_KEY_JASON: undefined,
+    }
+    const f = find(staticChecks(none), '3b')
+    expect(f).toBeDefined()
+    expect(f.level).toBe('WARN')
+    expect(f.detail).toMatch(/no signing keys visible/)
+  })
+})
+
+describe('preflight — dotenv coverage matches Vite', () => {
+  // Vite loads .env and .env.[mode] as well as .env.local. Reading only .env.local left the
+  // detection surface narrower than the exposure surface: a VITE_-prefixed key parked in
+  // .env would have been reported clean.
+  it('reads a plain .env file, not just .env.local', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-dotenv-'))
+    writeFileSync(join(dir, '.env'), `VITE_SNEAKY=${KEY_A}\n`)
+    const vars = readEnvFiles(dir)
+    expect(vars.VITE_SNEAKY).toBe(KEY_A)
+    // Fed through the actual check, it must FAIL rather than merely be present.
+    expect(find(staticChecks({ ...VALID, ...vars }), 3).level).toBe('FAIL')
+  })
+
+  it('.env.local wins over .env (Vite precedence)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-dotenv-'))
+    writeFileSync(join(dir, '.env'), 'ROOT_DOMAIN=from-env.eth\n')
+    writeFileSync(join(dir, '.env.local'), 'ROOT_DOMAIN=from-local.eth\n')
+    expect(readEnvFiles(dir).ROOT_DOMAIN).toBe('from-local.eth')
+  })
+})
+
+describe('preflight — RPC endpoint is reported, not silently defaulted', () => {
+  // Folding the RPC into the required-variable list made that entry impossible to trigger
+  // (there is always a public default), i.e. a check that cannot fail.
+  it('says so when falling back to the public default', () => {
+    const f = find(staticChecks({ ...VALID, OP_SEPOLIA_RPC_URL: undefined }), '1b')
+    expect(f.detail).toMatch(/public default/)
+  })
+  it('says so when configured explicitly', () => {
+    expect(find(staticChecks(VALID), '1b').detail).toMatch(/explicitly/)
   })
 })
 
