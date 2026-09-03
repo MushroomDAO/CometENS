@@ -2,51 +2,60 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CometENS 控制台</title>
+    <!-- Design system is the single source of styling truth. This page carries no
+         colour/spacing/type rules of its own; only layout glue lives below. -->
+    <link rel="stylesheet" href="/src/styles/design-system.css">
     <style>
-        body { font-family: monospace; padding: 40px; max-width: 760px; }
-        .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 16px; margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-        .muted { color: #666; font-size: 13px; line-height: 1.4; }
-        .title { margin: 0; }
-        a.button { display: inline-block; padding: 10px 18px; background: #0b79d0; color: #fff; text-decoration: none; border-radius: 6px; }
+        /* Layout glue only — every value comes from a design-system token. */
+        .entry { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+        .entry > div { min-width: 0; }
+        .page-head { padding: var(--sp-6) 0 var(--sp-4); }
     </style>
 </head>
 <body>
 
-    <h2 class="title">CometENS 控制台</h2>
-    <p class="muted">选择你要管理的分支与域名体系</p>
+<div class="container">
 
-    <div class="card">
+    <header class="page-head">
+        <h2 class="card-title">CometENS 控制台</h2>
+        <p class="card-sub">选择你要管理的分支与域名体系</p>
+    </header>
+
+    <div class="card entry">
         <div>
             <strong>.box（OP / my.box）</strong>
             <div class="muted">现有 ENS-tool 的 .box 流程（等待官方接口答复）。</div>
         </div>
-        <a class="button" href="/box.html">进入 .box 管理</a>
+        <a class="btn btn-primary" href="/box.html">进入 .box 管理</a>
     </div>
 
-    <div class="card">
+    <div class="card entry">
         <div>
             <strong>Register Subdomain</strong>
             <div class="muted">User-facing subdomain registration under the configured root domain.</div>
         </div>
-        <a class="button" href="/register.html">Register</a>
+        <a class="btn btn-primary" href="/register.html">Register</a>
     </div>
 
-    <div class="card">
+    <div class="card entry">
         <div>
             <strong>Admin Management</strong>
             <div class="muted">Owner-facing interface: query records, set addr, set text via EIP-712.</div>
         </div>
-        <a class="button" href="/admin.html">Admin</a>
+        <a class="btn btn-primary" href="/admin.html">Admin</a>
     </div>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-top:1px solid #e6e6e6;margin-top:8px;">
+    <div class="card entry">
         <div>
             <strong>Upstream API</strong>
             <div class="muted">Machine-to-machine API for apps that register subdomains programmatically.</div>
         </div>
-        <a class="button" href="/api-docs.html">API Docs</a>
+        <a class="btn btn-primary" href="/api-docs.html">API Docs</a>
     </div>
+
+</div>
 
 </body>
 </html>

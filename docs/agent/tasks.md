@@ -41,7 +41,7 @@
 
 ## F1.1 — 主干流程 UI 产品化
 
-### T1.1.1 建立统一设计系统  `READY`
+### T1.1.1 建立统一设计系统  `PR_OPEN`
 - **优先级**:high
 - **目标**:用一套共享 CSS token + 组件类取代各页内联 `<style>`,成为唯一样式来源。
 - **开发范围**:按 spec.md §4 建 `src/styles/design-system.css`,定义全部 token
