@@ -527,6 +527,28 @@ async function handleListApplications(env: Env): Promise<Response> {
   return json({ applications: apps })
 }
 
+/**
+ * Verify an EIP-712 signature, or refuse with 401.
+ *
+ * A MALFORMED signature makes viem THROW rather than return false, so the bare
+ * `const ok = await verifyTypedData(...); if (!ok) throw 401` pattern let the throw escape and
+ * surface as 500 — telling the caller "our fault" when the truth is "your signature is
+ * unusable". Every write endpoint shared that shape.
+ *
+ * A single helper rather than nine try/catch blocks, because the property to establish is
+ * COVERAGE: adding try/catch nine times proves only that nine places were edited, while one
+ * chokepoint plus a test that walks every endpoint proves none was missed.
+ */
+async function requireValidSignature(params: Parameters<typeof verifyTypedData>[0]): Promise<void> {
+  let ok = false
+  try {
+    ok = await verifyTypedData(params)
+  } catch {
+    ok = false
+  }
+  if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+}
+
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
   const payload = await parseJson(request)
 
@@ -562,8 +584,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
 
     // Authorization: recovered signer must be subdomain owner (check BEFORE consuming nonce)
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -628,18 +649,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    // Wrapped because a MALFORMED signature makes viem THROW rather than return false, and an
-    // uncaught throw here surfaces as 500 — telling the caller "our fault" when the truth is
-    // "your signature is unusable". Found by the approval-gate tests below, which needed a
-    // bad-signature request to prove the mode check happens after auth. The other write
-    // endpoints share the bare pattern and the same wrong status; that stays FU-6.
-    let ok = false
-    try {
-      ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
-    } catch {
-      ok = false
-    }
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
 
     // APPROVAL_MODE governs this endpoint too, not just /apply.
     //
@@ -714,8 +724,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
 
     // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -754,8 +763,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
 
     // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -800,18 +808,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     checkDeadline(message.deadline)
 
     // A distinct primaryType, so an Apply signature cannot be replayed as a Register.
-    //
-    // Wrapped in try/catch because a MALFORMED signature makes viem throw rather than return
-    // false, and an uncaught throw here surfaces as 500 — telling the caller "our fault" when
-    // the truth is "your signature is unusable". The other write endpoints share the bare
-    // pattern and have the same wrong status; recorded as a followup rather than changed here.
-    let applyOk = false
-    try {
-      applyOk = await verifyTypedData({ address: from, domain, primaryType: 'Apply', types: ApplyTypes as any, message: message as any, signature })
-    } catch {
-      applyOk = false
-    }
-    if (!applyOk) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'Apply', types: ApplyTypes as any, message: message as any, signature })
     await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
 
     try {
@@ -853,8 +850,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'ApproveApplication', types: ApproveApplicationTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'ApproveApplication', types: ApproveApplicationTypes as any, message: message as any, signature })
 
     // Only the contract owner decides. Read the owner rather than trusting anything supplied.
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
@@ -892,8 +888,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -920,8 +915,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -956,8 +950,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       throw badReq('Cannot transfer to self')
     }
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
 
     // Authorization: verify on-chain ownership BEFORE consuming nonce.
     // Uses subnodeOwner() which in V3 maps directly to ownerOf(uint256(node)).
