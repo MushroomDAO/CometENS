@@ -296,3 +296,46 @@ describe('preflight — third-party error strings are scrubbed', () => {
     expect(`prefix SENTINEL_KEY_abcdef123456 suffix`).toContain('SENTINEL_KEY_abcdef123456')
   })
 })
+
+describe('preflight — repo example values are not reported as your configuration', () => {
+  // On a fresh clone the committed wrangler.toml carries the REFERENCE deployment, so
+  // preflight used to report "7 passed, 0 failures" with OUR root domain, OUR contract and
+  // OUR owner — to someone who had configured nothing. That is step 1 of SELF-HOSTING.md,
+  // and false confidence there propagates through every later step.
+  const REPO_DEFAULTS = { ROOT_DOMAIN: 'aastar.eth', L2_RECORDS_ADDRESS: '0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc' }
+  const asRepoShipped = { ...VALID, ...REPO_DEFAULTS }
+
+  it('WARNs when the values are still the repo examples', () => {
+    const f = find(staticChecks(asRepoShipped, 'testnet', REPO_DEFAULTS), 1)
+    expect(f.level).toBe('WARN')
+    expect(f.detail).toMatch(/example value/)
+    expect(f.hint).toMatch(/not yours/)
+  })
+
+  it('names the root domain as an example too', () => {
+    const f = find(staticChecks(asRepoShipped, 'testnet', REPO_DEFAULTS), 8)
+    expect(f.level).toBe('WARN')
+    expect(f.detail).toContain('not yours')
+  })
+
+  it('PASSes once the operator sets their own values (control)', () => {
+    // Without this the fix could degrade into "always WARN", which is equally useless.
+    const own = { ...VALID, ROOT_DOMAIN: 'mycommunity.eth', L2_RECORDS_ADDRESS: `0x${'de'.repeat(20)}` }
+    expect(find(staticChecks(own, 'testnet', REPO_DEFAULTS), 1).level).toBe('PASS')
+    expect(find(staticChecks(own, 'testnet', REPO_DEFAULTS), 8).level).toBe('PASS')
+  })
+
+  it('names only the field still holding an example (partial control)', () => {
+    const half = { ...asRepoShipped, ROOT_DOMAIN: 'mycommunity.eth' }
+    const f = find(staticChecks(half, 'testnet', REPO_DEFAULTS), 1)
+    expect(f.level).toBe('WARN')
+    expect(f.detail).toContain('L2_RECORDS_ADDRESS')
+    expect(f.detail).not.toContain('ROOT_DOMAIN')
+  })
+
+  it('does not warn when the defaults are unknown (git unavailable)', () => {
+    // null/undefined means "could not check", and inventing a warning from that would be
+    // the same false confidence in the other direction.
+    expect(find(staticChecks(asRepoShipped, 'testnet', undefined), 1).level).toBe('PASS')
+  })
+})

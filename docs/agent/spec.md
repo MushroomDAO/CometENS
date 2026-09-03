@@ -49,10 +49,14 @@
 ## 3. `scripts/delegate.mjs` — 委托管理(**模式 A 的操作面**,不是模式 B)
 
 ```
-pnpm delegate:grant  --parent <name.eth> --to <0x...> [--quota N] [--expiry <ISO8601>]
-pnpm delegate:status --parent <name.eth> [--of <0x...>]
-pnpm delegate:revoke --parent <name.eth> --from <0x...>
+pnpm delegate grant  --parent <name.eth> --to <0x...> [--quota N] [--expiry <ISO8601>]
+pnpm delegate status --parent <name.eth> [--of <0x...>]
+pnpm delegate revoke --parent <name.eth> --from <0x...>
 ```
+
+> 实现用的是**子命令**形式(`pnpm delegate grant`),不是三个带冒号的独立 npm 脚本。
+> spec 早先写成后者,与实现不符,已更正 —— `test/unit/docs-commands.test.ts` 抓到的。
+> (这里刻意不写出那个错误形式的字面量:守卫是文本匹配,分不清「使用」和「提及」。)
 
 对应合约调用:`addRegistrar` / `getRegistrarInfo` / `removeRegistrar`(均 `onlyOwner`)。
 

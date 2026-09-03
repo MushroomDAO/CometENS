@@ -13,6 +13,7 @@
 // validity, the derived ADDRESS, or a mask. Everything below is written to that rule, and
 // test/unit/preflight.test.ts asserts no 64-hex string ever reaches the output.
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -115,6 +116,37 @@ export function deploymentVars(envName, root = REPO_ROOT) {
   }
 }
 
+/**
+ * The wrangler values as COMMITTED in git, i.e. the reference deployment this repo ships.
+ *
+ * Compared against the working tree so the warning disappears the moment an operator edits
+ * the file to their own values — which is exactly the signal we want, and it maintains itself
+ * when we redeploy (a hardcoded constant would go stale and silently stop warning).
+ *
+ * Returns null when git is unavailable (a tarball download, say). Callers must treat null as
+ * "could not check", never as "no defaults in use".
+ */
+export function repoCommittedVars(envName, root = REPO_ROOT) {
+  try {
+    const toml = execFileSync('git', ['show', `HEAD:workers/api/wrangler.toml`], {
+      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const start = toml.indexOf(`[env.${envName}.vars]`)
+    if (start === -1) return {}
+    const rest = toml.slice(start)
+    const nextRel = rest.slice(1).search(/\n[ \t]*\[/)
+    const block = nextRel === -1 ? rest : rest.slice(0, nextRel + 1)
+    const out = {}
+    for (const line of block.split('\n')) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*"([^"]*)"/)
+      if (m && m[2] !== '') out[m[1]] = m[2]
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 /** Derive an address from a private key, or null if the key is absent/malformed. */
 export function addressOf(key) {
   if (!key || !PRIVATE_KEY_RE.test(key)) return null
@@ -129,10 +161,27 @@ export function addressOf(key) {
  * All checks that need no network. Pure: takes an env object, returns findings.
  * Network checks live in probeChain() so tests can run the bulk of the logic offline.
  */
-export function staticChecks(env, envName = 'testnet') {
+export function staticChecks(env, envName = 'testnet', repoDefaults = undefined) {
   const net = NETWORKS[envName]
   const out = []
   const add = (id, level, title, detail, hint) => out.push({ id, level, title, detail, hint })
+
+  /**
+   * Values that came from the repo's own committed wrangler.toml rather than from anything
+   * the operator set.
+   *
+   * Without this the checks are actively misleading on a fresh clone: wrangler.toml carries
+   * the reference deployment, so `pnpm preflight` reported "all present" with OUR root domain,
+   * OUR contract and OUR owner — 7 passed, 0 failures — to someone who had configured nothing.
+   * That is the first step of SELF-HOSTING.md, and false confidence there propagates through
+   * every later step.
+   *
+   * Same shape as the provenance bug fixed in check-chain.mjs: a tool must not report a value
+   * without saying where it came from, especially when the convenient default is someone else's.
+   */
+  const defaults = repoDefaults ?? {}
+  const isRepoDefault = (key, value) =>
+    value !== undefined && defaults[key] !== undefined && String(defaults[key]) === String(value)
 
   // 1 — required variables
   const required = [
@@ -144,7 +193,18 @@ export function staticChecks(env, envName = 'testnet') {
     add(1, 'FAIL', 'required configuration', `missing: ${missing.join(', ')}`,
       'copy .env.op-sepolia to .env.local and fill these in')
   } else {
-    add(1, 'PASS', 'required configuration', 'all present')
+    const addrKey = env.L2_RECORDS_ADDRESS ? 'L2_RECORDS_ADDRESS' : 'L2_RECORDS_ADDRESS'
+    const fromRepo = [
+      isRepoDefault('L2_RECORDS_ADDRESS', env.L2_RECORDS_ADDRESS) ? 'L2_RECORDS_ADDRESS' : null,
+      isRepoDefault('ROOT_DOMAIN', env.ROOT_DOMAIN) ? 'ROOT_DOMAIN' : null,
+    ].filter(Boolean)
+    if (fromRepo.length) {
+      add(1, 'WARN', 'required configuration',
+        `present, but ${fromRepo.join(' and ')} ${fromRepo.length > 1 ? 'still hold' : 'still holds'} the repo's example value${fromRepo.length > 1 ? 's' : ''}`,
+        "this is OUR reference deployment as shipped in workers/*/wrangler.toml, not yours. Run `pnpm bootstrap:community` and put YOUR addresses there before relying on any check below.")
+    } else {
+      add(1, 'PASS', 'required configuration', 'all present (from your own configuration)')
+    }
   }
 
   // The RPC is reported separately rather than listed as a "required" variable: there is
@@ -223,7 +283,9 @@ export function staticChecks(env, envName = 'testnet') {
     add(8, 'FAIL', 'root domain', `"${root}" is not a valid .eth ENS name`,
       'expected something like community.eth (lowercase, ends in .eth)')
   } else if (root) {
-    add(8, 'PASS', 'root domain', root)
+    add(8, isRepoDefault('ROOT_DOMAIN', root) ? 'WARN' : 'PASS', 'root domain',
+      isRepoDefault('ROOT_DOMAIN', root) ? `${root} — the repo's example value, not yours` : root,
+      isRepoDefault('ROOT_DOMAIN', root) ? 'set ROOT_DOMAIN in workers/*/wrangler.toml to your own .eth name' : undefined)
   }
 
   return out
@@ -357,7 +419,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v)),
   }
 
-  const findings = staticChecks(env, envName)
+  const committed = repoCommittedVars(envName)
+  if (committed === null) {
+    console.error('note: could not read the committed wrangler.toml (no git?) — cannot tell your values from the repo\'s examples')
+  }
+  const findings = staticChecks(env, envName, committed ?? undefined)
   findings.push(...(await probeChain(env, envName)))
 
   const output = render(findings, asJson)
