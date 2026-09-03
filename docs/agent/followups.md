@@ -14,8 +14,13 @@
   `TS2591 process 未定义`+`TS2307 找不到模块`+`TS2304 找不到名称` 合计约 75 条 ——
   **根因是 `@types/node` 根本没装**(`node_modules/@types/` 下只有 chai/deep-eql/estree)。
   剩下约 34 条(TS7006 隐式 any 12 · TS2554 参数个数 7 · TS2339 5 · TS2345 4 · TS2322 2)才是真的类型问题。
-  **下一步**:在**主 checkout** 执行 `pnpm add -D @types/node`(worktree 的 node_modules 是指向主 checkout 的
-  符号链接,在 worktree 里装会改动共享安装状态),再把 `types` 加 `"node"`、include 扩到 test/server/sdk,修剩下那 ~34 条。
+  **下一步(需要你执行,原因见下)**:`pnpm add -D @types/node`
+  ⚠️ **2026-09-04 实测**:这条命令会让 pnpm 提示「The modules directory at
+  `/Users/jason/Dev/mycelium/CometENS/node_modules` will be removed and reinstalled from scratch」——
+  那是 **6 个 checkout(主仓库 + 5 个 worktree)共享**的目录,worktree 的 node_modules 全是指向它的符号链接。
+  重装期间所有 worktree 的依赖同时失效,而当时有分支正在跑测试,所以我在无人值守下没有执行。
+  **建议在没有并行工作时手工跑一次**,然后把 tsconfig 的 `types` 加 `"node"`、`include` 扩到 `["src","test","server","sdk"]`,修剩下那 ~34 条。
+  **验证**:`npx tsc -p tsconfig.json --noEmit` 的错误数应从 113 掉到 ~34。
   ⚠️ 我第一次看到首条错误是 `TS2719 Two different types with this name exist` 就断言"根因是 viem 重复安装" ——
   **那只是 sdk 贡献的唯一 1 条**。读了第一条证据就推广成结论,和 T1.3.3 里那次是同一个形状
 - [x] FU-6 · B · src=T1.6.1 · 2026-09-04 · 所有写端点(/register /set-addr /set-text /set-contenthash /add-registrar /remove-registrar /transfer-subnode)都用裸 verifyTypedData + if(!ok) throw 401 的模式,而畸形签名会让 viem 抛异常、绕过那行 → 返回 500 而不是 401。把签名判断说成服务端故障。**已完成(2026-09-04)**:九处全部收编到 requireValidSignature 单一入口,端点清单从源码推导。**判据(pr-daemon 给的,比「逐个加 try/catch」强)**:给每个写端点各喂一个畸形签名,断言拿到 401 而不是 5xx —— 前者能证明覆盖完整,后者只能证明改过
