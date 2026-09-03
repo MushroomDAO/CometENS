@@ -1,8 +1,13 @@
 # spec — 精确规格(可照着实现)
 
-## 1. `scripts/preflight.ts` — 部署前配置校验
+## 1. `scripts/preflight.mjs` — 部署前配置校验
 
-命令:`pnpm preflight [--network op-sepolia] [--json]`
+命令:`pnpm preflight [--env testnet|production] [--json]`
+
+> **为什么是 `.mjs` 而不是原先写的 `.ts`**:仓库里现有的 `.ts` 脚本声明
+> `#!/usr/bin/env tsx`,但 **tsx 不是本仓库的依赖**,只有恰好全局装了 tsx 的人才跑得起来。
+> 一个存在意义就是"让自部署可靠"的 preflight,自己不能依赖一个未声明的全局工具。
+> 因此跟随 package.json 真正接线的那批脚本(`sync-abi.mjs`、`check-chain.mjs`)。
 退出码:`0` 全通过;`1` 有 FAIL;`2` 用法错误。
 
 检查项(每项输出 `PASS|WARN|FAIL` + 一句人话建议):
@@ -14,6 +19,7 @@
 | 3 | **私钥未用 VITE_ 前缀** | 任何 `VITE_*` 变量的值像私钥(0x+64hex) |
 | 3b | **密钥未复用**(WARN) | owner / writer / gateway signer 三者派生同一地址 |
 | 4 | L2 RPC 可达且 chainId 正确 | 连不上,或 chainId ≠ 期望值 |
+| — | **配置来源优先级** | `process.env` > `.env.local` > `wrangler.toml`(部署配置的事实来源) |
 | 5 | L2Records 合约存在 | 该地址 `eth_getCode` 返回 `0x` |
 | 6 | 合约 `owner()` 可读 | 调用 revert |
 | 7 | 运营 EOA 有余额 | 余额为 0(WARN 而非 FAIL) |
