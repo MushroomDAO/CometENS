@@ -963,7 +963,9 @@ function jsonError(message: string, status: number, code?: string): Response {
 export function sanitiseErrorMessage(raw: string): string {
   return raw
     // Any URL, not just known providers: a self-hoster's endpoint may embed credentials too.
-    .replace(/https?:\/\/[^\s"']+/g, (u) => {
+    // wss:// is covered because providers issue a websocket endpoint alongside the HTTP one
+    // carrying the same key — matching only https? left that shape fully exposed.
+    .replace(/(?:https?|wss?):\/\/[^\s"']+/g, (u) => {
       try {
         const parsed = new URL(u)
         const hasPathOrQuery = parsed.pathname.replace(/^\/+|\/+$/g, '').length > 0 || parsed.search.length > 0
@@ -974,8 +976,12 @@ export function sanitiseErrorMessage(raw: string): string {
     })
     // Private keys should never reach an error string, but if one ever does, do not print it.
     .replace(/0x[0-9a-fA-F]{64}/g, '0x…(redacted)')
-    // viem appends "Request body: {...}" and "Raw Call Arguments:" blocks — internals.
-    .replace(/\n*Request body:[\s\S]*/i, '')
-    .replace(/\n*Raw Call Arguments:[\s\S]*/i, '')
+    // viem appends "Request body: {...}" and "Raw Call Arguments:" blocks — internals with
+    // no value to an API consumer. Stop at the next section rather than running to the end of
+    // the string: viem puts "Details:" AFTER "Raw Call Arguments:", and that Details line is
+    // usually the only sentence saying what actually went wrong. Stripping to the end took it
+    // with them, which made the "reason is preserved" claim untrue.
+    .replace(/\n*Request body:[\s\S]*?(?=\nDocs:|\nDetails:|\nVersion:|$)/i, '')
+    .replace(/\n*Raw Call Arguments:[\s\S]*?(?=\nDocs:|\nDetails:|\nVersion:|$)/i, '')
     .trim()
 }

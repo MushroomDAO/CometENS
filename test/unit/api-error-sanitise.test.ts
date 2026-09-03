@@ -81,3 +81,47 @@ describe('sanitiseErrorMessage — other credential shapes', () => {
     )
   })
 })
+
+describe('sanitiseErrorMessage — websocket endpoints', () => {
+  // Providers issue a wss:// endpoint alongside the HTTP one, carrying the same key.
+  // Matching only https? left this shape fully exposed — found in review of this PR.
+  it('redacts a key in a wss:// URL', () => {
+    const secret = 'WSS_SENTINEL_KEY_123'
+    const out = sanitiseErrorMessage(`socket failed: wss://opt-sepolia.g.alchemy.com/v2/${secret}`)
+    expect(out).not.toContain(secret)
+    expect(out).toContain('opt-sepolia.g.alchemy.com')
+  })
+
+  it('the wss sentinel is detectable unsanitised (must-leak control)', () => {
+    expect('wss://h/v2/WSS_SENTINEL_KEY_123').toContain('WSS_SENTINEL_KEY_123')
+  })
+
+  it('redacts ws:// too', () => {
+    expect(sanitiseErrorMessage('ws://host/v2/PLAINWS_KEY')).not.toContain('PLAINWS_KEY')
+  })
+})
+
+describe('sanitiseErrorMessage — the reason survives', () => {
+  // The PR description originally claimed the reason was preserved; it was not. viem puts
+  // "Details:" AFTER "Raw Call Arguments:", so stripping to end-of-string took the only
+  // sentence explaining the failure with it.
+  const VIEM_SHAPE = [
+    'JSON is not a valid request object.', '',
+    'URL: https://opt-sepolia.g.alchemy.com/v2/KEYVALUE',
+    'Request body: {"method":"eth_call"}', '',
+    'Raw Call Arguments:', '  to: 0xabc', '',
+    'Details: OPT_SEPOLIA is not enabled for this app',
+    'Version: viem@2.0',
+  ].join('\n')
+
+  it('keeps the Details line that says what went wrong', () => {
+    expect(sanitiseErrorMessage(VIEM_SHAPE)).toContain('OPT_SEPOLIA is not enabled')
+  })
+
+  it('still drops the internals and the key around it', () => {
+    const out = sanitiseErrorMessage(VIEM_SHAPE)
+    expect(out).not.toContain('Request body')
+    expect(out).not.toContain('Raw Call Arguments')
+    expect(out).not.toContain('KEYVALUE')
+  })
+})
