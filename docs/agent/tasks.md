@@ -144,7 +144,7 @@
 - **涉及文件**:`scripts/bootstrap-community.ts`、`package.json`
 - **证据**:
 
-### T1.2.3 SELF-HOSTING.md 自部署指南  `READY`
+### T1.2.3 SELF-HOSTING.md 自部署指南  `PR_OPEN`
 - **优先级**:high
 - **目标**:陌生开发者照着能在 2 小时内跑通,全程不需要联系我们。
 - **开发范围**:基于 T1.2.2 的**实跑结果**写(不是凭空写):前置条件 → preflight →
@@ -152,7 +152,9 @@
 - **明确不做**:不写主网步骤(标注"主网见 M2")。
 - **依赖**:T1.2.2(必须先有实跑输出)
 - **交付物**:`docs/SELF-HOSTING.md`
-- **验收命令**:`node -e "const s=require('fs').readFileSync('docs/SELF-HOSTING.md','utf8'); for (const k of ['preflight','bootstrap','setResolver','getEnsAddress']) if(!s.includes(k)) throw new Error('缺少步骤: '+k)"`
+- **验收命令**:`pnpm vitest run test/unit/docs-commands.test.ts && node -e "const s=require('fs').readFileSync('docs/SELF-HOSTING.md','utf8'); for (const k of ['preflight','bootstrap','setResolver','getEnsAddress']) if(!s.includes(k)) throw new Error('缺少步骤: '+k)"`
+  (原判据只查四个关键词存在,查不出文档让人跑一个不存在的命令;
+  新增 docs-commands 测试断言文档里每条 pnpm 脚本与脚本文件都真实存在)
 - **涉及文件**:`docs/SELF-HOSTING.md`
 - **证据**:
 
