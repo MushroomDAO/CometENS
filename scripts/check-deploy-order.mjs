@@ -50,7 +50,7 @@ export function countPathHits(sources) {
  */
 export function countApiMentions(sources) {
   let n = 0
-  for (const src of sources) n += [...src.matchAll(/apiUrl\}/g)].length
+  for (const src of sources) n += [...src.matchAll(/\bapiUrl\b/g)].length
   return n
 }
 
@@ -66,17 +66,32 @@ export function countApiMentions(sources) {
 export function unreadableCallSites(sources) {
   const out = []
   for (const src of sources) {
-    for (const m of src.matchAll(/.{0,50}apiUrl\}.{0,30}/g)) {
-      if (!/apiUrl\}\/[a-z0-9-]/.test(m[0])) out.push(m[0].trim())
+    // Anchored on `apiUrl`, NOT `apiUrl}`. The narrow anchor shared a blind spot with every
+    // other function here: `config.apiUrl + '/zz'` contains no `apiUrl}` at all, so a
+    // string-concatenated call was invisible to all four AT ONCE — it did not even register as
+    // "a call site I could not read". Two instruments that go blind on the same input are one
+    // instrument.
+    for (const m of src.matchAll(/.{0,50}\bapiUrl\b.{0,30}/gs)) {
+      if (!/apiUrl\}\/[a-z0-9-]/.test(m[0])) out.push(m[0].trim().replace(/\s+/g, ' '))
     }
   }
   return out
 }
 
+/**
+ * The frontend modules that CALL the API — `config.ts` excluded.
+ *
+ * config.ts is where `apiUrl` is declared and assigned; its two mentions are the definition,
+ * not call sites. Counting them would put a constant offset into every comparison below and
+ * break the identity that makes the two-instrument check readable
+ * (mentions − pathHits === unreadable call sites).
+ */
+export const DEFINITION_MODULE = 'config.ts'
+
 export function readFrontendSources() {
   const dir = join(REPO_ROOT, 'src')
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.ts'))
+    .filter((f) => f.endsWith('.ts') && f !== DEFINITION_MODULE)
     .map((f) => readFileSync(join(dir, f), 'utf8'))
 }
 

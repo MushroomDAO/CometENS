@@ -18,7 +18,15 @@ import { join } from 'node:path'
  * established, so a future reader can re-open the question with the evidence rather than
  * re-deriving it.
  */
-const RETRACTED: Array<{ phrase: string; why: string; where: string }> = [
+/**
+ * `allowIn` — files that may quote the phrase because they DOCUMENT the retraction.
+ *
+ * The ledger entry explaining why a claim was withdrawn has to be able to say what the claim
+ * was. A blanket ban would force that explanation to be vague, which defeats the point: a
+ * future reader could not tell what was retracted. Membership is verified below — an entry
+ * that does not actually contain the phrase is a stale exemption waiting to cover a real one.
+ */
+const RETRACTED: Array<{ phrase: string; why: string; where: string; allowIn?: string[] }> = [
   {
     phrase: '这条规则是唯一能存在的守卫',
     why: 'L2RecordsV3._registerNode 有 AlreadyRegistered 状态不变量,合约层挡得住重复注册。' +
@@ -31,6 +39,7 @@ const RETRACTED: Array<{ phrase: string; why: string; where: string }> = [
     where: 'PR #45',
   },
   {
+    allowIn: ['docs/agent/followups.md'],
     phrase: 'viem 重复安装',
     why: 'typecheck 的 113 个错误里 viem 类型冲突只占 1 条(sdk)。大头是 @types/node 没装。',
     where: 'PR #48 — 按目录二分:src=0 / +sdk=1 / +server=10 / +test=109',
@@ -66,13 +75,33 @@ describe('retracted claims do not survive anywhere in the repo', () => {
   const files = trackedTextFiles()
 
   it('the scan covers every tracked text file, including the ones the old walker missed', () => {
-    // A floor plus one known hit is what the previous version had, and it could not see the
-    // scan shrink — the same shape as the `>= 2` floor in #48. Compare against an independent
-    // enumeration instead: git's own file list, filtered the same way.
-    const expected = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, encoding: 'utf8' })
+    // Counted PER EXTENSION rather than as one total.
+    //
+    // The previous version rebuilt the same filter with the same `TEXT_EXT` and `SKIP_SELF`
+    // constants and compared lengths — so it caught a divergence introduced INSIDE the
+    // function, but not a change to the shared input. Dropping `.html` from `TEXT_EXT` moved
+    // both sides together (130 → 122) and the length line stayed green; what actually failed
+    // was the by-name list below.
+    //
+    // Bucketing by extension does not share that input: removing `.html` takes its bucket from
+    // 6 to 0 while the expected buckets are computed from the file names themselves.
+    const bucket = (paths: string[]) => {
+      const out: Record<string, number> = {}
+      for (const f of paths) {
+        const ext = f.slice(f.lastIndexOf('.'))
+        out[ext] = (out[ext] ?? 0) + 1
+      }
+      return out
+    }
+    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, encoding: 'utf8' })
       .split('\0')
-      .filter((f) => f && TEXT_EXT.test(f) && !f.endsWith(SKIP_SELF))
-    expect(files).toHaveLength(expected.length)
+      .filter(Boolean)
+      .filter((f) => !f.endsWith(SKIP_SELF))
+    const scanned = bucket(files.map((f) => f.slice(REPO.length + 1)))
+    const allTracked = bucket(tracked)
+    for (const ext of ['.md', '.ts', '.html', '.mjs', '.css', '.toml']) {
+      expect({ ext, n: scanned[ext] ?? 0 }).toEqual({ ext, n: allTracked[ext] ?? 0 })
+    }
 
     // Named explicitly because these are exactly the files the hand-listed ROOTS could not
     // reach, and they are the ones a retracted claim is most likely to survive in.
@@ -82,9 +111,25 @@ describe('retracted claims do not survive anywhere in the repo', () => {
     }
   })
 
-  for (const { phrase, why, where } of RETRACTED) {
+  it('every allowIn entry actually quotes its phrase (control)', () => {
+    // An exemption for a file that no longer contains the phrase is a hole standing open for
+    // whatever lands in that file next — the same failure mode as a stale READ_ONLY entry.
+    const stale: string[] = []
+    for (const { phrase, allowIn } of RETRACTED) {
+      for (const rel of allowIn ?? []) {
+        if (!readFileSync(join(REPO, rel), 'utf8').includes(phrase)) stale.push(`${rel} ∌ "${phrase}"`)
+      }
+    }
+    expect(stale).toEqual([])
+  })
+
+  for (const { phrase, why, where, allowIn } of RETRACTED) {
     it(`"${phrase.slice(0, 24)}…" appears nowhere`, () => {
-      const hits = files.filter((f) => readFileSync(f, 'utf8').includes(phrase))
+      const allowed = new Set(allowIn ?? [])
+      const hits = files
+        .map((f) => f.slice(REPO.length + 1))
+        .filter((rel) => !allowed.has(rel))
+        .filter((rel) => readFileSync(join(REPO, rel), 'utf8').includes(phrase))
       expect(hits, `${why} (${where})`).toEqual([])
     })
   }
