@@ -4,19 +4,20 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
     "abi:sync": "node scripts/sync-abi.mjs",
+    "bootstrap:community": "node scripts/bootstrap-community.mjs",
+    "build": "vite build",
     "check:chain": "node scripts/check-chain.mjs",
+    "check:deploy-order": "node scripts/check-deploy-order.mjs",
     "delegate": "node scripts/delegate.mjs",
+    "dev": "vite",
     "preflight": "node scripts/preflight.mjs",
+    "preview": "vite preview",
     "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
-    "bootstrap:community": "node scripts/bootstrap-community.mjs"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "viem": "^2.37.13"

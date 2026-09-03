@@ -221,3 +221,28 @@ pnpm delegate revoke --parent finance.你的名字.eth --from 0x<小组地址>
 
 写命令默认拒绝对**已部署的线上合约**动手,必须显式 `--i-know-this-is-live`。
 指向你自己的部署时用 `--contract 0x<你的地址>`。
+
+---
+
+## 部署顺序:先 API worker,后前端
+
+前端和 API worker 是**分开部署**的,所以前端可能先上线、调用一个还不存在的端点。
+这不是假想 —— 2026-09-04 实测,线上 worker 还没有 `/apply`、`/approval-mode`、
+`/applications`、`/approve`,而已发布的前端会调它们四个。
+
+```bash
+pnpm check:deploy-order                  # 默认查 VITE_API_URL 或内置的测试网地址
+pnpm check:deploy-order --api-url https://your-api.workers.dev
+```
+
+它把前端**源码里实际打的端点**列出来(不是一份手写清单 —— 手写只能覆盖有人记得的),
+逐个探活。退出码:
+
+| exit | 含义 |
+|---|---|
+| 0 | 全部存在,可以发前端 |
+| 1 | 有端点缺失 —— **先 `cd workers/api && wrangler deploy --env testnet`** |
+| 2 | 查不了(网络不通,或探针自检失败)—— **不是通过**,重试 |
+
+> 探针自己带一格对照:先探一个**必然不存在**的路径,如果那个也被判成"存在",
+> 说明这台 worker 分不清有无路由,整轮结果无意义 → 直接 exit 2。
