@@ -14,6 +14,8 @@
   `TS2591 process 未定义`+`TS2307 找不到模块`+`TS2304 找不到名称` 合计约 75 条 ——
   **根因是 `@types/node` 根本没装**(`node_modules/@types/` 下只有 chai/deep-eql/estree)。
   剩下约 34 条(TS7006 隐式 any 12 · TS2554 参数个数 7 · TS2339 5 · TS2345 4 · TS2322 2)才是真的类型问题。
+  **注:这些数字会随新增测试文件变化。2026-09-04 晚间重量为 TS2307 40 · TS2304 32 · TS7006 18 ——
+  结论(根因是 @types/node)不变,但引用具体数字之前请重新量一次。**
   **下一步(需要你执行,原因见下)**:`pnpm add -D @types/node`
   ⚠️ **2026-09-04 实测**:这条命令会让 pnpm 提示「The modules directory at
   `/Users/jason/Dev/mycelium/CometENS/node_modules` will be removed and reinstalled from scratch」——

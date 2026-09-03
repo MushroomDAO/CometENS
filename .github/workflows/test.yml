@@ -47,6 +47,11 @@ jobs:
       #
       # NOT `submodules: recursive` — that would also pull vendor/ and eval/* (several large
       # reference repos that nothing in test/, src/, server/, sdk/ or scripts/ imports).
+      #
+      # `--depth 1` works because GitHub serves fetch-by-SHA. If either submodule is ever
+      # bumped to a commit that a shallow fetch cannot reach, this step fails with
+      # `fatal: remote error: upload-pack: not our ref …` — which READS LIKE A NETWORK
+      # PROBLEM and is not. Drop `--depth 1` if that happens; do not go looking at the runner.
       - name: Fetch the two submodules the contracts import
         run: git submodule update --init --depth 1 contracts/lib/openzeppelin-contracts contracts/lib/unruggable-gateways
 
