@@ -1,243 +1,283 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin — CometENS</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CometENS 管理控制台</title>
+  <link rel="stylesheet" href="/src/styles/design-system.css">
   <style>
-    body { font-family: monospace; padding: 40px; max-width: 760px; margin: 0 auto; }
-    h2 { margin-bottom: 4px; }
-    .muted { color: #666; font-size: 13px; margin-top: 0; }
-    .card { border: 1px solid #e6e6e6; border-radius: 8px; padding: 20px; margin-top: 20px; }
-    .card h3 { margin: 0 0 14px 0; font-size: 15px; border-bottom: 1px solid #f0f0f0; padding-bottom: 10px; }
-    label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; }
-    input, select { width: 100%; box-sizing: border-box; padding: 8px 10px; font-family: monospace; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; }
-    input:focus, select:focus { outline: none; border-color: #0b79d0; }
-    .row { display: flex; gap: 8px; align-items: flex-start; }
-    .row input { margin-bottom: 0; }
-    .row .key-input { flex: 1; }
-    .row .value-input { flex: 2; }
-    button { padding: 9px 16px; font-family: monospace; font-size: 13px; cursor: pointer; border: none; border-radius: 6px; margin-right: 6px; margin-top: 2px; }
-    .btn-primary { background: #0b79d0; color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: #0960a8; }
-    .btn-small { background: #f5f5f5; border: 1px solid #ddd; color: #333; font-size: 12px; padding: 6px 12px; }
-    .btn-small:hover { background: #e8e8e8; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .result-box { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
-    .result-box.success { background: #e8f5e9; border: 1px solid #81c784; color: #2e7d32; }
-    .result-box.error { background: #fdecea; border: 1px solid #e57373; color: #c62828; }
-    .result-box.info { background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; }
-    .result-box.hidden { display: none; }
-    .inline-row { display: flex; gap: 8px; }
-    .inline-row input { margin-bottom: 0; }
-    .wallet-bar { background: #f9f9f9; border: 1px solid #e6e6e6; border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
-    .wallet-bar .addr { color: #333; font-size: 12px; }
-    a.back { font-size: 12px; color: #0b79d0; text-decoration: none; display: inline-block; margin-bottom: 24px; }
-    a.back:hover { text-decoration: underline; }
-    .source-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-    .source-row select { width: auto; margin-bottom: 0; flex: 0 0 auto; }
-    .source-row label { margin-bottom: 0; white-space: nowrap; }
-    .query-btn-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .text-key-input { width: 120px; flex: 0 0 120px; }
+    /* Layout glue only — every value comes from a design-system token. */
+    .page-head { padding: var(--sp-6) 0 var(--sp-4); }
+    .wallet-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+    .field + .field { margin-top: var(--sp-3); }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-3); }
+    .actions { margin-top: var(--sp-4); }
+    /* Secondary tools collapse so the primary action is not buried in a wall of forms. */
+    details.card { padding: 0; }
+    details.card > summary {
+      padding: var(--sp-4) var(--sp-5);
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+    }
+    details.card > summary::-webkit-details-marker { display: none; }
+    details.card > summary::before { content: '▸ '; color: var(--c-text-muted); }
+    details.card[open] > summary::before { content: '▾ '; }
+    details.card > .details-body { padding: 0 var(--sp-5) var(--sp-5); }
+    .subsection + .subsection { margin-top: var(--sp-5); padding-top: var(--sp-5); border-top: 1px solid var(--c-border); }
+    .subsection h4 { margin: 0 0 var(--sp-1); font-size: var(--fs-md); }
   </style>
 </head>
 <body>
 
-  <a class="back" href="/">← Back to console</a>
+<div class="container">
 
-  <h2>CometENS Admin</h2>
-  <p class="muted">Query records and manage ENS data under <strong id="rootDomainLabel">...</strong></p>
+  <header class="page-head">
+    <h2 class="card-title">CometENS 管理控制台</h2>
+    <p class="card-sub">
+      管理 <strong id="rootDomainLabel" class="mono">…</strong> 下的子域名与记录。
+      <span class="badge">仅测试网</span>
+    </p>
+  </header>
 
-  <!-- Wallet bar -->
-  <div class="wallet-bar">
-    <span class="addr" id="walletAddr">Not connected</span>
-    <button class="btn-small" id="connectWalletBtn">Connect MetaMask</button>
+  <div class="card wallet-bar">
+    <div>
+      <div class="muted" style="font-size: var(--fs-xs)">当前钱包</div>
+      <span class="mono break-all" id="walletAddr">未连接</span>
+    </div>
+    <button class="btn" id="connectWalletBtn" type="button">连接 MetaMask</button>
   </div>
 
-  <!-- ── Section 1: Query ── -->
+  <!-- Primary action. A community operator opens this page to hand someone a name; that
+       belongs at the top, not buried under six query forms. -->
   <div class="card">
-    <h3>Query Records</h3>
+    <h3 class="card-title">授予子域名</h3>
+    <p class="card-sub">
+      把一个子域名发给某个地址。名字归对方所有(ERC-721),你之后无法凭这里的操作把它要回来。
+    </p>
 
-    <label for="queryName">ENS name (e.g. alice.aastar.eth)</label>
-    <input id="queryName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <div class="source-row">
-      <label>Source:</label>
-      <select id="querySource">
-        <option value="l2" selected>L2 (OP Sepolia)</option>
-        <option value="l1">L1 (Sepolia / Mainnet)</option>
-      </select>
-      <select id="l1Chain" style="display:none; width:auto; margin-bottom:0;">
-        <option value="sepolia" selected>Sepolia</option>
-        <option value="mainnet">Mainnet</option>
-      </select>
+    <div class="field">
+      <label class="label" for="registerLabel">标签</label>
+      <input class="input" id="registerLabel" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
+      <div class="hint">只用小写字母、数字和连字符。最终名字是 <code id="registerPreview">alice.…</code></div>
+    </div>
+    <div class="field">
+      <label class="label" for="registerParent">父域名</label>
+      <input class="input" id="registerParent" type="text" placeholder="community.eth" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="field">
+      <label class="label" for="registerOwner">授予给(地址)</label>
+      <input class="input" id="registerOwner" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
     </div>
 
-    <div class="query-btn-row">
-      <button class="btn-small" id="queryAddrBtn">Query Addr</button>
-      <button class="btn-small" id="queryTextBtn">Query Text key:</button>
-      <input id="queryTextKey" type="text" placeholder="com.twitter" style="width:140px; margin-bottom:0; padding:6px 8px; font-size:12px;" />
-      <button class="btn-small" id="queryChBtn">Query Contenthash</button>
+    <div class="actions">
+      <button class="btn btn-primary" id="registerBtn" type="button">签名并授予</button>
     </div>
-
-    <div class="result-box hidden" id="queryResult"></div>
+    <div id="registerResult" hidden></div>
   </div>
 
-  <!-- ── Section 2: Set Addr ── -->
-  <div class="card">
-    <h3>Set Address Record (EIP-712)</h3>
-
-    <label for="setAddrName">ENS name</label>
-    <input id="setAddrName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="setAddrAddr">Address (0x...)</label>
-    <input id="setAddrAddr" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
-
-    <label for="setAddrCoinType">Coin type (default 60 = ETH)</label>
-    <input id="setAddrCoinType" type="text" value="60" style="width:120px;" />
-
-    <button class="btn-primary" id="setAddrBtn">Connect &amp; Sign SetAddr</button>
-    <div class="result-box hidden" id="setAddrResult"></div>
-  </div>
-
-  <!-- ── Section 3: Set Text ── -->
-  <div class="card">
-    <h3>Set Text Record (EIP-712)</h3>
-
-    <label for="setTextName">ENS name</label>
-    <input id="setTextName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="setTextKey">Key (e.g. com.twitter)</label>
-    <input id="setTextKey" type="text" placeholder="com.twitter" autocomplete="off" spellcheck="false" />
-
-    <label for="setTextValue">Value (e.g. @alice)</label>
-    <input id="setTextValue" type="text" placeholder="@alice" autocomplete="off" />
-
-    <button class="btn-primary" id="setTextBtn">Connect &amp; Sign SetText</button>
-    <div class="result-box hidden" id="setTextResult"></div>
-  </div>
-
-  <!-- ── Section 4: Query Registrar Info ── -->
-  <div class="card">
-    <h3>Query Registrar Info</h3>
-    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Check if an address is authorized as a registrar</p>
-
-    <label for="queryRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
-    <input id="queryRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="queryRegistrarAddress">Registrar Address (0x...)</label>
-    <input id="queryRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
-
-    <button class="btn-small" id="queryRegistrarBtn">Query</button>
-    <div class="result-box hidden" id="queryRegistrarResult"></div>
-  </div>
-
-  <!-- ── Section 5: Add Registrar ── -->
-  <div class="card">
-    <h3>Add Registrar (Owner Only)</h3>
-    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Authorize an address to register subdomains under a parent domain</p>
-
-    <label for="addRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
-    <input id="addRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="addRegistrarAddress">Registrar Address (0x...)</label>
-    <input id="addRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
-
-    <div class="row">
-      <div style="flex:1;">
-        <label for="addRegistrarQuota">Quota (max registrations, 0 = unlimited)</label>
-        <input id="addRegistrarQuota" type="number" value="1000" min="0" style="width:100%;" />
+  <details class="card">
+    <summary>查询记录</summary>
+    <div class="details-body">
+      <div class="field">
+        <label class="label" for="queryName">名字</label>
+        <input class="input" id="queryName" type="text" placeholder="alice.community.eth" autocomplete="off" spellcheck="false" />
       </div>
-      <div style="flex:1;">
-        <label for="addRegistrarExpiry">Expiry (timestamp, 0 = never)</label>
-        <input id="addRegistrarExpiry" type="number" value="0" min="0" style="width:100%;" />
+      <div class="grid-2">
+        <div class="field">
+          <label class="label" for="querySource">数据来源</label>
+          <select class="input" id="querySource">
+            <option value="l2" selected>L2 合约(OP Sepolia 直读)</option>
+            <option value="l1">L1(经 CCIP-Read 解析)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label" for="l1Chain">L1 网络</label>
+          <select class="input" id="l1Chain">
+            <option value="sepolia" selected>Sepolia</option>
+            <option value="mainnet">Mainnet</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="queryTextKey">Text 记录的 key</label>
+        <input class="input" id="queryTextKey" type="text" placeholder="com.twitter" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="actions row">
+        <button class="btn" id="queryAddrBtn" type="button">查地址</button>
+        <button class="btn" id="queryTextBtn" type="button">查 Text</button>
+        <button class="btn" id="queryChBtn" type="button">查 Contenthash</button>
+      </div>
+      <div id="queryResult" hidden></div>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary>修改记录</summary>
+    <div class="details-body">
+      <p class="card-sub">
+        记录只能由该子域名的**持有者**修改。合约 owner 也可以覆写任意记录 —— 这是运营逃生舱,
+        不是常规操作。
+      </p>
+
+      <div class="subsection">
+        <h4>设置地址</h4>
+        <div class="field">
+          <label class="label" for="setAddrName">名字</label>
+          <input class="input" id="setAddrName" type="text" placeholder="alice.community.eth" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label" for="setAddrAddr">地址</label>
+            <input class="input" id="setAddrAddr" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="setAddrCoinType">Coin type</label>
+            <input class="input" id="setAddrCoinType" type="text" value="60" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="setAddrBtn" type="button">签名并设置地址</button>
+        </div>
+        <div id="setAddrResult" hidden></div>
+      </div>
+
+      <div class="subsection">
+        <h4>设置 Text 记录</h4>
+        <div class="field">
+          <label class="label" for="setTextName">名字</label>
+          <input class="input" id="setTextName" type="text" placeholder="alice.community.eth" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label" for="setTextKey">Key</label>
+            <input class="input" id="setTextKey" type="text" placeholder="com.twitter" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="setTextValue">Value</label>
+            <input class="input" id="setTextValue" type="text" placeholder="@alice" autocomplete="off" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="setTextBtn" type="button">签名并设置 Text</button>
+        </div>
+        <div id="setTextResult" hidden></div>
+      </div>
+
+      <div class="subsection">
+        <h4>设置 Contenthash</h4>
+        <div class="field">
+          <label class="label" for="setChName">名字</label>
+          <input class="input" id="setChName" type="text" placeholder="alice.community.eth" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label class="label" for="setChHash">Contenthash</label>
+          <input class="input" id="setChHash" type="text" placeholder="0xe30101… (IPFS),留空表示清除" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="setChBtn" type="button">签名并设置 Contenthash</button>
+        </div>
+        <div id="setChResult" hidden></div>
       </div>
     </div>
+  </details>
 
-    <button class="btn-primary" id="addRegistrarBtn" style="background:#2e7d32;">Connect &amp; Sign AddRegistrar</button>
-    <div class="result-box hidden" id="addRegistrarResult"></div>
-  </div>
+  <details class="card">
+    <summary>Registrar 授权管理</summary>
+    <div class="details-body">
+      <div class="alert alert-warn" style="margin-bottom: var(--sp-4)">
+        <strong>撤销 registrar ≠ 没人能发子域了。</strong>
+        <div class="muted">
+          合约 owner 无条件绕过 registrar 允许列表、配额与到期时间。撤销只对被授权的第三方生效。
+          托管场景下社区真正的杠杆是在 L1 改 resolver。
+        </div>
+      </div>
 
-  <!-- ── Section 6: Remove Registrar ── -->
-  <div class="card">
-    <h3>Remove Registrar (Owner Only)</h3>
-    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Revoke a registrar's authorization under a parent domain</p>
+      <div class="subsection">
+        <h4>查询授权状态</h4>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label" for="queryRegistrarParent">父域名</label>
+            <input class="input" id="queryRegistrarParent" type="text" placeholder="forest.community.eth" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="queryRegistrarAddress">registrar 地址</label>
+            <input class="input" id="queryRegistrarAddress" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="queryRegistrarBtn" type="button">查询</button>
+        </div>
+        <div id="queryRegistrarResult" hidden></div>
+      </div>
 
-    <label for="removeRegistrarParent">Parent Domain (e.g. forest.aastar.eth)</label>
-    <input id="removeRegistrarParent" type="text" placeholder="forest.aastar.eth" autocomplete="off" spellcheck="false" />
+      <div class="subsection">
+        <h4>授权 registrar</h4>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label" for="addRegistrarParent">父域名</label>
+            <input class="input" id="addRegistrarParent" type="text" placeholder="forest.community.eth" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="addRegistrarAddress">registrar 地址</label>
+            <input class="input" id="addRegistrarAddress" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="addRegistrarQuota">配额(可发放个数)</label>
+            <input class="input" id="addRegistrarQuota" type="number" value="1000" min="0" />
+          </div>
+          <div class="field">
+            <label class="label" for="addRegistrarExpiry">到期时间戳(0 = 永不过期)</label>
+            <input class="input" id="addRegistrarExpiry" type="number" value="0" min="0" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="addRegistrarBtn" type="button">签名并授权</button>
+        </div>
+        <div id="addRegistrarResult" hidden></div>
+      </div>
 
-    <label for="removeRegistrarAddress">Registrar Address (0x...)</label>
-    <input id="removeRegistrarAddress" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+      <div class="subsection">
+        <h4>撤销 registrar</h4>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label" for="removeRegistrarParent">父域名</label>
+            <input class="input" id="removeRegistrarParent" type="text" placeholder="forest.community.eth" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="label" for="removeRegistrarAddress">registrar 地址</label>
+            <input class="input" id="removeRegistrarAddress" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="removeRegistrarBtn" type="button">签名并撤销</button>
+        </div>
+        <div id="removeRegistrarResult" hidden></div>
+      </div>
+    </div>
+  </details>
 
-    <button class="btn-primary" id="removeRegistrarBtn" style="background:#c62828;">Connect &amp; Sign RemoveRegistrar</button>
-    <div class="result-box hidden" id="removeRegistrarResult"></div>
-  </div>
+  <details class="card">
+    <summary>转移子域名</summary>
+    <div class="details-body">
+      <p class="card-sub">把子域名的 ERC-721 所有权转给另一个地址。只有当前持有者能发起。</p>
+      <div class="field">
+        <label class="label" for="transferSubdomain">子域名</label>
+        <input class="input" id="transferSubdomain" type="text" placeholder="alice.forest.community.eth" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label class="label" for="transferSubdomainTo">转给(地址)</label>
+        <input class="input" id="transferSubdomainTo" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="transferSubdomainBtn" type="button">签名并转移</button>
+      </div>
+      <div id="transferSubdomainResult" hidden></div>
+    </div>
+  </details>
 
-  <!-- ── Section 7: Set Contenthash ── -->
-  <div class="card">
-    <h3>Set Contenthash (EIP-712)</h3>
+</div>
 
-    <label for="setChName">ENS name</label>
-    <input id="setChName" type="text" placeholder="alice.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="setChHash">Contenthash (hex, leave empty to clear)</label>
-    <input id="setChHash" type="text" placeholder="0xe301017012... (IPFS) or empty to clear" autocomplete="off" spellcheck="false" />
-
-    <button class="btn-primary" id="setChBtn">Connect &amp; Sign SetContenthash</button>
-    <div class="result-box hidden" id="setChResult"></div>
-  </div>
-
-  <!-- ── Section 8: Transfer Subdomain ── -->
-  <div class="card">
-    <h3>Transfer Subdomain (NFT Owner)</h3>
-    <p class="muted" style="margin-top:-10px; margin-bottom:12px;">Transfer ownership of a subdomain NFT to another address</p>
-
-    <label for="transferSubdomain">Subdomain (e.g. alice.forest.aastar.eth)</label>
-    <input id="transferSubdomain" type="text" placeholder="alice.forest.aastar.eth" autocomplete="off" spellcheck="false" />
-
-    <label for="transferSubdomainTo">New Owner Address (0x...)</label>
-    <input id="transferSubdomainTo" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
-
-    <button class="btn-small" id="transferSubdomainBtn">Transfer</button>
-    <div class="result-box hidden" id="transferSubdomainResult"></div>
-  </div>
-
-  <!-- ── Deployed Contracts ── -->
-  <div class="card">
-    <h3>Deployed Contracts</h3>
-    <table style="width:100%; border-collapse:collapse; font-size:12px;">
-      <thead>
-        <tr style="border-bottom:1px solid #e0e0e0;">
-          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left; width:180px;">Contract</th>
-          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left; width:80px;">Deployed by</th>
-          <th style="padding:4px 0; color:#999; font-weight:normal; text-align:left;">Address</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 0; color:#333;">L2RecordsV2 (OP Sepolia)</td>
-          <td style="padding:6px 0; color:#0b79d0; font-size:11px;">CometENS</td>
-          <td><a href="https://sepolia-optimism.etherscan.io/address/0x4124c580a52E3E8d7E678E3023B913738e5B2FD3" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x4124c580a52E3E8d7E678E3023B913738e5B2FD3</a></td>
-        </tr>
-        <tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 0; color:#333;">OffchainResolver (Sepolia)</td>
-          <td style="padding:6px 0; color:#0b79d0; font-size:11px;">CometENS</td>
-          <td><a href="https://sepolia.etherscan.io/address/0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x87d97a2e3B334a4b62e1269d02bf4e2b168EbB45</a></td>
-        </tr>
-        <tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 0; color:#333;">ENS Registry (Sepolia)</td>
-          <td style="padding:6px 0; color:#666; font-size:11px;">ENS Official</td>
-          <td><a href="https://sepolia.etherscan.io/address/0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e</a></td>
-        </tr>
-        <tr>
-          <td style="padding:6px 0; color:#333;">ENS Universal Resolver (Sepolia)</td>
-          <td style="padding:6px 0; color:#666; font-size:11px;">ENS Official</td>
-          <td><a href="https://sepolia.etherscan.io/address/0x21B000Fd62a880b2125A61e36a284BB757b76025" target="_blank" rel="noopener" style="font-family:monospace; color:#0b79d0;">0x21B000Fd62a880b2125A61e36a284BB757b76025</a></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <script type="module" src="/src/admin.ts"></script>
+<script type="module" src="/src/admin.ts"></script>
 </body>
 </html>

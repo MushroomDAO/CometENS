@@ -11,7 +11,8 @@ import {
 } from 'viem'
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
 import { config, isTestnet } from './config'
-import { buildDomain, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
+import { buildDomain, RegisterTypes, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
+import { OpPanel, explainError, explorerTxUrl, type ResultField } from './ui-state'
 import { L2RecordsV2ABI } from '../server/gateway/abi'
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -52,18 +53,27 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null
 }
 
+/**
+ * Single funnel for every result panel on this page.
+ *
+ * Rewriting this one function moves all eight existing forms onto the design system's alert
+ * styles at once, instead of editing ~700 lines of call sites. Visibility is toggled with the
+ * `hidden` property rather than a CSS class so the markup stays honest about what is shown.
+ */
 function showResult(elId: string, msg: string, type: 'success' | 'error' | 'info') {
   const el = byId(elId)
   if (!el) return
   el.textContent = msg
-  el.className = `result-box ${type}`
+  el.className = `alert alert-${type}`
+  el.hidden = false
 }
 
 function clearResult(elId: string) {
   const el = byId(elId)
   if (!el) return
-  el.className = 'result-box hidden'
+  el.className = ''
   el.textContent = ''
+  el.hidden = true
 }
 
 function getQuerySource(): 'l1' | 'l2' {
@@ -285,6 +295,84 @@ async function signAndSubmitSetAddr(): Promise<void> {
     showResult('setAddrResult', (e as Error)?.message ?? String(e), 'error')
   } finally {
     if (setAddrBtn) { setAddrBtn.disabled = false; setAddrBtn.textContent = 'Connect & Sign SetAddr' }
+  }
+}
+
+// ─── Grant subdomain (the console's primary action) ───────────────────────────
+
+const LABEL_RE = /^[a-z0-9-]+$/
+
+/**
+ * Hand a subdomain to an address.
+ *
+ * This is the one thing a community operator opens the console to do, and it was missing
+ * entirely — the page had six ways to read and edit records but no way to issue a name.
+ * Uses OpPanel rather than the plain showResult funnel because the outcome carries values
+ * (name, node, txHash) that the operator needs to copy elsewhere.
+ */
+async function signAndSubmitRegister(): Promise<void> {
+  const btn = byId<HTMLButtonElement>('registerBtn')
+  const panel = new OpPanel(byId('registerResult')!, btn, '签名并授予')
+
+  const label = byId<HTMLInputElement>('registerLabel')?.value.trim().toLowerCase() ?? ''
+  const parent = byId<HTMLInputElement>('registerParent')?.value.trim().toLowerCase() ?? ''
+  const owner = byId<HTMLInputElement>('registerOwner')?.value.trim() ?? ''
+
+  // Validate before asking for a signature: making someone approve a wallet prompt for a
+  // request that cannot succeed is the rudest possible way to report a typo.
+  if (!label) return panel.error(new Error('请填写标签'))
+  if (!LABEL_RE.test(label)) return panel.error(new Error('InvalidLabel'))
+  if (!parent) return panel.error(new Error('请填写父域名'))
+  if (!isAddress(owner)) return panel.error(new Error('授予目标不是一个合法地址'))
+
+  try {
+    panel.pending('等待钱包签名…')
+    const from = await ensureConnected()
+    const chain = getL2Chain()
+    const wallet = createWalletClient({ chain, transport: custom(getEthereum()) })
+
+    const now = Math.floor(Date.now() / 1000)
+    const nonce = BigInt(Date.now())
+    const deadline = BigInt(now + 600)
+    const message = { parent, label, owner: owner as Address, nonce, deadline }
+
+    const signature = await wallet.signTypedData({
+      account: from,
+      domain: buildDomain(chain.id, CONTRACT),
+      primaryType: 'Register',
+      types: RegisterTypes as any,
+      message: message as any,
+    })
+
+    panel.pending('提交中,等待上链…')
+    const response = await fetch(`${config.apiUrl}/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        signature,
+        domain: { verifyingContract: CONTRACT },
+        message: { parent, label, owner, nonce: nonce.toString(), deadline: deadline.toString() },
+      }),
+    })
+    const json = await response.json()
+    if (!response.ok) throw new Error(json.error ?? `服务端返回 ${response.status}`)
+
+    const fullName = `${label}.${parent}`
+    const fields: ResultField[] = [
+      { label: '名字', value: json.name ?? fullName, copy: true },
+      { label: '归属', value: owner, copy: true },
+    ]
+    if (json.node) fields.push({ label: 'node', value: json.node, copy: true })
+    if (json.txHash) {
+      fields.push({ label: '交易', value: json.txHash, copy: true, href: explorerTxUrl(chain.id, json.txHash) })
+    } else {
+      // Distinguish "submitted with no tx" from success — the worker may be read-only.
+      fields.push({ label: '注意', value: '服务端未返回交易哈希(worker 可能未配置写入密钥)' })
+    }
+    panel.success(`已授予 ${fullName}`, fields)
+  } catch (e) {
+    panel.error(e)
   }
 }
 
@@ -739,9 +827,36 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await ensureConnected()
     } catch (e) {
-      alert((e as Error)?.message ?? String(e))
+      // Previously a blocking modal dialog, which covers the tab and shows a raw RPC string.
+      // The wallet bar is where the user is looking, so the failure belongs there.
+      const addrEl = byId('walletAddr')
+      const { message } = explainError(e)
+      if (addrEl) {
+        addrEl.textContent = message
+        addrEl.className = 'break-all'
+        addrEl.style.color = 'var(--c-danger)'
+      }
     }
   })
+
+  // Grant subdomain — the primary action
+  byId<HTMLButtonElement>('registerBtn')?.addEventListener('click', signAndSubmitRegister)
+
+  // Live preview of the resulting name, so the operator sees what they are about to create
+  // rather than assembling it in their head from two separate fields.
+  const syncPreview = () => {
+    const label = byId<HTMLInputElement>('registerLabel')?.value.trim().toLowerCase() || 'alice'
+    const parent = byId<HTMLInputElement>('registerParent')?.value.trim().toLowerCase() || config.rootDomain || '…'
+    const el = byId('registerPreview')
+    if (el) el.textContent = `${label}.${parent}`
+  }
+  byId<HTMLInputElement>('registerLabel')?.addEventListener('input', syncPreview)
+  byId<HTMLInputElement>('registerParent')?.addEventListener('input', syncPreview)
+  if (config.rootDomain) {
+    const parentEl = byId<HTMLInputElement>('registerParent')
+    if (parentEl && !parentEl.value) parentEl.value = config.rootDomain
+  }
+  syncPreview()
 
   // Query buttons
   byId<HTMLButtonElement>('queryAddrBtn')?.addEventListener('click', queryAddr)
