@@ -19,11 +19,32 @@ import type { Address } from 'viem'
 const SOURCE = join(__dirname, '..', '..', 'workers', 'api', 'src', 'index.ts')
 const CONTRACT = '0x1111111111111111111111111111111111111111' as Address
 
-/** Routes dispatched through handleManage — i.e. every signature-authenticated write path. */
-function writeEndpoints(): string[] {
+/**
+ * Read-only routes. Everything else that the worker dispatches is treated as a write path and
+ * must answer a malformed signature with 401.
+ *
+ * DERIVED INVERSELY, on pr-daemon's note: the first version matched the ONE shape
+ * `if (path === '/x') { response = await handleManage(...) }`, so an endpoint written any other
+ * way was silently absent from the list. That is not hypothetical — at b7aecad `/apply` was
+ * written exactly that other way, and #33's missing-auth hole lived precisely there.
+ *
+ * An allowlist inverts the failure: a NEW endpoint is a write path by default, so forgetting to
+ * classify it makes this suite fail rather than quietly skip it. Adding a name here is a
+ * deliberate act someone has to justify in review.
+ */
+const READ_ONLY = new Set([
+  '/health', '/check-label', '/check-owner', '/lookup', '/resolve-status',
+  '/root-domains', '/application', '/applications', '/approval-mode',
+])
+
+function allDispatchedPaths(): string[] {
   const src = readFileSync(SOURCE, 'utf8')
-  const found = [...src.matchAll(/if \(path === '(\/[a-z0-9-]+)'\)\s*\{\s*response = await handleManage/g)]
+  const found = [...src.matchAll(/path === '(\/[a-z0-9/-]+)'/g)]
   return [...new Set(found.map((m) => m[1]))]
+}
+
+function writeEndpoints(): string[] {
+  return allDispatchedPaths().filter((p) => !READ_ONLY.has(p))
 }
 
 const { mockReadContract } = vi.hoisted(() => ({ mockReadContract: vi.fn() }))
@@ -56,6 +77,9 @@ const env = () => ({
   NETWORK: 'op-sepolia', L2_RECORDS_ADDRESS: CONTRACT,
   ROOT_DOMAIN: 'aastar.eth', ROOT_DOMAINS: 'aastar.eth',
   OP_RPC_URL: 'http://localhost:8545',
+  // /v1/register refuses with 503 when this is unset — correct for an unconfigured deployment,
+  // but it would mean this suite never reached that endpoint's signature check at all.
+  UPSTREAM_ALLOWED_SIGNERS: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
 })
 
 /**
@@ -83,6 +107,10 @@ function malformedBody() {
       id: 'alice.aastar.eth', decision: 'approve', reason: '',
       nonce: String(Date.now()), deadline: future,
     },
+    // /v1/register is personal_sign and reads these at the top level, not under `message`.
+    label: 'alice',
+    owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+    timestamp: Math.floor(Date.now() / 1000),
   }
 }
 
@@ -114,6 +142,51 @@ describe('a malformed signature is 401, never 5xx', () => {
     expect(endpoints.length).toBeGreaterThanOrEqual(7)
     expect(endpoints).toContain('/register')
     expect(endpoints).toContain('/apply')
+  })
+
+  it('every READ_ONLY name is a route that actually exists (control)', () => {
+    // An allowlist entry for a route that no longer exists is a silent exemption waiting to
+    // match a future endpoint of the same name. Stale allowlists are how these decay.
+    const dispatched = new Set(allDispatchedPaths())
+    expect([...READ_ONLY].filter((p) => !dispatched.has(p))).toEqual([])
+  })
+
+  it('every READ_ONLY route actually answers a GET — membership is earned, not asserted', () => {
+    // An allowlist whose entries are just names someone typed can silently exempt a write
+    // endpoint: adding '/v1/register' to READ_ONLY makes this whole suite green again, and
+    // nothing else notices. So membership needs a property the route must actually have.
+    //
+    // Reading is what these routes are for, so: a read-only route answers GET. A write route
+    // does not — it is POST-only and a GET falls through to 404.
+    return Promise.all(
+      [...READ_ONLY].map(async (path) => {
+        const worker = (await import('../../workers/api/src/index')).default
+        const res = await worker.fetch(
+          new Request(`https://api.test${path}`, { method: 'GET' }),
+          env() as any, {} as ExecutionContext,
+        )
+        expect({ path, status: res.status }).not.toMatchObject({ status: 404 })
+      }),
+    )
+  })
+
+  it('a WRITE route does not answer a GET (control)', async () => {
+    // The other half: without this, "answers a GET" would be a property every route has, and
+    // the membership check above would exempt nothing.
+    const worker = (await import('../../workers/api/src/index')).default
+    const res = await worker.fetch(
+      new Request('https://api.test/register', { method: 'GET' }),
+      env() as any, {} as ExecutionContext,
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('read-only and write together cover every dispatched route (control)', () => {
+    // The partition must be total: a route in neither list would be checked by nobody, and no
+    // assertion here would notice.
+    const all = allDispatchedPaths()
+    const readOnlyPresent = all.filter((p) => READ_ONLY.has(p))
+    expect(readOnlyPresent.length + endpoints.length).toBe(all.length)
   })
 
   for (const path of endpoints) {
