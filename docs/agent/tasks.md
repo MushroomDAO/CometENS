@@ -130,8 +130,11 @@
 - **明确不做**:不碰主网;不自动改 ENS(setResolver 由使用者自己执行,脚本只输出指引)。
 - **依赖**:T1.2.1
 - **交付物**:`scripts/bootstrap-community.mjs` + `pnpm bootstrap:community` + 一次 OP Sepolia 实跑记录
-- **验收命令**:`pnpm bootstrap:community --root test.eth --owner 0x... --dry-run`
-  必须成功;并**在 OP Sepolia 真跑一次**,把合约地址与 `owner()` 校验结果记进 progress.md
+- **验收命令**:`pnpm vitest run test/unit/bootstrap-checklist.test.ts && pnpm bootstrap:community --root test.eth --owner 0x... --dry-run`
+  必须成功;并**在 OP Sepolia 真跑一次**,把合约地址与 `owner()` 校验结果记进 progress.md。
+  (新增的 checklist 测试断言**清单里给出的变量覆盖验证步骤真正会读的变量** ——
+  #28 评审实测:照着原清单做,最后一步会以 `Missing VITE_L1_SEPOLIA_RPC_URL` 失败。
+  只跑 dry-run 是查不到这种问题的,清单是纯打印文本)
 - **风险/回滚**:会发真实测试网交易,消耗测试网 ETH。仅限 Sepolia,失败可重跑。
 - **涉及文件**:`scripts/bootstrap-community.ts`、`package.json`
 - **证据**:
