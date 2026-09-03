@@ -68,7 +68,11 @@ const envName = envIdx !== -1 ? args[envIdx + 1] : 'testnet'
 
 const net = NETWORKS[envName]
 if (!net) {
-  console.error(`unknown --env "${envName}" (expected: ${Object.keys(NETWORKS).join(' | ')})`)
+  // Honour --json even for usage errors: a caller piping into jq should never get plain
+  // text back, or the pipeline dies on the one path it cannot anticipate.
+  const msg = `unknown --env "${envName}" (expected: ${Object.keys(NETWORKS).join(' | ')})`
+  if (asJson) console.log(JSON.stringify({ ok: false, error: msg, hint: null }, null, 2))
+  else console.error(msg)
   process.exit(2)
 }
 
@@ -85,11 +89,18 @@ function addressFromWrangler(file, section) {
     return null
   }
   // Narrow to the requested env block so the testnet/production values can't be confused.
+  //
+  // The next-section search must tolerate INDENTED headers. TOML allows them, and an
+  // indented header used to leave the block unterminated — the regex then scanned on into
+  // the following env and returned ITS address. Verified: a testnet block with no address
+  // followed by an indented [env.production.vars] returned the production address, while
+  // the same input with the header at column 0 correctly returned null. Two spaces apart,
+  // and the failure mode is a silently wrong chain rather than an error.
   const start = toml.indexOf(`[env.${section}.vars]`)
   if (start === -1) return null
-  const rest = toml.slice(start + 1)
-  const nextSection = rest.indexOf('\n[')
-  const block = nextSection === -1 ? rest : rest.slice(0, nextSection)
+  const rest = toml.slice(start)
+  const nextRel = rest.slice(1).search(/\n[ \t]*\[/)
+  const block = nextRel === -1 ? rest : rest.slice(0, nextRel + 1)
   const m = block.match(/^\s*L2_RECORDS_ADDRESS\s*=\s*"(0x[0-9a-fA-F]{40})"/m)
   return m ? m[1] : null
 }
@@ -102,10 +113,34 @@ function addressFromWrangler(file, section) {
 // to catch. Only when the variable is unset/blank do we fall back to the public endpoint.
 const configuredRpc = (net.rpcEnvVar ? process.env[net.rpcEnvVar] : '')?.trim()
 const rpcUrl = process.env.CHECK_CHAIN_RPC_URL || configuredRpc || net.defaultRpc
-const address =
-  process.env.CHECK_CHAIN_L2_ADDRESS ||
-  addressFromWrangler(join(REPO_ROOT, 'workers/api/wrangler.toml'), envName) ||
-  addressFromWrangler(join(REPO_ROOT, 'workers/gateway/wrangler.toml'), envName)
+// Read BOTH worker configs rather than falling back from one to the other. With a
+// fallback, the api value simply wins and a disagreement between the two files — the exact
+// class of drift this script exists to surface — stays invisible.
+const apiAddress = addressFromWrangler(join(REPO_ROOT, 'workers/api/wrangler.toml'), envName)
+const gatewayAddress = addressFromWrangler(join(REPO_ROOT, 'workers/gateway/wrangler.toml'), envName)
+
+// Provenance is tracked, not assumed. The operator reads this line to confirm "the address
+// really came from wrangler.toml"; printing that claim when the value actually came from an
+// override hands them a receipt for something that did not happen.
+let address, addressSource
+if (process.env.CHECK_CHAIN_L2_ADDRESS) {
+  address = process.env.CHECK_CHAIN_L2_ADDRESS
+  addressSource = 'CHECK_CHAIN_L2_ADDRESS override'
+} else if (apiAddress && gatewayAddress && apiAddress.toLowerCase() !== gatewayAddress.toLowerCase()) {
+  address = null
+  addressSource = 'conflicting'
+} else if (apiAddress) {
+  address = apiAddress
+  addressSource = gatewayAddress
+    ? `wrangler.toml [env.${envName}.vars] (api + gateway agree)`
+    : `workers/api/wrangler.toml [env.${envName}.vars]`
+} else if (gatewayAddress) {
+  address = gatewayAddress
+  addressSource = `workers/gateway/wrangler.toml [env.${envName}.vars]`
+} else {
+  address = null
+  addressSource = 'not found'
+}
 
 /**
  * Redact an RPC URL for display. Provider keys are routinely embedded in the path
@@ -129,6 +164,21 @@ const OWNER_ABI = [
 ]
 const ZERO = '0x0000000000000000000000000000000000000000'
 
+/**
+ * Strip anything key-shaped from a third-party error string before it is displayed.
+ *
+ * The RPC URL is redacted at every site where we build a message, but viem error objects
+ * carry the full URL in `message`/`metaMessages`. Today `shortMessage` is always present so
+ * `??`-chains never reach `message` — that is a property of viem, not a guarantee we own.
+ * This makes the safety independent of it.
+ */
+function scrubError(e) {
+  const raw = String(e?.shortMessage || e?.message || e)
+  return raw
+    .replace(/https?:\/\/[^\s"']+/g, (u) => redactRpc(u))
+    .replace(/0x[0-9a-fA-F]{64}/g, '0x…(redacted)')
+}
+
 function fail(msg, hint) {
   if (asJson) {
     console.log(JSON.stringify({ ok: false, error: msg, hint: hint ?? null }, null, 2))
@@ -139,6 +189,12 @@ function fail(msg, hint) {
   process.exit(1)
 }
 
+if (addressSource === 'conflicting') {
+  fail(
+    `workers/api and workers/gateway disagree on L2_RECORDS_ADDRESS for env "${envName}": ${apiAddress} vs ${gatewayAddress}`,
+    'the two Workers would read different contracts. Reconcile both wrangler.toml files before deploying.',
+  )
+}
 if (!address) {
   fail(
     `could not find L2_RECORDS_ADDRESS for env "${envName}" in workers/*/wrangler.toml`,
@@ -161,7 +217,7 @@ try {
   chainId = await client.getChainId()
 } catch (e) {
   fail(
-    `cannot reach RPC ${redactRpc(rpcUrl)}: ${e?.shortMessage || e?.message || e}`,
+    `cannot reach RPC ${redactRpc(rpcUrl)}: ${scrubError(e)}`,
     'the endpoint is unreachable or rejected the request. Override with CHECK_CHAIN_RPC_URL=<url>.',
   )
 }
@@ -177,7 +233,7 @@ let code
 try {
   code = await client.getCode({ address })
 } catch (e) {
-  fail(`eth_getCode failed for ${address}: ${e?.shortMessage || e?.message || e}`)
+  fail(`eth_getCode failed for ${address}: ${scrubError(e)}`)
 }
 if (!code || code === '0x') {
   fail(
@@ -191,7 +247,7 @@ try {
   owner = await client.readContract({ address, abi: OWNER_ABI, functionName: 'owner' })
 } catch (e) {
   fail(
-    `owner() call reverted at ${address}: ${e?.shortMessage || e?.message || e}`,
+    `owner() call reverted at ${address}: ${scrubError(e)}`,
     'the contract at this address may not be an L2Records instance',
   )
 }
@@ -200,11 +256,12 @@ if (owner.toLowerCase() === ZERO) {
 }
 
 if (asJson) {
-  console.log(JSON.stringify({ ok: true, env: envName, network: net.label, chainId, rpc: redactRpc(rpcUrl), address, owner }, null, 2))
+  console.log(JSON.stringify({ ok: true, env: envName, network: net.label, chainId, rpc: redactRpc(rpcUrl), address, addressSource, owner }, null, 2))
 } else {
   console.log(`PASS  ${net.label}`)
   console.log(`      chainId   ${chainId}`)
   console.log(`      rpc       ${redactRpc(rpcUrl)}`)
-  console.log(`      contract  ${address}   (source: wrangler.toml [env.${envName}.vars])`)
+  console.log(`      contract  ${address}`)
+  console.log(`      source    ${addressSource}`)
   console.log(`      owner()   ${owner}`)
 }
