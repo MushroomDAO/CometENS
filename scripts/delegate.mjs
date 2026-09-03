@@ -97,14 +97,20 @@ function contractFromWrangler(section) {
 }
 
 const ZERO = '0x0000000000000000000000000000000000000000'
-const explicitContract = flag('contract')
-const contract = explicitContract ?? contractFromWrangler(envName)
+const liveAddress = contractFromWrangler(envName)
+const contract = flag('contract') ?? liveAddress
 if (!contract || contract.toLowerCase() === ZERO) {
   bail('no L2Records address', 'pass --contract 0x… or set it in workers/api/wrangler.toml')
 }
-// Whether this address came from wrangler.toml matters for the write guard below: that file
-// names the DEPLOYED contract, i.e. the one currently serving users.
-const targetingLiveDeployment = !explicitContract
+// Compare the ADDRESS, not how it arrived.
+//
+// The first version keyed off provenance (`!flag('contract')`), which answers "did the user
+// type it?" — a different question from "is this the contract serving users?". Passing the
+// live address verbatim to --contract therefore switched the guard off completely, and the
+// live address is printed by `check:chain` and published in the README, CHANGELOG and launch
+// post. The guard's own hint used to suggest --contract as the way forward, i.e. it taught
+// the bypass.
+const targetingLiveDeployment = !!liveAddress && contract.toLowerCase() === liveAddress.toLowerCase()
 
 const parent = flag('parent')
 if (!parent) bail('--parent is required', 'e.g. --parent community.eth')
@@ -117,6 +123,12 @@ const ABI = [
   { name: 'addRegistrar', type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }], outputs: [] },
   { name: 'removeRegistrar', type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'bytes32' }, { type: 'address' }], outputs: [] },
   { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  // The custom errors must be in the ABI or viem cannot name them, and explainRevert's
+  // branches below never match. Without these the four tailored hints are dead code.
+  { type: 'error', name: 'Unauthorized', inputs: [] },
+  { type: 'error', name: 'QuotaExceeded', inputs: [] },
+  { type: 'error', name: 'RegistrarExpired', inputs: [] },
+  { type: 'error', name: 'ZeroAddress', inputs: [] },
 ]
 
 const rpcUrl = process.env.OP_SEPOLIA_RPC_URL || net.defaultRpc
@@ -124,7 +136,12 @@ const pub = createPublicClient({ transport: http(rpcUrl) })
 
 /** Map a contract revert onto the operator-facing cause. Generic reverts are unhelpful here. */
 function explainRevert(e) {
-  const text = String(e?.shortMessage || e?.message || e)
+  // viem puts the decoded custom-error name on cause.data.errorName. Reading shortMessage
+  // first would never find it: shortMessage says "execution reverted" and the `||` chain then
+  // short-circuits before reaching anything that carries the name. Same `||`-short-circuit
+  // trap as the one fixed in check-chain.mjs during PR #22.
+  const errorName = e?.cause?.data?.errorName ?? e?.data?.errorName
+  const text = errorName ?? String(e?.shortMessage || e?.message || e)
   if (/Unauthorized/.test(text)) {
     return ['not the contract owner', 'addRegistrar/removeRegistrar are onlyOwner. Use the key that owns this deployment.']
   }
@@ -194,7 +211,7 @@ if (command === 'status') {
 if (targetingLiveDeployment && !argv.includes('--i-know-this-is-live')) {
   bail(
     `refusing to write to ${contract} — that is the DEPLOYED contract from workers/api/wrangler.toml`,
-    'point at your own deployment with --contract 0x…, or add --i-know-this-is-live if you really mean the live one',
+    'use --contract 0x… with YOUR OWN deployment (a different address), or add --i-know-this-is-live if you really do mean this one',
   )
 }
 
