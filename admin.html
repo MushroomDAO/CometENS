@@ -76,6 +76,16 @@
     <div id="registerResult" hidden></div>
   </div>
 
+  <div class="card">
+    <div class="row" style="justify-content: space-between; align-items: baseline">
+      <h3 class="card-title" style="margin: 0">待审批的申请</h3>
+      <button class="btn btn-ghost" id="queueRefreshBtn" type="button">刷新</button>
+    </div>
+    <p class="card-sub" id="approvalModeLabel">审批模式:读取中…</p>
+    <div id="queueList"></div>
+    <div id="queueResult" hidden style="margin-top: var(--sp-3)"></div>
+  </div>
+
   <details class="card">
     <summary>查询记录</summary>
     <div class="details-body">
