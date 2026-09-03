@@ -24,6 +24,7 @@ export default defineConfig({
         register: 'register.html',
         admin:    'admin.html',
         box:      'box.html',
+        lookup:   'lookup.html',
         apidocs:  'api-docs.html',
       },
     },
