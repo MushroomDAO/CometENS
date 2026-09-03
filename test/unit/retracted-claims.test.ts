@@ -26,7 +26,14 @@ import { join } from 'node:path'
  * future reader could not tell what was retracted. Membership is verified below — an entry
  * that does not actually contain the phrase is a stale exemption waiting to cover a real one.
  */
-const RETRACTED: Array<{ phrase: string; why: string; where: string; allowIn?: string[] }> = [
+interface Exemption {
+  /** Repo-relative path. */
+  file: string
+  /** How many times the phrase may appear there. Pinned, not a ceiling — see below. */
+  count: number
+}
+
+const RETRACTED: Array<{ phrase: string; why: string; where: string; allowIn?: Exemption[] }> = [
   {
     phrase: '这条规则是唯一能存在的守卫',
     why: 'L2RecordsV3._registerNode 有 AlreadyRegistered 状态不变量,合约层挡得住重复注册。' +
@@ -39,7 +46,7 @@ const RETRACTED: Array<{ phrase: string; why: string; where: string; allowIn?: s
     where: 'PR #45',
   },
   {
-    allowIn: ['docs/agent/followups.md'],
+    allowIn: [{ file: 'docs/agent/followups.md', count: 1 }],
     phrase: 'viem 重复安装',
     why: 'typecheck 的 113 个错误里 viem 类型冲突只占 1 条(sdk)。大头是 @types/node 没装。',
     where: 'PR #48 — 按目录二分:src=0 / +sdk=1 / +server=10 / +test=109',
@@ -116,8 +123,9 @@ describe('retracted claims do not survive anywhere in the repo', () => {
     // whatever lands in that file next — the same failure mode as a stale READ_ONLY entry.
     const stale: string[] = []
     for (const { phrase, allowIn } of RETRACTED) {
-      for (const rel of allowIn ?? []) {
-        if (!readFileSync(join(REPO, rel), 'utf8').includes(phrase)) stale.push(`${rel} ∌ "${phrase}"`)
+      for (const { file, count } of allowIn ?? []) {
+        const n = readFileSync(join(REPO, file), 'utf8').split(phrase).length - 1
+        if (n !== count) stale.push(`${file} has ${n}× "${phrase}", exemption says ${count}`)
       }
     }
     expect(stale).toEqual([])
@@ -125,12 +133,23 @@ describe('retracted claims do not survive anywhere in the repo', () => {
 
   for (const { phrase, why, where, allowIn } of RETRACTED) {
     it(`"${phrase.slice(0, 24)}…" appears nowhere`, () => {
-      const allowed = new Set(allowIn ?? [])
-      const hits = files
-        .map((f) => f.slice(REPO.length + 1))
-        .filter((rel) => !allowed.has(rel))
-        .filter((rel) => readFileSync(join(REPO, rel), 'utf8').includes(phrase))
-      expect(hits, `${why} (${where})`).toEqual([])
+      const allowed = new Map((allowIn ?? []).map((e) => [e.file, e.count]))
+      const offenders: string[] = []
+      for (const abs of files) {
+        const rel = abs.slice(REPO.length + 1)
+        const n = readFileSync(abs, 'utf8').split(phrase).length - 1
+        if (n === 0) continue
+        const budget = allowed.get(rel)
+        if (budget === undefined) {
+          offenders.push(`${rel} (${n}×, no exemption)`)
+        } else if (n !== budget) {
+          // Not `n > budget`. An exact count fails in BOTH directions: a bare ceiling only
+          // stops the phrase spreading, and a stale exemption for text that is no longer there
+          // would sit open — the same "floor equal to today's value" trap as #48.
+          offenders.push(`${rel} (${n}×, exemption allows exactly ${budget})`)
+        }
+      }
+      expect(offenders, `${why} (${where})`).toEqual([])
     })
   }
 
