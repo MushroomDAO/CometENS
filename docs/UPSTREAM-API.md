@@ -13,6 +13,7 @@ CometENS 是组件,不管你的用户是谁、怎么登录。你的系统知道"
 
 ```
 POST /register        ← 面向浏览器,EIP-712 签名,用户自己签
+                        ⚠️ APPROVAL_MODE=manual 时**仅限合约 owner**,其他人拿 409 并被指向 /apply
 POST /v1/register     ← 面向服务端,personal_sign,你的系统签  ← 本文讲这个
 ```
 

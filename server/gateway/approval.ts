@@ -201,3 +201,37 @@ export function isAuthorisedApprover(caller: string | undefined, contractOwner: 
   if (!ADDRESS_RE.test(caller) || !ADDRESS_RE.test(contractOwner)) return false
   return caller.toLowerCase() === contractOwner.toLowerCase()
 }
+
+/**
+ * Whether a direct /register call may proceed under the current approval mode.
+ *
+ * `/register` predates applications and grants immediately with no reference to APPROVAL_MODE.
+ * That made `manual` a promise the code did not keep: an operator who turns it on believes
+ * "nothing is issued without my decision", while anyone with a wallet could still POST
+ * /register and mint a name. The mode governed /apply only.
+ *
+ * It cannot simply be closed in manual mode: the admin console's own grant button posts to
+ * /register (admin.ts), and that grant IS the operator's decision — closing it would break the
+ * one flow manual mode exists to serve. So the rule is by CALLER, not by endpoint:
+ *
+ *   auto   → anyone (the deployment has said names are issued on request)
+ *   manual → the contract owner only; everyone else is redirected to /apply
+ *
+ * This does not touch /v1/register, which has its own allowlist (UPSTREAM_ALLOWED_SIGNERS)
+ * and is machine-to-machine: an upstream system holding a whitelisted key IS an authorised
+ * issuer under either mode.
+ */
+export function mayRegisterDirectly(
+  mode: ApprovalMode,
+  caller: string | undefined,
+  contractOwner: string | undefined,
+): { ok: true } | { ok: false; status: number; message: string; hint: string } {
+  if (mode === 'auto') return { ok: true }
+  if (isAuthorisedApprover(caller, contractOwner)) return { ok: true }
+  return {
+    ok: false,
+    status: 409,
+    message: 'This deployment requires approval before a name is issued',
+    hint: 'POST /apply instead — it queues the request for review. Direct /register is limited to the contract owner while APPROVAL_MODE=manual.',
+  }
+}

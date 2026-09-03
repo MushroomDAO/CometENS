@@ -3,6 +3,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import type { Address } from 'viem'
 import { buildDomain, ApplyTypes } from '../../server/gateway/manage/schemas'
+import { mayRegisterDirectly } from '../../server/gateway/approval'
 
 /**
  * `/apply` must be authenticated in BOTH approval modes.
@@ -169,5 +170,50 @@ describe('/apply — an Apply signature is not a Register signature', () => {
       message: { ...message, nonce: message.nonce.toString(), deadline: message.deadline.toString() },
     })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('manual mode must actually govern /register, not just /apply', () => {
+  // /register predates applications and granted immediately with no reference to APPROVAL_MODE.
+  // That made `manual` a promise the code did not keep: an operator who turned it on believed
+  // nothing was issued without their decision, while anyone with a wallet could still POST
+  // /register and mint a name.
+  const OWNER = `0x${'11'.repeat(20)}`
+  const STRANGER = `0x${'22'.repeat(20)}`
+
+  it('auto lets anyone register directly', () => {
+    expect(mayRegisterDirectly('auto', STRANGER, OWNER).ok).toBe(true)
+  })
+
+  it('manual blocks a stranger and points at /apply', () => {
+    const r = mayRegisterDirectly('manual', STRANGER, OWNER)
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.status).toBe(409)
+    expect(r.hint).toContain('/apply')
+  })
+
+  it('manual still lets the OWNER grant (control)', () => {
+    // The admin console's grant button posts to /register, and that grant IS the operator's
+    // decision. Closing it would break the one flow manual mode exists to serve — a fix that
+    // blocked everyone would pass the assertion above while making manual mode unusable.
+    expect(mayRegisterDirectly('manual', OWNER, OWNER).ok).toBe(true)
+  })
+
+  it('owner check is case-insensitive but not prefix-loose', () => {
+    expect(mayRegisterDirectly('manual', OWNER.toUpperCase().replace('0X', '0x'), OWNER).ok).toBe(true)
+    expect(mayRegisterDirectly('manual', OWNER.slice(0, -2) + 'ff', OWNER).ok).toBe(false)
+  })
+
+  it('an unreadable owner fails CLOSED in manual mode', () => {
+    // If owner() could not be read, "allow" would turn an RPC hiccup into an open door.
+    expect(mayRegisterDirectly('manual', OWNER, undefined).ok).toBe(false)
+    expect(mayRegisterDirectly('manual', undefined, OWNER).ok).toBe(false)
+  })
+
+  it('but an unreadable owner does NOT break auto mode (control)', () => {
+    // Without this, "fail closed everywhere" would pass the assertion above and break every
+    // auto-mode deployment whose RPC blipped.
+    expect(mayRegisterDirectly('auto', STRANGER, undefined).ok).toBe(true)
   })
 })

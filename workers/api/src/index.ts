@@ -46,7 +46,7 @@ import {
 } from '../../../server/gateway/manage/schemas'
 import { handleV1Register } from '../../../server/gateway/v1/register'
 import {
-  resolveMode, buildApplication, decideOnSubmit, checkResubmission, applyDecision,
+  resolveMode, buildApplication, decideOnSubmit, checkResubmission, applyDecision, mayRegisterDirectly,
   applicationKey, publicView, isAuthorisedApprover, APPLICATION_PREFIX,
   ApprovalError, type Application,
 } from '../../../server/gateway/approval'
@@ -624,10 +624,40 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
+    // Wrapped because a MALFORMED signature makes viem THROW rather than return false, and an
+    // uncaught throw here surfaces as 500 — telling the caller "our fault" when the truth is
+    // "your signature is unusable". Found by the approval-gate tests below, which needed a
+    // bad-signature request to prove the mode check happens after auth. The other write
+    // endpoints share the bare pattern and the same wrong status; that stays FU-6.
+    let ok = false
+    try {
+      ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
+    } catch {
+      ok = false
+    }
     if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
 
-    // Self-service model: any wallet can register their own subdomain.
+    // APPROVAL_MODE governs this endpoint too, not just /apply.
+    //
+    // Until now `manual` was a promise the code did not keep: an operator who turned it on
+    // believed nothing was issued without their decision, while anyone with a wallet could
+    // still POST here and mint a name. The mode is checked AFTER the signature so an
+    // unauthenticated caller still gets 401 rather than learning the deployment's mode.
+    //
+    // Owner-only rather than closed: the admin console's grant button posts here, and that
+    // grant IS the operator's decision. /v1/register is untouched — it has its own allowlist.
+    {
+      const mode = resolveMode(env.APPROVAL_MODE)
+      let contractOwner: string | undefined
+      try {
+        contractOwner = (await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })) as string
+      } catch {
+        contractOwner = undefined // fails closed in manual mode, by design
+      }
+      const gate = mayRegisterDirectly(mode, from, contractOwner)
+      if (!gate.ok) return jsonError(`${gate.message} — ${gate.hint}`, gate.status, 'APPROVAL_REQUIRED')
+    }
+
     // The Worker EOA (WORKER_EOA_PRIVATE_KEY) is the on-chain registrar and
     // submits the L2 tx — the signer just proves intent via EIP-712.
     const parentNode = namehash(message.parent) as Hex
