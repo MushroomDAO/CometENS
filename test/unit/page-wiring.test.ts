@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -196,5 +196,36 @@ describe('pages use the design system rather than their own palette', () => {
 
   it('the hex detector works (must-find control)', () => {
     expect('color: #ff0000;'.match(/#[0-9a-fA-F]{3,8}\b/g)).not.toBeNull()
+  })
+})
+
+describe('pages do not link to files that are not there', () => {
+  // The landing page is the front door; a dead link there is the worst place to have one,
+  // and nothing else looks at HTML hrefs — the build happily emits them, and docs-links only
+  // covers markdown.
+  const ALL_HTML = [...new Set(PAGES.map(([h]) => h).concat('index.html'))]
+
+  /** Root-relative hrefs/srcs pointing at repo files. External URLs and anchors are skipped. */
+  function localRefs(html: string): string[] {
+    return [...html.matchAll(/(?:href|src)="(\/[^"#?]+)"/g)]
+      .map((m) => m[1])
+      .filter((h) => !h.startsWith('//'))
+  }
+
+  it.each(ALL_HTML)('%s links only to files that exist', (page) => {
+    const missing = localRefs(read(page)).filter((h) => !existsSync(join(ROOT, h.replace(/^\//, ''))))
+    expect(missing, `${page} points at files that are not in the repo`).toEqual([])
+  })
+
+  it('the extractor finds refs, and would flag a bad one (controls)', () => {
+    // Two controls: it must see real refs, and it must reject a fabricated one — otherwise
+    // "no missing links" could just mean "found nothing to check".
+    expect(localRefs('<a href="/lookup.html">x</a>')).toEqual(['/lookup.html'])
+    expect(localRefs('<a href="https://example.com/x">x</a>')).toEqual([])
+    expect(
+      localRefs('<a href="/definitely-not-here.html">x</a>').filter(
+        (h) => !existsSync(join(ROOT, h.replace(/^\//, ''))),
+      ),
+    ).toEqual(['/definitely-not-here.html'])
   })
 })
