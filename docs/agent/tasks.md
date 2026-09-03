@@ -229,7 +229,7 @@
 - **涉及文件**:`docs/DELEGATED-HOSTING.md`、`docs/UPSTREAM-API.md`
 - **证据**:
 
-### T1.3.3 上游授予路径 e2e 测试  `PR_OPEN`
+### T1.3.3 上游授予路径 e2e 测试  `DONE` (PR #45)
 - **优先级**:mid
 - **目标**:证明「上游签名 → 子域真的 mint 给目标地址」,而不是只测了签名校验。
 - **开发范围**:补 `test/e2e/` 用例:构造 personal_sign 请求打 `/v1/register`,
@@ -247,7 +247,7 @@
 
 ## F1.4 — 文档与规划一致性
 
-### T1.4.1 同步 docs/roadmap.md 到真实状态  `PR_OPEN`
+### T1.4.1 同步 docs/roadmap.md 到真实状态  `DONE` (PR #41)
 - **优先级**:mid
 - **目标**:消除"文档说 v0.6.0、实际 v0.7.0 且已上测试网"的脱节。
 - **开发范围**:更新 `docs/roadmap.md`:补 HybridResolver、Cloudflare 部署、
@@ -296,7 +296,7 @@
 - **涉及文件**:`scripts/rotate-gateway-signer.ts`、`docs/KEY-ROTATION.md`、`package.json`
 - **证据**:
 
-### T1.5.1 抽象签名器接口 + env-key 实现  `PR_OPEN`
+### T1.5.1 抽象签名器接口 + env-key 实现  `DONE` (PR #35)
 - **优先级**:high
 - **目标**:把"用哪把钥匙、怎么签"从业务逻辑里剥离,为 KMS 留出插槽,
   同时保证自部署者只需一个环境变量即可运行。
@@ -314,7 +314,7 @@
 - **涉及文件**:`workers/api/src/`、`workers/gateway/src/`、`test/unit/`
 - **证据**:
 
-### T1.5.2 三角色密钥分离 + preflight 校验  `PR_OPEN`
+### T1.5.2 三角色密钥分离 + preflight 校验  `DONE` (PR #42)
 - **优先级**:high
 - **目标**:让 owner / writer / gateway-signer 在配置层就是三把独立的钥匙,
   并让 preflight 能检出"又混用了"。
@@ -356,7 +356,7 @@
 - **涉及文件**:`workers/api/src/index.ts`、`test/unit/`
 - **证据**:
 
-### T1.6.2 register.html 改造为申请入口  `PR_OPEN`
+### T1.6.2 register.html 改造为申请入口  `DONE` (PR #38)
 - **优先级**:mid
 - **目标**:页面语义从"自己注册"改为"提交申请",并如实显示当前审批模式。
 - **开发范围**:用设计系统重做;`auto` 模式下体验仍是即时拿到名字,
