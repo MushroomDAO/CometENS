@@ -152,7 +152,7 @@
 
 ## F1.3 — 委托托管闭环(管理权/所有权分离)
 
-### T1.3.1 delegate CLI + 撤销的**诚实**链上验证  `READY`
+### T1.3.1 delegate CLI + 撤销的**诚实**链上验证  `PR_OPEN`
 - **优先级**:high
 - **目标**:把 registrar 授权/查询/撤销做成可用命令(**模式 A 用**),
   并用测试**同时证明它有效、和它的边界在哪**。
@@ -175,7 +175,7 @@
   文档就会写出当前不成立的安全承诺。
 - **明确不做**:不新增合约、不改 owner 权限语义(那属于 TB.3 的架构决策)。
 - **依赖**:T1.0.1(需要可用的 RPC)
-- **交付物**:`scripts/delegate.ts` + 3 组 Foundry 测试 + 一次链上实跑记录
+- **交付物**:`scripts/delegate.mjs` + 5 个 Foundry 测试 + 只读命令链上实跑记录
 - **验收命令**:
   `forge test && grep -q 'function test_ownerCanStillRegisterAfterRevoke' contracts/test/L2RecordsV3.t.sol`
   (**当前树上这条是红的**;此前用的 `grep -c "owner" …` 恒真——现在就返回 25/exit 0,

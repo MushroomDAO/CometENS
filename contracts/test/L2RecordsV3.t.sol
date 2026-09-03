@@ -348,4 +348,100 @@ contract L2RecordsV3Test is Test {
         vm.expectRevert(L2RecordsV3.Unauthorized.selector);
         records.transferSubnodeByGateway(NODE_ALICE, alice, bob);
     }
+
+    // ─── T1.3.1: delegation isolation, revocation, and the owner escape hatch ──
+    //
+    // These three properties must be read together. Testing only the first two yields a
+    // comfortable "revocation verified ✅" that is FALSE for the delegated-hosting model,
+    // where the operator IS the contract owner and revocation does not apply to them.
+    // The third test exists to keep that fact visible instead of letting the docs claim
+    // a guarantee the contract does not make.
+
+    bytes32 constant PARENT_A = keccak256("parentA");
+    bytes32 constant PARENT_B = keccak256("parentB");
+
+    /// Property 1 — a registrar authorised for one parent cannot issue under another.
+    /// This is the security root of per-community isolation.
+    function test_registrarCannotCrossParentNode() public {
+        records.addRegistrar(PARENT_A, registrar, type(uint256).max, 0);
+
+        // Positive control first: without it, a revert below could simply mean the call
+        // was malformed rather than unauthorised.
+        vm.prank(registrar);
+        records.setSubnodeOwner(PARENT_A, LABEL_ALICE, alice, "alice");
+        assertEq(records.subnodeOwner(keccak256(abi.encodePacked(PARENT_A, LABEL_ALICE))), alice);
+
+        vm.prank(registrar);
+        vm.expectRevert(L2RecordsV3.Unauthorized.selector);
+        records.setSubnodeOwner(PARENT_B, LABEL_BOB, bob, "bob");
+    }
+
+    /// Property 2a — the positive control for revocation.
+    /// "Fails after revoke" means nothing unless it succeeded before.
+    function test_registrarSucceedsBeforeRevoke() public {
+        records.addRegistrar(PARENT_A, registrar, type(uint256).max, 0);
+        vm.prank(registrar);
+        records.setSubnodeOwner(PARENT_A, LABEL_ALICE, alice, "alice");
+        assertEq(records.subnodeOwner(keccak256(abi.encodePacked(PARENT_A, LABEL_ALICE))), alice);
+        assertTrue(records.isRegistrar(PARENT_A, registrar));
+    }
+
+    /// Property 2b — after removeRegistrar the same caller is rejected, with the specific
+    /// selector. A bare expectRevert() would also pass on an unrelated failure.
+    function test_registrarRevertsAfterRevoke() public {
+        records.addRegistrar(PARENT_A, registrar, type(uint256).max, 0);
+        vm.prank(registrar);
+        records.setSubnodeOwner(PARENT_A, LABEL_ALICE, alice, "alice");
+
+        records.removeRegistrar(PARENT_A, registrar);
+        assertFalse(records.isRegistrar(PARENT_A, registrar));
+
+        vm.prank(registrar);
+        vm.expectRevert(L2RecordsV3.Unauthorized.selector);
+        records.setSubnodeOwner(PARENT_A, LABEL_BOB, bob, "bob");
+    }
+
+    /// Property 3 — THE REVERSE ASSERTION. Revocation does not constrain the contract owner.
+    ///
+    /// onlyOwnerOrRegistrar short-circuits on `msg.sender != owner`, so the owner never
+    /// consults the registrar allowlist, the quota, or the expiry. In delegated hosting the
+    /// operator holds that owner key, which means "the community can revoke us" is not true
+    /// on-chain — their actual lever is changing the L1 resolver.
+    ///
+    /// Pinning this down is the point of the task: without it the suite reports revocation
+    /// as verified while the gap stays invisible.
+    function test_ownerCanStillRegisterAfterRevoke() public {
+        records.addRegistrar(PARENT_A, registrar, type(uint256).max, 0);
+        records.removeRegistrar(PARENT_A, registrar);
+        assertFalse(records.isRegistrar(PARENT_A, registrar));
+
+        // (a) the owner still issues under the very parent whose registrar was revoked
+        records.setSubnodeOwner(PARENT_A, LABEL_ALICE, alice, "alice");
+        bytes32 node = keccak256(abi.encodePacked(PARENT_A, LABEL_ALICE));
+        assertEq(records.subnodeOwner(node), alice);
+
+        // (b) the owner overwrites a record belonging to someone else
+        records.setAddr(node, 60, abi.encodePacked(bob));
+        assertEq(records.addr(node), bob);
+
+        // (c) the owner moves another account's subdomain NFT without their consent
+        records.transferSubnodeByGateway(node, alice, bob);
+        assertEq(records.subnodeOwner(node), bob);
+    }
+
+    /// The owner bypass is not limited to a revoked registrar: quota is short-circuited too.
+    function test_ownerBypassesRegistrarQuota() public {
+        records.addRegistrar(PARENT_A, registrar, 1, 0);
+
+        // The registrar burns its single unit and is then refused.
+        vm.prank(registrar);
+        records.setSubnodeOwner(PARENT_A, LABEL_ALICE, alice, "alice");
+        vm.prank(registrar);
+        vm.expectRevert(L2RecordsV3.QuotaExceeded.selector);
+        records.setSubnodeOwner(PARENT_A, LABEL_BOB, bob, "bob");
+
+        // The owner is unaffected by that exhausted quota.
+        records.setSubnodeOwner(PARENT_A, LABEL_BOB, bob, "bob");
+        assertEq(records.subnodeOwner(keccak256(abi.encodePacked(PARENT_A, LABEL_BOB))), bob);
+    }
 }

@@ -40,7 +40,7 @@
 
 验收:在 OP Sepolia 真跑一次,拿到合约地址,且 `owner()` == 传入的 owner。
 
-## 3. `scripts/delegate.ts` — 委托管理(**模式 A 的操作面**,不是模式 B)
+## 3. `scripts/delegate.mjs` — 委托管理(**模式 A 的操作面**,不是模式 B)
 
 ```
 pnpm delegate:grant  --parent <name.eth> --to <0x...> [--quota N] [--expiry <ISO8601>]
