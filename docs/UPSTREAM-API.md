@@ -19,6 +19,8 @@ POST /v1/register     ← 面向服务端,personal_sign,你的系统签  ← 本
 `/v1/register` 是**机器对机器**的:签名来自你的服务,不是终端用户。用户不需要有钱包,
 不需要登录 CometENS,甚至不需要知道 CometENS 存在。
 
+> `/register` 在某些部署下有额外限制(见下面的[错误码](#错误码)表)。`/v1/register` 不受影响。
+
 ## 鉴权
 
 你的服务持有一个密钥对,把它的地址交给运营方加进 `UPSTREAM_ALLOWED_SIGNERS`(逗号分隔)。
