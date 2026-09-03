@@ -129,3 +129,38 @@ cd <worktree> && pnpm install
   完成产品化差距分析;拆出 F1.1–F1.4 共 11 个 READY task、2 个 BLOCKED。
   *(计数是 2026-09-03 立项当时的;后续拆分与新增见 tasks.md,那里才是现值。)*
   按用户口径修正范围:仅测试网、CometENS 为大系统组件、终端用户免登录、子域为授予制。
+
+## 2026-09-04 · M1 验收逐条实核
+
+主线 task 与跟进账本(FU-5 除外)全部完成。对 `acceptance.md` 逐条核实,读数如下。
+
+### 代码侧:满足
+
+| 判据 | 读数 |
+|---|---|
+| A1 preflight 部署前报错 | 可运行;`PREFLIGHT_KEY_SEPARATION=stict` → exit 2(拼错不静默降级) |
+| A2 一条命令部署 | `pnpm bootstrap:community`,OP Sepolia 实跑过(`0xa67e416…`) |
+| A4 不依赖我们的密钥/worker | `SELF-HOSTING.md` 里我们的 worker 域名出现 **0 次** |
+| B1 委托生效 | 链上实测:`aastar.eth` 与 `forest.aastar.eth` 的 resolver 均为 HybridResolver `0xA54D63a6…` |
+| B3 信任模型如实披露 | `DELEGATED-HOSTING.md` 写明覆写记录 / 收回 NFT / 改 registrar,并把三处逃生舱指到具体测试 |
+| 成员两条路径 | API 自动(`/v1/register`,e2e 9 处链上断言)+ 管理员手动(`admin.ts:435`) |
+| 界面三页 | 落地页 / 公开查询页 / 管理控制台均已重做 |
+
+### 未验证:三条,都不在代码里
+
+1. **A3 —— 一个陌生开发者用自己的测试域名跑通全流程。** 需要别人的域名和 2 小时,
+   我核不了。文档写好了,但"照着文档能不能走通"只能由真的照着走一遍来回答。
+2. **B2 —— 撤销可验证(社区在 L1 改回自己的 resolver)。** 需要域名持有者的 L1 私钥。
+3. **⚠️ 线上 API worker 缺 4 个端点**(`/apply` `/approval-mode` `/applications` `/approve`,
+   `pnpm check:deploy-order` 实测)。**申请/审批功能对外目前不存在。**
+   代码在 `preview` 上,但没部署 = 没上线。
+
+### 一个反复出现的自身错误,记在这里
+
+今晚三次把**匹配不到的模式**当成"这东西不存在"的证据:
+`str.replace` 锚点写错(静默无操作)、核对模式漏了反引号、
+双引号里的 `\|` 在 ERE 下是字面反斜杠。三次都读出 0,三次都不是真的 0。
+
+**规程**:临时 shell 核对里的"应当不存在"检查,必须在同一次运行里配一格
+**已知存在**的对照。这条在测试里一直在做,但在随手的命令行核对里没做 ——
+而后者恰恰更容易被当成结论直接汇报出去。
