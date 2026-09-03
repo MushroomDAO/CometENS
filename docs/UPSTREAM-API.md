@@ -160,4 +160,4 @@ export async function grantSubdomain(label: string, owner: string) {
 发出去的名字归用户所有(ERC-721)。但**运营方作为合约 owner,在技术上仍能覆写记录、
 转移这个 NFT** —— 这是链上事实,不是本 API 的限制。如果你的用户需要这条保证,
 看 [DELEGATED-HOSTING.md](DELEGATED-HOSTING.md) 的"运营方能做什么"一节,
-以及自部署选项 `docs/SELF-HOSTING.md`(T1.2.3 编写中)。
+以及自部署选项 [SELF-HOSTING.md](SELF-HOSTING.md)。
