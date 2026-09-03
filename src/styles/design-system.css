@@ -23,7 +23,11 @@
    * addresses and hashes, and a loud accent competes with the data for attention. */
   --c-accent: #2554c7;
   --c-accent-hover: #1c42a3;
-  --c-success: #1a7f4b;
+  /* Foreground for anything sitting ON the accent. A token rather than a media-query
+   * override, so every accent surface (base AND hover) states its colour explicitly —
+   * see the .btn-primary note below for why implicit inheritance was unsafe here. */
+  --c-accent-fg: #ffffff;
+  --c-success: #14663c;
   --c-warn: #9a6207;
   --c-danger: #c0392f;
 
@@ -75,6 +79,8 @@
 
     --c-accent: #7aa2f7;
     --c-accent-hover: #9bb8fa;
+    /* The dark accent is a light blue; white on it fails contrast, so text flips dark. */
+    --c-accent-fg: #0d1218;
     --c-success: #5fce93;
     --c-warn: #e0b062;
     --c-danger: #f08278;
@@ -163,6 +169,9 @@ a:hover {
 }
 .btn:hover:not(:disabled) {
   border-color: var(--c-text-muted);
+  /* Same a:hover (0,1,1) > .btn (0,1,0) trap as .btn-primary — a plain .btn used as a
+   * link would otherwise turn accent-coloured on hover instead of staying text-coloured. */
+  color: var(--c-text);
 }
 /* :focus-visible rather than :focus so a mouse click does not leave a ring behind,
  * while keyboard users keep a clearly visible focus target. */
@@ -180,18 +189,18 @@ a:hover {
 .btn-primary {
   background: var(--c-accent);
   border-color: var(--c-accent);
-  color: #ffffff;
+  color: var(--c-accent-fg);
 }
+/* The color declaration below is NOT redundant. These buttons are <a> elements, and the
+ * global `a:hover` rule has specificity (0,1,1) — higher than `.btn-primary` (0,1,0). Without
+ * an explicit colour here, hover text was repainted with --c-accent-hover while this rule set
+ * the BACKGROUND to that same value: contrast 1.00, text invisible. Measured in a browser at
+ * 1.00 on hover vs 6.62 un-hovered before the fix. Any accent surface used as a link must
+ * state its own hover colour. */
 .btn-primary:hover:not(:disabled) {
   background: var(--c-accent-hover);
   border-color: var(--c-accent-hover);
-}
-@media (prefers-color-scheme: dark) {
-  /* The dark accent is a light blue; white-on-light-blue fails contrast, so the
-   * primary button flips to dark text in dark mode. */
-  .btn-primary {
-    color: #0d1218;
-  }
+  color: var(--c-accent-fg);
 }
 
 .btn-ghost {
@@ -201,7 +210,7 @@ a:hover {
 }
 .btn-ghost:hover:not(:disabled) {
   background: var(--c-bg);
-  color: var(--c-text);
+  color: var(--c-text); /* explicit: outranks a:hover, see .btn-primary note */
   border-color: var(--c-border);
 }
 
