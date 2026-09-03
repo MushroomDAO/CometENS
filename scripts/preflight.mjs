@@ -372,6 +372,29 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
 
   }
 
+  // 3d — the frontend's URLs still point at the reference deployment.
+  //
+  // src/config.ts falls back to OUR workers when VITE_API_URL / VITE_GATEWAY_URL are unset.
+  // That default is right for someone hacking on this repo and wrong for a self-hoster: their
+  // build silently routes resolution and writes through our infrastructure, and nothing in the
+  // build output says so. Acceptance criterion A4 is "no step needs our worker" — this check
+  // is what makes that verifiable instead of assumed.
+  const REFERENCE_HOSTS = ['cometens-api.jhfnetboy.workers.dev', 'cometens-gateway.jhfnetboy.workers.dev']
+  const frontendUrls = [
+    { name: 'VITE_API_URL', value: env.VITE_API_URL, fallback: REFERENCE_HOSTS[0] },
+    { name: 'VITE_GATEWAY_URL', value: env.VITE_GATEWAY_URL, fallback: REFERENCE_HOSTS[1] },
+  ]
+  const pointingAtUs = frontendUrls.filter(
+    (u) => !u.value || REFERENCE_HOSTS.some((h) => String(u.value).includes(h)),
+  )
+  if (pointingAtUs.length) {
+    add('3d', 'WARN', 'frontend points at the reference deployment',
+      pointingAtUs.map((u) => (u.value ? `${u.name}=${u.value}` : `${u.name} unset → defaults to ${u.fallback}`)).join(', '),
+      'a self-hosted frontend built like this routes resolution and writes through OUR workers. Set both to your own deployed workers. (If you ARE working on this repo, this warning is expected.)')
+  } else {
+    add('3d', 'PASS', 'frontend points at the reference deployment', 'both URLs point somewhere else')
+  }
+
   // 8 — root domain shape
   const root = env.ROOT_DOMAIN || env.VITE_ROOT_DOMAIN
   if (root && !ENS_NAME_RE.test(root)) {

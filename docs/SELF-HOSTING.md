@@ -149,14 +149,23 @@ pnpm check:chain     # chainId、合约地址、owner()
 pnpm preflight       # 全量配置检查
 ```
 
-然后配好 `.env.local`(四个变量,前两个来自第 2 步,后两个来自第 3 步):
+然后配好 `.env.local`(**六个变量**,前两个来自第 2 步,第三个来自第 3 步,
+最后两个指向**你自己部署的 workers**):
 
 ```
 VITE_ROOT_DOMAIN=你的名字.eth
 VITE_L2_RECORDS_ADDRESS=0x<第 2 步>
 VITE_L1_OFFCHAIN_RESOLVER_ADDRESS=0x<第 3 步>
 VITE_L1_SEPOLIA_RPC_URL=<一个 Ethereum Sepolia RPC>
+
+# ⚠️ 这两个不设的话,前端会**默认指向我们的 worker** —— 你的部署会依赖我们。
+VITE_API_URL=https://<你的 api worker>.workers.dev
+VITE_GATEWAY_URL=https://<你的 gateway worker>.workers.dev
 ```
+
+> 这两个默认值(`src/config.ts`)是为了让本仓库的开发者不配任何东西就能跑起来。
+> 对**自建者**它们是错的默认值:不覆盖就等于把解析和写入都托给我们,
+> 而构建过程不会有任何提示。`pnpm preflight` 现在会检出这一点。
 
 发一个子域,然后端到端解析:
 
