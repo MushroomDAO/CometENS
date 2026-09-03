@@ -13,7 +13,6 @@ CometENS 是组件,不管你的用户是谁、怎么登录。你的系统知道"
 
 ```
 POST /register        ← 面向浏览器,EIP-712 签名,用户自己签
-                        ⚠️ APPROVAL_MODE=manual 时**仅限合约 owner**,其他人拿 409 并被指向 /apply
 POST /v1/register     ← 面向服务端,personal_sign,你的系统签  ← 本文讲这个
 ```
 
@@ -165,15 +164,41 @@ export async function grantSubdomain(label: string, owner: string) {
 
 ---
 
-## 错误码
+## 重复注册的语义(2026-09-04)
 
-集成方请匹配 `code`,不要匹配英文文案 —— 文案会变。
+`/v1/register` 缺少 `/register` 已有的前置检查。**线上不存在静默转移** —— 部署中的
+`L2RecordsV3` 在 `_registerNode` 里有 `AlreadyRegistered` 不变量,重复注册会链上回滚。
+缺的是**清晰的错误语义与幂等**,以及对仍在跑 `L2Records`(V1,无此不变量)的部署的防护。
 
-| code | HTTP | 含义 | 该怎么办 |
-|---|---|---|---|
-| `LABEL_TAKEN` | 409 | 这个名字已经属于**别人** | 换一个标签。不要重试 —— 重试不会让它变成你的 |
-| `APPROVAL_REQUIRED` | 409 | 这套部署是 `APPROVAL_MODE=manual`,直接 `/register` 只对合约 owner 开放 | 改用 `POST /apply` 提交申请。**若你的地址是链上授权的 registrar,你本来就能直接调合约发放** —— 这条限制是关于运营方替谁付 gas,不是关于你有没有发放权 |
-| `OWNER_UNVERIFIABLE` | 503 | 读不到合约 owner(L2 RPC 没答),因此拒绝而不是猜 | 重试。**这不是在说你是谁** —— 持续出现请查 OP RPC |
+> `AlreadyRegistered` 不是授权检查,是**状态不变量**。合约 owner 绕过的是
+> 「你有没有权做这件事」(`onlyOwnerOrRegistrar`、配额、到期),不是「这件事是否合法」。
 
-> `APPROVAL_REQUIRED` 只影响 `POST /register`。`POST /v1/register` 有自己的白名单
-> (`UPSTREAM_ALLOWED_SIGNERS`),两种审批模式下都照常工作。
+现在的行为分三种,互不合并:
+
+| 链上现状 | 行为 | 返回 |
+|---|---|---|
+| 未注册 | 正常注册 | `200 { ok, name, node, txHash }` |
+| **已属于同一个 owner** | **幂等,不发交易** | `200 { ok, name, node, alreadyRegistered: true }`(无 `txHash`) |
+| 已属于**别人** | 拒绝 | `409 LABEL_TAKEN` |
+
+好处是把一次不透明的链上 revert 变成明确的回执,并省下一笔注定失败的交易。
+
+### 为什么 `/register` 没有幂等档,而这里有
+
+**幂等性该由调用方的重试模型决定,而不是由端点名决定。**
+
+`/v1/register` 的调用方是机器,至少一次投递、重试是正常行为,一个重复投递不该变成
+集成方必须特判的错误。`/register` 的调用方是人,重复提交是误操作 —— 静默"成功"会让
+他以为发生了什么事。所以两者语义不同是**刻意的**,不是遗漏。
+
+---|---|---|
+| 未注册 | 正常注册 | `200 { ok, name, node, txHash }` |
+| **已属于同一个 owner** | **幂等,不发交易** | `200 { ok, name, node, alreadyRegistered: true }`(无 `txHash`) |
+| 已属于**别人** | 拒绝 | `409 LABEL_TAKEN` |
+
+幂等那一档是刻意的:上游系统会重试,一个重复投递不该变成集成方必须特判的错误。
+但它**可区分** —— 没有 `txHash` 且带 `alreadyRegistered: true`,
+集成方能分清「本来就已经是这样」和「写入静默没发生」。
+
+> 合约层挡不住这个:worker EOA 就是合约 owner,链上没有任何东西阻止覆写。
+> 这条规则是唯一能存在的守卫。

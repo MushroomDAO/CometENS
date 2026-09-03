@@ -464,7 +464,11 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
 
   const writer = buildWriter(env)
 
-  const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer)
+  const pub = makePublicClient(env)
+  const l2Addr = env.L2_RECORDS_ADDRESS as Address
+  const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer, async (node) =>
+    (await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node] })) as string,
+  )
 
   // Persist full qualified name to KV registry on success
   if (result.ok && result.name && env.REGISTRY) {
