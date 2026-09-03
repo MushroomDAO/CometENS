@@ -2,7 +2,49 @@ import { createWalletClient, createPublicClient, http, custom } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { namehash } from 'viem/ens'
 import { config } from './config'
-import { RegisterTypes, buildDomain } from '../server/gateway/manage/schemas'
+import { RegisterTypes, ApplyTypes, buildDomain } from '../server/gateway/manage/schemas'
+import { OpPanel } from './ui-state'
+import {
+  classifyOutcome, describeOutcome, isNameUsable, submitLabel,
+  classifyModeProbe, canSubmit, probeNotice,
+  buildApplyMessage, serialiseApplyMessage,
+  type ApprovalMode, type ApplyResponse, type ModeProbe,
+} from './apply-flow'
+
+/**
+ * Which approval mode this deployment runs. Read once on load, because the page has to say
+ * what will happen BEFORE the applicant signs — a button reading "领取名字" under manual
+ * approval misleads someone into expecting a name and handing them a queue position.
+ * Defaults to 'manual' on failure: promising less than the deployment delivers is the safe
+ * direction to be wrong in.
+ */
+let modeProbe: ModeProbe = { kind: 'unknown' }
+let approvalMode: ApprovalMode = 'manual'
+
+async function loadApprovalMode(): Promise<void> {
+  try {
+    const res = await fetch(`${config.apiUrl}/approval-mode`)
+    let body: unknown = null
+    try {
+      body = await res.json()
+    } catch {
+      body = null
+    }
+    modeProbe = classifyModeProbe(res.status, body)
+  } catch {
+    modeProbe = { kind: 'unknown' }
+  }
+  if (modeProbe.kind === 'ok') approvalMode = modeProbe.mode
+
+  const notice = byId('modeNotice')
+  if (notice) notice.textContent = probeNotice(modeProbe)
+  const btn = byId<HTMLButtonElement>('registerBtn')
+  if (btn) {
+    btn.textContent = submitLabel(approvalMode)
+    // Refreshed again by the connect handler; this only ever tightens the condition.
+    if (!canSubmit(modeProbe)) btn.disabled = true
+  }
+}
 
 // Minimal ABI for L2Records reads
 const L2_READ_ABI = [
@@ -295,6 +337,12 @@ async function register(): Promise<void> {
     setResult('Please connect your wallet first.', 'error')
     return
   }
+  // Second gate, not a duplicate of the disabled button: the button is re-enabled by the
+  // connect handler, which does not know about the probe.
+  if (!canSubmit(modeProbe)) {
+    setResult(probeNotice(modeProbe), 'error')
+    return
+  }
 
   const registerBtn = byId<HTMLButtonElement>('registerBtn')
   if (registerBtn) {
@@ -323,68 +371,60 @@ async function register(): Promise<void> {
     const chain = getChain()
     const wallet = createWalletClient({ chain, transport: custom(ethereum) })
 
-    const now = Math.floor(Date.now() / 1000)
-    const nonce = BigInt(Date.now())
-    const deadline = BigInt(now + 600)
-
     const domain = buildDomain(chain.id, config.l2RecordsAddress)
-    const message = {
-      parent,
-      label,
-      owner: connectedAddress,
-      nonce,
-      deadline,
-    }
+    const message = buildApplyMessage(parent, label, connectedAddress)
 
+    // Apply, not Register: the two schemas are field-for-field identical and are told apart
+    // only by the primaryType in the struct hash — which is exactly what stops this signature
+    // being replayed against /register to bypass approval.
     const signature = await wallet.signTypedData({
       account: connectedAddress,
       domain,
-      primaryType: 'Register',
-      types: RegisterTypes as any,
+      primaryType: 'Apply',
+      types: ApplyTypes as any,
       message: message as any,
     })
 
     if (registerBtn) registerBtn.textContent = 'Submitting…'
 
-    const response = await fetch(`${config.apiUrl}/register`, {
+    const response = await fetch(`${config.apiUrl}/apply`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         from: connectedAddress,
         signature,
         domain: { verifyingContract: config.l2RecordsAddress },
-        message: {
-          parent: message.parent,
-          label: message.label,
-          owner: message.owner,
-          nonce: nonce.toString(),
-          deadline: deadline.toString(),
-        },
+        message: serialiseApplyMessage(message),
       }),
     })
 
-    const json = await response.json()
+    const json = (await response.json()) as ApplyResponse & { error?: string }
 
     if (!response.ok) {
       throw new Error(json.error ?? `Server error ${response.status}`)
     }
 
-    const fullName = `${label}.${parent}`
-    const txInfo = json.txHash ? `\nTx: ${json.txHash}` : '\n(no tx — worker key not configured)'
-    saveRegistration(connectedAddress!, label, fullName)
-    setResult(`Registered: ${fullName}${txInfo}`, 'success')
-    showVerifyCard(fullName, connectedAddress!)
+    const outcome = classifyOutcome(json)
+    const fullName = json.name || `${label}.${parent}`
+    const panel = new OpPanel(byId('result')!, registerBtn, submitLabel(approvalMode))
+    panel.success(fullName, describeOutcome(json))
 
-    // Show ENS App resolution countdown if the server returned an estimate
-    if (json.estimatedL1ResolvableAt) {
-      showResolveCountdown(fullName, json.estimatedL1ResolvableAt, json.challengePeriodSeconds)
+    // Only a granted-with-transaction application produced a name that actually resolves.
+    // Showing the verify card for a queued or unwritten one invites the applicant to check a
+    // name that is not there yet and read the failure as a bug.
+    if (isNameUsable(outcome)) {
+      saveRegistration(connectedAddress!, label, fullName)
+      showVerifyCard(fullName, connectedAddress!)
+      if ((json as any).estimatedL1ResolvableAt) {
+        showResolveCountdown(fullName, (json as any).estimatedL1ResolvableAt, (json as any).challengePeriodSeconds)
+      }
     }
   } catch (e) {
     setResult((e as Error)?.message ?? String(e), 'error')
   } finally {
     if (registerBtn) {
       registerBtn.disabled = !connectedAddress
-      registerBtn.textContent = 'Register Subdomain'
+      registerBtn.textContent = submitLabel(approvalMode)
     }
   }
 }
@@ -684,6 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshPreview()
   }
   loadRootDomains()
+  loadApprovalMode()
 
   // Live preview — update when label or parent changes
   const labelInput = byId<HTMLInputElement>('labelInput')
