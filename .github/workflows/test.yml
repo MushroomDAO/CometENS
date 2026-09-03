@@ -87,9 +87,19 @@ jobs:
       #
       # I tried replacing this with a hand-rolled `curl | bash` + retry loop so the transient
       # case would self-heal. It failed three attempts in a row on
-      # `~/.foundry/bin/foundryup: No such file or directory` — the installer does not put it
-      # where I assumed. That traded a rare network flake for a permanent breakage I owned, so
-      # it went back. If a retry is added later, wrap THIS action rather than reimplementing it.
+      # `~/.foundry/bin/foundryup: No such file or directory`.
+      #
+      # Root cause, for anyone tempted to try again: the installer honours XDG, and GitHub
+      # runners SET `XDG_CONFIG_HOME`, so foundryup lands in `$XDG_CONFIG_HOME/.foundry`, not
+      # `$HOME/.foundry`. It was not misplacing anything — my hardcoded path was wrong, and
+      # `export FOUNDRY_DIR="$HOME/.foundry"` would have fixed it in one line. The three
+      # attempts each failed in under a second; it was never the network.
+      #
+      # So the reason to keep this action is NOT "hand-rolling hits unknown path problems" —
+      # that problem was known and one line wide. The reason is that the action also brings
+      # VERSION MANAGEMENT and a CACHE, and the hand-rolled version silently dropped the cache
+      # — making it worse at the very thing it was meant to improve. Reimplement those two and
+      # you have rewritten the action; wrap it instead.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
       - name: Contracts must compile before the e2e suite deploys them
