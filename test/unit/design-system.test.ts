@@ -110,13 +110,22 @@ describe('design system — token coverage', () => {
    * list guards the rules someone remembered; the bug it exists to catch is precisely the one
    * nobody remembered.
    */
+  /** Selectors in scope for a given stylesheet — exported shape so the predicate is testable. */
+  function inScope(css: string): string[] {
+    return rulesIn(css).map((r) => r.selector)
+  }
+
   function backgroundRules(): Array<{ selector: string; body: string }> {
+    return rulesIn(CSS)
+  }
+
+  function rulesIn(source: string): Array<{ selector: string; body: string }> {
     const out: Array<{ selector: string; body: string }> = []
     // Comments must go first. A `/* … */` block sitting above a rule gets swallowed into the
     // selector capture, so `.btn-primary:hover` and `.badge` — both of which carry explanatory
     // comments — were silently absent from the derived set. Exactly the failure the control
     // exists for, and it only showed up when I checked the list against the stylesheet by eye.
-    const cssNoComments = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    const cssNoComments = source.replace(/\/\*[\s\S]*?\*\//g, '')
     for (const m of cssNoComments.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
       const selector = m[1].trim()
       const body = m[2]
@@ -124,12 +133,20 @@ describe('design system — token coverage', () => {
       // whether a rule is IN SCOPE, so getting it wrong selected nothing at all and the loop
       // ran zero assertions. A selection predicate fails silent; an assertion predicate fails
       // loud. The control below is what surfaced it.
-      // In scope: anything that paints a background, AND every hover/focus state — a hover
-      // rule that only sets `color` still competes with the global `a:hover`, and dropping its
-      // `color` reintroduces the original bug even though it paints nothing itself.
+      // In scope: anything that CHANGES the background, plus `:hover` — never `:focus`.
+      //
+      // The question is "does this rule change the background", not "is it a hover or a focus".
+      // `:hover` earns its place because it has a concrete opponent: the global `a:hover` will
+      // come for the foreground. `:focus-visible` has no such opponent, and most designs
+      // deliberately change only the outline and inherit the base colour — demanding an
+      // explicit `color` there punishes the correct way to write it.
+      //
+      // The false-positive side is the expensive one: a rule that keeps accusing good code
+      // gets disabled, and everything it legitimately caught goes with it. Same lesson as the
+      // address guard in #41, arrived at from the other direction.
       const paints = /(^|[;{])\s*background(-color)?\s*:/m.test(body)
-      const isInteractiveState = /:(hover|focus|focus-visible)/.test(selector)
-      if (!paints && !isInteractiveState) continue
+      const isHover = /:hover/.test(selector)
+      if (!paints && !isHover) continue
       // Only interactive surfaces carrying text: those are what `a:hover` can repaint.
       // Deliberately loose on the pseudo-class tail — an earlier strict pattern failed to
       // match `.btn:hover:not(:disabled)` and silently selected nothing, which the control
@@ -139,7 +156,7 @@ describe('design system — token coverage', () => {
       if (selector.includes(',')) continue
       // A transparent background paints nothing, so it cannot trap text against itself —
       // unless it is also a hover state, where a:hover still applies.
-      if (!isInteractiveState && /transparent|none/.test(body.match(/background(-color)?\s*:([^;]*)/)?.[2] ?? '')) continue
+      if (!isHover && /transparent|none/.test(body.match(/background(-color)?\s*:([^;]*)/)?.[2] ?? '')) continue
       out.push({ selector, body })
     }
     return out
@@ -166,6 +183,25 @@ describe('design system — token coverage', () => {
       expect(rule.body).toMatch(COLOR_DECL)
     },
   )
+
+  // pr-daemon's two rows for the focus question. The first is the load-bearing one: it is the
+  // only input on which "flag every interactive state" and "flag whatever changes the
+  // background" give DIFFERENT answers. The second gives the same answer either way, so on its
+  // own it cannot tell the two rules apart — which is exactly why it is here as a pair.
+  it('a focus rule that only changes the outline is NOT in scope', () => {
+    const css = '.btn:focus-visible { outline: 2px solid var(--c-ring); }'
+    expect(inScope(css)).toEqual([])
+  })
+
+  it('a focus rule that DOES change the background IS in scope (control)', () => {
+    const css = '.btn:focus-visible { background: var(--c-accent); }'
+    expect(inScope(css)).toEqual(['.btn:focus-visible'])
+  })
+
+  it('a hover rule with no background is still in scope — it has a:hover to fight', () => {
+    const css = '.btn:hover { color: var(--c-text); }'
+    expect(inScope(css)).toEqual(['.btn:hover'])
+  })
 
   it('the matcher rejects a block that only has border-color (control)', () => {
     expect('  background: red;\n  border-color: blue;\n').not.toMatch(COLOR_DECL)
