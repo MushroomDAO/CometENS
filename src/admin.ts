@@ -10,7 +10,7 @@ import {
   type Hex,
 } from 'viem'
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
-import { config, isTestnet } from './config'
+import { config } from './config'
 import { buildDomain, RegisterTypes, ApproveApplicationTypes, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
 import { OpPanel, explainError, explorerTxUrl, type ResultField } from './ui-state'
 import {
