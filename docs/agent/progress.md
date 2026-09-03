@@ -127,4 +127,5 @@ cd <worktree> && pnpm install
   preflight 增加密钥复用检查与"禁止打印私钥"硬要求。
 - **2026-09-03** `pilot plan`:建立 `docs/agent/` 七件套 + `.pilot.yml`;
   完成产品化差距分析;拆出 F1.1–F1.4 共 11 个 READY task、2 个 BLOCKED。
+  *(计数是 2026-09-03 立项当时的;后续拆分与新增见 tasks.md,那里才是现值。)*
   按用户口径修正范围:仅测试网、CometENS 为大系统组件、终端用户免登录、子域为授予制。
