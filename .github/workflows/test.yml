@@ -74,8 +74,32 @@ jobs:
 
       # Installed before the suite because test/e2e spawns `anvil`. Without it those files fail
       # rather than skip, and e2e is where the contract-invariant assertions live (#45).
+      #
+      # Retried because this step is the gate's only unavoidable network dependency, and it has
+      # already failed once for `curl: (35) Recv failure: Connection reset by peer` — a red gate
+      # for a reason with nothing to do with the code under review. That failure mode is the
+      # corrosive kind: it teaches people to re-run until green, and that action is
+      # indistinguishable from ignoring a real failure.
+      #
+      # Three attempts, and the step still FAILS if all three do — no `continue-on-error`, which
+      # would trade a flaky gate for a silent one.
+      # Plain bash rather than a retry action: this repo carries one runtime dependency on
+      # purpose, and a third-party action for a six-line loop does not fit that. The loop below
+      # is written so that exhausting the attempts FAILS — the naive `for … done` version exits
+      # 0 after the last failed attempt, which would turn a flaky gate into a silent one.
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if curl -fsSL https://foundry.paradigm.xyz | bash && "$HOME/.foundry/bin/foundryup"; then
+              echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+            echo "foundry install attempt $attempt failed"
+            sleep 15
+          done
+          echo "::error::foundry install failed after 3 attempts"
+          exit 1
 
       - name: Contracts must compile before the e2e suite deploys them
         run: forge build
