@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "abi:sync": "node scripts/sync-abi.mjs",
     "check:chain": "node scripts/check-chain.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs"
   },
   "dependencies": {
