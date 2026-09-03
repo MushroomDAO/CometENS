@@ -16,7 +16,7 @@ import { join } from 'node:path'
  * "Is there a duplicate" is a question about the whole set, so the extraction has to see every
  * port — I first grepped `ANVIL_PORT = N` and missed ccip.test.ts entirely, which uses L1_PORT
  * and L2_PORT. Anchoring on the `--port` ARGUMENT is what makes the scope match the question
- * (docs/agent/tasks.md「取证规程」).
+ * (docs/agent/practices.md「取证规程」).
  */
 const E2E_DIR = join(__dirname, '..', 'e2e')
 
