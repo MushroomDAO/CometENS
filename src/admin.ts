@@ -11,8 +11,12 @@ import {
 } from 'viem'
 import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
 import { config, isTestnet } from './config'
-import { buildDomain, RegisterTypes, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
+import { buildDomain, RegisterTypes, ApproveApplicationTypes, SetAddrTypes, SetTextTypes, SetContenthashTypes, AddRegistrarTypes, RemoveRegistrarTypes, TransferSubnodeTypes } from '../server/gateway/manage/schemas'
 import { OpPanel, explainError, explorerTxUrl, type ResultField } from './ui-state'
+import {
+  renderQueue, describeApplication, buildApproveMessage, serialiseApproveMessage,
+  type QueuedApplication,
+} from './admin-queue'
 import { L2RecordsV2ABI } from '../server/gateway/abi'
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -295,6 +299,90 @@ async function signAndSubmitSetAddr(): Promise<void> {
     showResult('setAddrResult', (e as Error)?.message ?? String(e), 'error')
   } finally {
     if (setAddrBtn) { setAddrBtn.disabled = false; setAddrBtn.textContent = 'Connect & Sign SetAddr' }
+  }
+}
+
+// ─── Approval queue ───────────────────────────────────────────────────────────
+
+/**
+ * Load and render the queue.
+ *
+ * Read-only and unauthenticated: seeing who applied for what is not privileged, and making
+ * the list require a wallet connection would mean an operator cannot even glance at the
+ * backlog without signing something.
+ */
+async function loadQueue(): Promise<void> {
+  const list = byId('queueList')
+  const panel = new OpPanel(byId('queueResult')!, byId<HTMLButtonElement>('queueRefreshBtn'), '刷新')
+  if (!list) return
+  try {
+    const [appsRes, modeRes] = await Promise.all([
+      fetch(`${config.apiUrl}/applications`),
+      fetch(`${config.apiUrl}/approval-mode`),
+    ])
+    const apps = ((await appsRes.json()) as any).applications as QueuedApplication[]
+    const mode = ((await modeRes.json()) as any).mode as string
+
+    const label = byId('approvalModeLabel')
+    if (label) {
+      label.textContent =
+        mode === 'manual'
+          ? '审批模式:manual — 申请进入下面的队列,需要你逐条决定。'
+          : '审批模式:auto — 申请提交即发放,这个队列通常是空的。'
+    }
+    renderQueue(list, apps ?? [], decideOnApplication)
+    panel.idle()
+  } catch (e) {
+    panel.error(e)
+  }
+}
+
+/** Sign a decision and submit it. Only the contract owner's signature is accepted server-side. */
+async function decideOnApplication(id: string, decision: 'approve' | 'reject'): Promise<void> {
+  const panel = new OpPanel(byId('queueResult')!, byId<HTMLButtonElement>('queueRefreshBtn'), '刷新')
+  let reason: string | undefined
+  if (decision === 'reject') {
+    // A rejection with no reason leaves the applicant with nothing to act on.
+    reason = window.prompt('拒绝理由(会展示给申请人,可留空):') ?? undefined
+  }
+  try {
+    panel.pending(decision === 'approve' ? '等待签名并发放…' : '等待签名…')
+    const from = await ensureConnected()
+    const chain = getL2Chain()
+    const wallet = createWalletClient({ chain, transport: custom(getEthereum()) })
+
+    const message = buildApproveMessage(id, decision, reason)
+    const signature = await wallet.signTypedData({
+      account: from,
+      domain: buildDomain(chain.id, CONTRACT),
+      primaryType: 'ApproveApplication',
+      types: ApproveApplicationTypes as any,
+      message: message as any,
+    })
+
+    panel.pending('提交中…')
+    const res = await fetch(`${config.apiUrl}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        signature,
+        domain: { verifyingContract: CONTRACT },
+        message: serialiseApproveMessage(message),
+      }),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error ?? `服务端返回 ${res.status}`)
+
+    const fields = describeApplication(json as QueuedApplication)
+    if (json.txHash) {
+      const href = explorerTxUrl(chain.id, json.txHash)
+      if (href) fields.push({ label: '浏览器', value: json.txHash, href, copy: true })
+    }
+    panel.success(decision === 'approve' ? '已批准并发放' : '已拒绝', fields)
+    await loadQueue()
+  } catch (e) {
+    panel.error(e)
   }
 }
 
@@ -838,6 +926,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   })
+
+  // Approval queue — loaded on open so an operator sees the backlog without clicking.
+  byId<HTMLButtonElement>('queueRefreshBtn')?.addEventListener('click', loadQueue)
+  loadQueue()
 
   // Grant subdomain — the primary action
   byId<HTMLButtonElement>('registerBtn')?.addEventListener('click', signAndSubmitRegister)
