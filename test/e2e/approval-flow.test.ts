@@ -24,7 +24,12 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { buildDomain, ApplyTypes, ApproveApplicationTypes } from '../../server/gateway/manage/schemas'
 
-const ANVIL_PORT = 18549
+// Every e2e file spawns its own anvil, and vitest runs files in parallel — a shared port
+// means the second process fails to bind, its client connects to somebody else's chain, and
+// both send from the same default accounts (NonceTooLowError). 18549 collided with
+// upstream-api.test.ts: running just those two failed 3/3.
+// test/unit/e2e-ports.test.ts asserts these stay distinct.
+const ANVIL_PORT = 18553
 const CONTRACTS_DIR = join(import.meta.dirname, '..', '..', 'contracts')
 const ROOT = 'community.eth'
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -38,7 +43,7 @@ const applicant = privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86d
 const stranger = privateKeyToAccount('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a')
 const RECIPIENT = applicant.address
 
-const anvilChain = { ...foundry, id: 31337, rpcUrls: { default: { http: [`http://127.0.0.1:${ANVIL_PORT}`] } } }
+const anvilChain = { ...foundry, rpcUrls: { default: { http: [`http://127.0.0.1:${ANVIL_PORT}`] } } }
 
 const L2_READ_ABI = [
   { type: 'function', name: 'subnodeOwner', stateMutability: 'view',

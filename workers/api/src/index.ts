@@ -1032,10 +1032,16 @@ function getRootDomains(env: Env): string[] {
  * wrong EIP-712 domain.
  *
  * It exists because the chain id is baked into the EIP-712 domain, so nothing that signs can
- * be exercised end-to-end against a local node without it — the approval flow included. A
- * self-hoster bringing the stack up on Anvil before touching a testnet needs the same branch.
+ * be exercised end-to-end against a local node without it — the approval flow included.
+ *
+ * Not a test hook, by this test: does the branch change WHAT THE CODE DOES for a given
+ * (chain, signature), or only WHICH CHAIN was selected? Only the latter — `getChain` was
+ * already a deployment axis switching on NETWORK and this adds a third value to it. A test
+ * hook is dangerous because it makes the thing under test differ from the thing that ships;
+ * a configuration axis does not create that fork, so "is there a second user" need not be
+ * answered.
  */
-function getChain(env: Env) {
+export function getChain(env: Env) {
   if (env.NETWORK === 'op-mainnet') return optimism
   if (env.NETWORK === 'local') return { ...foundry, id: 31337 }
   return optimismSepolia
