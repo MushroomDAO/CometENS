@@ -15,7 +15,8 @@
     "check:chain": "node scripts/check-chain.mjs",
     "delegate": "node scripts/delegate.mjs",
     "preflight": "node scripts/preflight.mjs",
-    "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs"
+    "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
+    "bootstrap:community": "node scripts/bootstrap-community.mjs"
   },
   "dependencies": {
     "viem": "^2.37.13"

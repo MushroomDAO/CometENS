@@ -126,7 +126,7 @@
 - **涉及文件**:`scripts/preflight.ts`、`test/unit/preflight.test.ts`、`package.json`
 - **证据**:
 
-### T1.2.2 一键 bootstrap 部署脚本(测试网实跑)  `READY`
+### T1.2.2 一键 bootstrap 部署脚本(测试网实跑)  `PR_OPEN`
 - **优先级**:high
 - **目标**:一条命令为一个新社区在 OP Sepolia 拉起全套,并输出收尾清单。
 - **开发范围**:按 spec.md §2 实现 `scripts/bootstrap-community.ts`
@@ -134,9 +134,12 @@
   支持 `--dry-run`;每步幂等。
 - **明确不做**:不碰主网;不自动改 ENS(setResolver 由使用者自己执行,脚本只输出指引)。
 - **依赖**:T1.2.1
-- **交付物**:`scripts/bootstrap-community.ts` + `pnpm bootstrap:community` + 一次 OP Sepolia 实跑记录
-- **验收命令**:`pnpm bootstrap:community --root test.eth --owner 0x... --dry-run`
-  必须成功;并**在 OP Sepolia 真跑一次**,把合约地址与 `owner()` 校验结果记进 progress.md
+- **交付物**:`scripts/bootstrap-community.mjs` + `pnpm bootstrap:community` + 一次 OP Sepolia 实跑记录
+- **验收命令**:`pnpm vitest run test/unit/bootstrap-checklist.test.ts && pnpm bootstrap:community --root test.eth --owner 0x... --dry-run`
+  必须成功;并**在 OP Sepolia 真跑一次**,把合约地址与 `owner()` 校验结果记进 progress.md。
+  (新增的 checklist 测试断言**清单里给出的变量覆盖验证步骤真正会读的变量** ——
+  #28 评审实测:照着原清单做,最后一步会以 `Missing VITE_L1_SEPOLIA_RPC_URL` 失败。
+  只跑 dry-run 是查不到这种问题的,清单是纯打印文本)
 - **风险/回滚**:会发真实测试网交易,消耗测试网 ETH。仅限 Sepolia,失败可重跑。
 - **涉及文件**:`scripts/bootstrap-community.ts`、`package.json`
 - **证据**:
