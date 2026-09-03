@@ -14,7 +14,8 @@
     "abi:sync": "node scripts/sync-abi.mjs",
     "check:chain": "node scripts/check-chain.mjs",
     "preflight": "node scripts/preflight.mjs",
-    "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs"
+    "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
+    "bootstrap:community": "node scripts/bootstrap-community.mjs"
   },
   "dependencies": {
     "viem": "^2.37.13"
