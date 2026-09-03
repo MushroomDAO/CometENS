@@ -26,9 +26,20 @@ function testSources(): string[] {
     .filter((f) => f.endsWith('.test.ts') && !f.endsWith('test-focus.test.ts'))
 }
 
-/** Matches `.only` / `.skip` as a call on a test function, not as part of a longer name. */
-const FOCUS = /\b(?:it|test|describe)\s*\.\s*only\b/
-const SKIP = /\b(?:it|test|describe)\s*\.\s*skip\b/
+/**
+ * `.only` / `.skip` as a call on a test function, through any chain of modifiers.
+ *
+ * The first version required `only` to follow the test function DIRECTLY, so
+ * `it.concurrent.only(...)` slipped past — and that is not a contrived spelling: reaching for
+ * `it.concurrent.only` while debugging one slow async case needs no motive at all, which is
+ * precisely the "reached for it without thinking" this guard exists to catch.
+ *
+ * Measured: injecting `it.concurrent.only` into design-system.test.ts left that file at
+ * 1 passed | 35 skipped, this guard at 6 passed, and the whole gate green. The 35 that
+ * vanished are the design-system assertions #48 and #54 took several rounds to build.
+ */
+const FOCUS = /\b(?:it|test|describe)(?:\s*\.\s*\w+)*\s*\.\s*only\b/
+const SKIP = /\b(?:it|test|describe)(?:\s*\.\s*\w+)*\s*\.\s*skip\b/
 
 describe('no committed .only or unconditional .skip', () => {
   const files = testSources()
@@ -66,6 +77,21 @@ describe('no committed .only or unconditional .skip', () => {
     expect(FOCUS.test('it.only("x", () => {})')).toBe(true)
     expect(SKIP.test('describe.skip("x", () => {})')).toBe(true)
     expect(FOCUS.test('it . only ("x", () => {})')).toBe(true)
+  })
+
+  it('catches .only behind a modifier chain', () => {
+    // The spelling that got past the first version. `skipIf` must still be exempt, so the
+    // chain part cannot simply be "anything before .skip".
+    expect(FOCUS.test('it.concurrent.only("x", () => {})')).toBe(true)
+    expect(FOCUS.test('it.sequential.only("x", () => {})')).toBe(true)
+    expect(SKIP.test('describe.concurrent.skip("x", () => {})')).toBe(true)
+  })
+
+  it('the widened chain does NOT start catching skipIf (control)', () => {
+    // The failure mode of the fix: `(?:\.\w+)*` could swallow `skipIf` if `skip` were matched
+    // without a boundary. Both spellings, plain and chained.
+    expect(SKIP.test('describe.skipIf(SKIP)("Integration", () => {})')).toBe(false)
+    expect(SKIP.test('it.concurrent.skipIf(x)("y", () => {})')).toBe(false)
   })
 
   it('does not flag a test whose NAME contains the word (control)', () => {

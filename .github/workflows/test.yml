@@ -85,7 +85,15 @@ jobs:
       # RPC/key env vars are absent (describe.skipIf), which is the case here; that is
       # deliberate, not a silent gap: those tests talk to a live deployment.
       - name: Test suite
-        run: pnpm test
+        run: pnpm vitest run --reporter=default --reporter=json --outputFile.json=vitest-report.json
+
+      # Second instrument for "did anything stop running", reading the RUN rather than the
+      # source. test/unit/test-focus.test.ts greps for `.only`/`.skip` and so only recognises
+      # spellings someone thought of — `it.concurrent.only` slipped past its first version,
+      # leaving one file at 1 passed | 35 skipped with this gate green. The skipped TOTAL went
+      # 9 → 44 in that same run. The mark was always there; nobody was reading the number.
+      - name: Nothing silently stopped running
+        run: pnpm check:skipped vitest-report.json
 
       - name: Solidity tests
         run: forge test
