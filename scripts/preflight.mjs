@@ -30,12 +30,59 @@ const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/
 /** Matches a bare 64-hex key anywhere in a string — used to detect leakage, not to validate. */
 export const LOOKS_LIKE_KEY = /0x[0-9a-fA-F]{64}/
 
-/** The three key roles. Reusing one key across them means one leak compromises everything. */
+/**
+ * The three key roles, each with its variable names most-specific-first.
+ *
+ * This table MUST stay in step with ROLE_ENV_VARS in server/gateway/signer.ts — that is what
+ * the workers actually read. It is duplicated rather than imported because preflight is a
+ * plain .mjs script that node runs directly and cannot import a .ts module; a test asserts
+ * the two agree, so drift fails loudly instead of making preflight check the wrong variables.
+ */
 export const KEY_ROLES = [
-  { env: 'WORKER_EOA_PRIVATE_KEY', role: 'writer (L2 transactions)' },
-  { env: 'PRIVATE_KEY_SUPPLIER', role: 'gateway signer (CCIP-Read responses)' },
-  { env: 'PRIVATE_KEY_JASON', role: 'deployer / owner' },
+  { names: ['WRITER_KEY', 'WORKER_EOA_PRIVATE_KEY'], role: 'writer (L2 transactions)' },
+  { names: ['GATEWAY_SIGNER_KEY', 'PRIVATE_KEY_SUPPLIER'], role: 'gateway signer (CCIP-Read responses)' },
+  { names: ['OWNER_KEY', 'PRIVATE_KEY_JASON'], role: 'deployer / owner' },
 ]
+
+/**
+ * Whether a shared key is a warning or a hard failure.
+ *
+ * Self-hosting starts with one key doing everything and that is a reasonable place to begin —
+ * failing there would block a first deployment over a risk the operator may knowingly accept.
+ * A delegated deployment holds other communities' names, so the same finding is disqualifying.
+ * Set PREFLIGHT_KEY_SEPARATION=strict there (docs/DELEGATED-HOSTING.md says to).
+ */
+export function separationSeverity(env) {
+  return String(env.PREFLIGHT_KEY_SEPARATION ?? '').toLowerCase() === 'strict' ? 'FAIL' : 'WARN'
+}
+
+/** First non-empty variable for a role, mirroring resolveKeySource in signer.ts. */
+export function resolveRoleKey(names, env) {
+  for (let i = 0; i < names.length; i++) {
+    const v = env[names[i]]
+    if (v !== undefined && v !== '') return { varName: names[i], value: v, legacy: i > 0 }
+  }
+  return null
+}
+
+/**
+ * Two names for one role holding DIFFERENT keys.
+ *
+ * The workers REFUSE TO START on this (see assertNoConflictingKeys in signer.ts), because
+ * which name wins changed when the role-specific names were introduced — so deploying would
+ * silently swap the signer. preflight has to report it, or the operator meets it as a dead
+ * gateway with a green health check.
+ */
+export function roleKeyConflicts(env) {
+  const out = []
+  for (const { names, role } of KEY_ROLES) {
+    const present = names.filter((n) => env[n] !== undefined && env[n] !== '')
+    if (present.length < 2) continue
+    const addrs = new Set(present.map((n) => addressOf(env[n])).filter(Boolean))
+    if (addrs.size > 1) out.push({ role, names: present })
+  }
+  return out
+}
 
 const ENS_NAME_RE = /^([a-z0-9-]+\.)+eth$/
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
@@ -217,11 +264,16 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
   // 2 — private key format. Report the KEY NAME and validity, never the value.
   const badFormat = []
   const present = []
-  for (const { env: name } of KEY_ROLES) {
-    const v = env[name]
-    if (!v) continue
-    present.push(name)
-    if (!PRIVATE_KEY_RE.test(v)) badFormat.push(name)
+  // Every name a role can be set under, not just the preferred one: a malformed key under the
+  // legacy name is exactly as fatal, and checking only the new name would report PASS on a
+  // deployment whose actual key is unusable.
+  for (const { names } of KEY_ROLES) {
+    for (const name of names) {
+      const v = env[name]
+      if (!v) continue
+      present.push(name)
+      if (!PRIVATE_KEY_RE.test(v)) badFormat.push(name)
+    }
   }
   if (badFormat.length) {
     add(2, 'FAIL', 'private key format', `not 0x + 64 hex: ${badFormat.join(', ')}`,
@@ -251,22 +303,36 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
   // the NORMAL case for the deployment shape TB.3 recommends (owner key cold, the rest held as
   // Workers secrets) — precisely the configuration whose separation most needs stating
   // honestly. Shaped like check 2, which already gets the "nothing to look at" case right.
+  // A CONFLICT outranks everything else here: the workers will not start at all, so reporting
+  // anything about separation first would bury the finding that stops the deployment dead.
+  const conflicts = roleKeyConflicts(env)
+  if (conflicts.length) {
+    const c = conflicts[0]
+    add('3b', 'FAIL', 'key role separation', `${c.names.join(' and ')} are both set but hold different keys (${c.role})`,
+      'the workers refuse to start on this: which name wins changed when the role-specific names were introduced, so deploying would silently swap this signer. Delete the one you are not using.')
+  } else {
+
   const byAddress = new Map()
   const unseen = []
-  for (const { env: name, role } of KEY_ROLES) {
-    const addr = addressOf(env[name])
+  const legacyNames = []
+  for (const { names, role } of KEY_ROLES) {
+    const found = resolveRoleKey(names, env)
+    const addr = found ? addressOf(found.value) : null
     if (!addr) {
-      unseen.push(name)
+      // Name BOTH: telling an operator on legacy names to "set GATEWAY_SIGNER_KEY" walks them
+      // straight into the conflict that makes the workers refuse to start.
+      unseen.push(`${names[0]} (or legacy ${names[1]})`)
       continue
     }
+    if (found.legacy) legacyNames.push(`${found.varName} → ${names[0]}`)
     if (!byAddress.has(addr)) byAddress.set(addr, [])
     byAddress.get(addr).push(role)
   }
   const shared = [...byAddress.entries()].filter(([, roles]) => roles.length > 1)
   if (shared.length) {
     const [addr, roles] = shared[0]
-    add('3b', 'WARN', 'key role separation', `${addr} serves ${roles.length} roles: ${roles.join(', ')}`,
-      'one leak of this key compromises every role at once. Use a separate key per role; keep the owner key cold and out of the routine write path.')
+    add('3b', separationSeverity(env), 'key role separation', `${addr} serves ${roles.length} roles: ${roles.join(', ')}`,
+      'one leak of this key compromises every role at once. Use a separate key per role; keep the owner key cold and out of the routine write path. Delegated deployments should set PREFLIGHT_KEY_SEPARATION=strict so this fails instead of warning.')
   } else if (byAddress.size === 0) {
     add('3b', 'WARN', 'key role separation', 'not verified — no signing keys visible here',
       'all three keys live elsewhere (Workers secrets / cold storage). Separation cannot be checked from this machine; verify it where the keys are held.')
@@ -275,6 +341,15 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
       'the keys not visible here may or may not differ from the ones that are. This is normal when they live in Workers secrets, but it means separation is unverified, not confirmed.')
   } else {
     add('3b', 'PASS', 'key role separation', `${byAddress.size} distinct key(s) across all ${KEY_ROLES.length} roles`)
+  }
+
+  // Reported separately from separation: using the legacy name is not a security finding, it
+  // just means this deployment predates the rename and will keep working.
+  if (legacyNames.length) {
+    add('3c', 'WARN', 'legacy key variable names', legacyNames.join(', '),
+      'these still work and nothing breaks today. Renaming makes the role explicit — but set only ONE name per role: setting both with different keys makes the workers refuse to start.')
+  }
+
   }
 
   // 8 — root domain shape
@@ -362,7 +437,7 @@ export async function probeChain(env, envName = 'testnet', clientFactory) {
   }
 
   // 7 — balance is a WARN: an empty operator wallet blocks writes but breaks nothing yet.
-  const writer = addressOf(env.WORKER_EOA_PRIVATE_KEY)
+  const writer = addressOf(resolveRoleKey(KEY_ROLES[0].names, env)?.value)
   if (writer) {
     const bal = await client.getBalance({ address: writer }).catch(() => null)
     if (bal === 0n) {

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // @ts-expect-error — plain .mjs module, no type declarations (see scripts/preflight.mjs header)
-import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, readEnvFiles, LOOKS_LIKE_KEY } from '../../scripts/preflight.mjs'
+import { staticChecks, probeChain, render, summarize, addressOf, readWranglerVars, readEnvFiles, LOOKS_LIKE_KEY, KEY_ROLES } from '../../scripts/preflight.mjs'
 
 // Synthetic 32-byte keys. Deliberately NOT real or well-known test keys: this file asserts
 // that key material never reaches the output, so it must not itself ship anything that a
@@ -337,5 +337,122 @@ describe('preflight — repo example values are not reported as your configurati
     // null/undefined means "could not check", and inventing a warning from that would be
     // the same false confidence in the other direction.
     expect(find(staticChecks(asRepoShipped, 'testnet', undefined), 1).level).toBe('PASS')
+  })
+})
+
+describe('preflight 3b — three roles, three keys', () => {
+  const K = {
+    writer: `0x${'11'.repeat(32)}`,
+    gateway: `0x${'22'.repeat(32)}`,
+    owner: `0x${'33'.repeat(32)}`,
+  }
+  const base = {
+    NETWORK: 'testnet',
+    L2_RECORDS_ADDRESS: `0x${'ab'.repeat(20)}`,
+    ROOT_DOMAIN: 'community.eth',
+  }
+  const check3b = (env) => staticChecks({ ...base, ...env }).find((c) => String(c.id) === '3b')
+
+  it('three distinct keys PASS', () => {
+    const c = check3b({ WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner })
+    expect(c.level).toBe('PASS')
+  })
+
+  it('one key for all three roles WARNs by default', () => {
+    // Self-hosting starts this way and that is a reasonable place to begin — failing here
+    // would block a first deployment over a risk the operator may knowingly accept.
+    const c = check3b({ WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.writer, OWNER_KEY: K.writer })
+    expect(c.level).toBe('WARN')
+    expect(c.detail).toMatch(/3 roles/)
+  })
+
+  it('the SAME finding FAILs under PREFLIGHT_KEY_SEPARATION=strict', () => {
+    // A delegated deployment holds other communities' names; the same finding is disqualifying.
+    const c = check3b({
+      WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.writer, OWNER_KEY: K.writer,
+      PREFLIGHT_KEY_SEPARATION: 'strict',
+    })
+    expect(c.level).toBe('FAIL')
+  })
+
+  it('strict does NOT turn a clean config into a failure (control)', () => {
+    // Without this, "always FAIL when strict" would pass the assertion above.
+    const c = check3b({
+      WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner,
+      PREFLIGHT_KEY_SEPARATION: 'strict',
+    })
+    expect(c.level).toBe('PASS')
+  })
+
+  it('an unrecognised PREFLIGHT_KEY_SEPARATION value does not silently mean strict', () => {
+    const c = check3b({
+      WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.writer, OWNER_KEY: K.writer,
+      PREFLIGHT_KEY_SEPARATION: 'yes',
+    })
+    expect(c.level).toBe('WARN')
+  })
+
+  it('legacy names still resolve, and are reported separately from separation', () => {
+    const checks = staticChecks({
+      ...base,
+      WORKER_EOA_PRIVATE_KEY: K.writer,
+      PRIVATE_KEY_SUPPLIER: K.gateway,
+      PRIVATE_KEY_JASON: K.owner,
+    })
+    expect(checks.find((c) => c.id === '3b').level).toBe('PASS')
+    const nudge = checks.find((c) => String(c.id) === '3c')
+    expect(nudge.level).toBe('WARN')
+    expect(nudge.detail).toContain('WORKER_EOA_PRIVATE_KEY')
+  })
+
+  it('a clean modern config produces NO legacy nudge (control)', () => {
+    // Without this, always emitting 3c would pass the assertion above.
+    const checks = staticChecks({ ...base, WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner })
+    expect(checks.find((c) => String(c.id) === '3c')).toBeUndefined()
+  })
+
+  it('two names for one role with DIFFERENT keys is a FAIL, whatever the severity setting', () => {
+    // The workers refuse to start on this. Reporting it as a separation warning would bury the
+    // finding that stops the deployment dead — and it fails even without strict.
+    const c = check3b({ GATEWAY_SIGNER_KEY: K.gateway, PRIVATE_KEY_SUPPLIER: K.owner })
+    expect(c.level).toBe('FAIL')
+    expect(c.detail).toContain('GATEWAY_SIGNER_KEY')
+    expect(c.detail).toContain('PRIVATE_KEY_SUPPLIER')
+  })
+
+  it('two names for one role with the SAME key is not a conflict (control)', () => {
+    // That is what a careful migration looks like; refusing it would break the safe path.
+    const c = check3b({ GATEWAY_SIGNER_KEY: K.gateway, PRIVATE_KEY_SUPPLIER: K.gateway, WRITER_KEY: K.writer, OWNER_KEY: K.owner })
+    expect(c.level).toBe('PASS')
+  })
+
+  it('no keys visible is still "not verified", not PASS', () => {
+    expect(check3b({}).level).toBe('WARN')
+    expect(check3b({}).detail).toMatch(/not verified/)
+  })
+
+  it('never prints key material (control: the sentinel is detectable)', () => {
+    const checks = staticChecks({ ...base, WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner })
+    const blob = JSON.stringify(checks)
+    expect(blob).not.toContain(K.writer)
+    expect(`x${K.writer}x`).toContain(K.writer)
+  })
+})
+
+describe('preflight and the workers must read the SAME variables', () => {
+  it('KEY_ROLES matches ROLE_ENV_VARS in signer.ts', async () => {
+    // preflight is plain .mjs and cannot import the .ts module the workers use, so the table is
+    // duplicated. Drift would make preflight check variables nobody reads and report PASS on a
+    // deployment whose real keys it never looked at — a false green, not a missing check.
+    const { ROLE_ENV_VARS } = await import('../../server/gateway/signer')
+    const fromPreflight = KEY_ROLES.map((r) => r.names.join(','))
+    const fromSigner = Object.values(ROLE_ENV_VARS).map((n) => n.join(','))
+    expect(fromPreflight).toEqual(fromSigner)
+  })
+
+  it('the comparison is not vacuous (control)', async () => {
+    const { ROLE_ENV_VARS } = await import('../../server/gateway/signer')
+    expect(Object.keys(ROLE_ENV_VARS).length).toBe(3)
+    expect(KEY_ROLES.length).toBe(3)
   })
 })

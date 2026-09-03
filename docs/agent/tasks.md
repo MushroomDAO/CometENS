@@ -294,7 +294,7 @@
 - **涉及文件**:`workers/api/src/`、`workers/gateway/src/`、`test/unit/`
 - **证据**:
 
-### T1.5.2 三角色密钥分离 + preflight 校验  `READY`
+### T1.5.2 三角色密钥分离 + preflight 校验  `PR_OPEN`
 - **优先级**:high
 - **目标**:让 owner / writer / gateway-signer 在配置层就是三把独立的钥匙,
   并让 preflight 能检出"又混用了"。

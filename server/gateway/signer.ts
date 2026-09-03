@@ -150,7 +150,12 @@ export function tryCreateSigner(
  * makes `createSigner` throw, `tryCreateSigner` swallows that, and the role comes back looking
  * exactly like an unconfigured one — reported as "not configured" by the very tool whose job is
  * to say what IS configured. That is not fixable here without changing the return type, so
- * **callers must consult `signerConflicts` as well**; preflight check 3b does.
+ * **callers must consult `signerConflicts` as well**.
+ *
+ * preflight cannot import this module (it is plain .mjs and node runs it directly), so it
+ * reimplements the same rule as `roleKeyConflicts` in scripts/preflight.mjs, with a test
+ * asserting the two role tables agree. Any new caller inside the workers should use
+ * `signerConflicts` rather than repeating the logic a third time.
  */
 export function signerAddresses(env: Record<string, string | undefined>): Partial<Record<SignerRole, string>> {
   const out: Partial<Record<SignerRole, string>> = {}
