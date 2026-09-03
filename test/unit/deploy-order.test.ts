@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 // @ts-expect-error — plain .mjs module, no type declarations
-import { requiredEndpoints, classify, redact, readFrontendSources } from '../../scripts/check-deploy-order.mjs'
+import {
+  requiredEndpoints, classify, redact, readFrontendSources,
+  countApiMentions, countPathHits, unreadableCallSites,
+} from '../../scripts/check-deploy-order.mjs'
 
 /**
  * FU-7: the frontend and the API worker deploy independently, so the frontend can ship first
@@ -59,9 +62,32 @@ describe('classify — present, missing, unknown are three different facts', () 
     expect(new Set([classify(404, 404), classify(404, 400), classify(null, null)]).size).toBe(3)
   })
 
-  it('one verb reachable and one not is still a judgement, not unknown', () => {
-    // Half-failure resolves toward the evidence we do have rather than collapsing to unknown.
-    expect(classify(null, 404)).toBe('present')
+  it('a LONE 404 is unknown — a write endpoint 404s on GET exactly like a missing route', () => {
+    // Measured on the live worker: GET /register, /set-addr, /transfer-subnode all return 404,
+    // and so does GET /__nope__. A single 404 therefore carries zero information about
+    // existence, which is the whole reason for probing two verbs.
+    expect(classify(404, null)).toBe('unknown')
+    expect(classify(null, 404)).toBe('unknown')
+  })
+
+  it('but a lone NON-404 is still present (control)', () => {
+    // Without this, "any half-failure is unknown" would pass the assertion above while
+    // throwing away readings that genuinely prove the route exists.
+    expect(classify(null, 200)).toBe('present')
+    expect(classify(401, null)).toBe('present')
+  })
+
+  it('and two 404s are still missing (control)', () => {
+    // The other side: a rule cautious enough to call everything unknown would satisfy the
+    // first assertion and never report a missing endpoint again.
+    expect(classify(404, 404)).toBe('missing')
+  })
+
+  it('a transient failure can no longer greenlight a deploy', () => {
+    // The asymmetry this closes: the sentinel probe failed safe on a blip while a real
+    // endpoint failed OPEN, so the same fault either blocked the run or passed it depending on
+    // which request it hit. Now neither direction is silent.
+    expect(classify(404, null)).not.toBe('present')
   })
 })
 
@@ -77,5 +103,48 @@ describe('redact', () => {
 
   it('says so rather than throwing on junk', () => {
     expect(redact('not a url')).toMatch(/unparseable/)
+  })
+})
+
+describe('two independent counts of the same call sites', () => {
+  // pr-daemon's general answer to a failure that has now appeared three times: do not only
+  // guard a lower bound — guard that two numbers computed DIFFERENT WAYS agree. The second
+  // must not be derived from the first, or it is an identity and green forever.
+  const sources = readFrontendSources()
+
+  it('counts occurrences, not unique paths (the two are not the same measurement)', () => {
+    const src = ['`${config.apiUrl}/a`; `${config.apiUrl}/a`; `${config.apiUrl}/b`']
+    expect(countPathHits(src)).toBe(3)
+    expect(requiredEndpoints(src)).toHaveLength(2) // deduplicated
+    expect(countApiMentions(src)).toBe(3)
+  })
+
+  it('a call the path pattern cannot read still gets counted as a mention', () => {
+    // THE POINT. This is the input on which the two instruments disagree, and it is the only
+    // kind of input that can reveal an under-reporting path pattern.
+    const src = ['fetch(`${config.apiUrl}${path}`)']
+    expect(countPathHits(src)).toBe(0)
+    expect(countApiMentions(src)).toBe(1)
+    expect(unreadableCallSites(src)).toHaveLength(1)
+  })
+
+  it('a readable call is NOT reported as unreadable (control)', () => {
+    // Without this, "everything is unreadable" would satisfy the assertion above.
+    expect(unreadableCallSites(['fetch(`${config.apiUrl}/lookup`)'])).toEqual([])
+  })
+
+  it('the real frontend has exactly ONE unreadable call site today', () => {
+    // Pinned rather than tolerated: the existing one is legitimate (`${config.apiUrl}${path}`
+    // with a parameter, statically unresolvable), but a NEW spelling the pattern cannot read
+    // changes this number and lands here instead of quietly shrinking the checked list.
+    const gaps = unreadableCallSites(sources)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toContain('${path}')
+  })
+
+  it('the gap accounts for the whole difference between the two counts (control)', () => {
+    // Ties the pinned number to the arithmetic: if the gap list and the count difference ever
+    // disagree, one of the three functions is measuring something else.
+    expect(countApiMentions(sources) - countPathHits(sources)).toBe(unreadableCallSites(sources).length)
   })
 })

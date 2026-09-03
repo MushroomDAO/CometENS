@@ -28,6 +28,51 @@ export function requiredEndpoints(sources) {
   return [...found].sort()
 }
 
+/** Raw path hits, NOT deduplicated — the like-for-like counterpart to countApiMentions. */
+export function countPathHits(sources) {
+  let n = 0
+  for (const src of sources) n += [...src.matchAll(/apiUrl\}(\/[a-z0-9-]+)/g)].length
+  return n
+}
+
+/**
+ * How many times the frontend mentions the API base at all — counted a DIFFERENT way.
+ *
+ * `requiredEndpoints` recognises one spelling. "Derived zero" is already a hard failure, but
+ * "derived SOME of them" was still silent, and that shape has now bitten three times (the
+ * handleManage enumeration in #47, the tautological partition control in #49, and this).
+ *
+ * The fix is not a better regex — it is a second measurement that cannot be wrong in the same
+ * way. This counts occurrences of `apiUrl}` with no opinion about what follows; the other
+ * extracts paths. A call written in a form the path pattern cannot read still gets counted
+ * here, so the two disagree. It deliberately does NOT derive from `requiredEndpoints`: a
+ * number computed from the first would be an identity, green forever.
+ */
+export function countApiMentions(sources) {
+  let n = 0
+  for (const src of sources) n += [...src.matchAll(/apiUrl\}/g)].length
+  return n
+}
+
+/**
+ * The call sites the path pattern cannot read, with context.
+ *
+ * There is one today and it is legitimate: `fetch(`${config.apiUrl}${path}`)`, where the path
+ * is a parameter and cannot be resolved statically. A hard failure on any gap would block
+ * correct code forever, so these are REPORTED instead — the check says what it could not read
+ * rather than presenting a partial list as complete. The unit tests pin the current count, so
+ * a new unreadable spelling changes the number and fails there.
+ */
+export function unreadableCallSites(sources) {
+  const out = []
+  for (const src of sources) {
+    for (const m of src.matchAll(/.{0,50}apiUrl\}.{0,30}/g)) {
+      if (!/apiUrl\}\/[a-z0-9-]/.test(m[0])) out.push(m[0].trim())
+    }
+  }
+  return out
+}
+
 export function readFrontendSources() {
   const dir = join(REPO_ROOT, 'src')
   return readdirSync(dir)
@@ -44,9 +89,27 @@ export function readFrontendSources() {
  * "missing" would block a deploy over a flaky network.
  */
 export function classify(getStatus, postStatus) {
-  if (getStatus === null && postStatus === null) return 'unknown'
-  if (getStatus === 404 && postStatus === 404) return 'missing'
-  return 'present'
+  const seen = [getStatus, postStatus].filter((s) => s !== null)
+  if (seen.length === 0) return 'unknown'
+  // Any non-404 proves the route exists — it answered, it just rejected the probe.
+  if (seen.some((s) => s !== 404)) return 'present'
+  // Only 404s left. Two of them mean absent; ONE means we learned nothing.
+  //
+  // A write endpoint answers 404 to a GET, exactly like a route that does not exist —
+  // measured on the live worker: GET /register, /set-addr, /transfer-subnode all 404, and so
+  // does GET /__nope__. That is the entire reason for probing two verbs, so treating a lone
+  // 404 as "present" throws away the only thing that made the probe informative.
+  //
+  // The earlier version returned 'present' here, reasoning "resolve toward the evidence we
+  // have". That principle holds for (null, 200) — a 200 proves existence — and fails for
+  // (404, null), where the evidence we have is precisely the reading that cannot tell the two
+  // apart. They look like one rule and are two.
+  //
+  // It also removed an asymmetry: the sentinel check fails safe on a transient fault while a
+  // real endpoint failed OPEN, so the same blip either blocked the whole run or greenlit a
+  // deploy depending on which request it hit.
+  if (seen.length === 2) return 'missing'
+  return 'unknown'
 }
 
 async function probe(base, path) {
@@ -83,12 +146,23 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const i = argv.indexOf('--api-url')
   const base = (i !== -1 ? argv[i + 1] : process.env.VITE_API_URL) ?? 'https://cometens-api.jhfnetboy.workers.dev'
 
-  const required = requiredEndpoints(readFrontendSources())
+  const sources = readFrontendSources()
+  const required = requiredEndpoints(sources)
   if (required.length === 0) {
     const msg = 'derived zero required endpoints from src/ — the scan is broken, refusing to report success'
     if (asJson) console.log(JSON.stringify({ ok: false, error: msg }, null, 2))
     else console.error(`check-deploy-order: ${msg}`)
     process.exit(2)
+  }
+
+  // The two counts measure the same population differently, so their gap is exactly the set
+  // one instrument can see and the other cannot. Shown, never hidden — a partial list
+  // presented as complete is the failure this whole check exists to prevent.
+  const unreadable = unreadableCallSites(sources)
+  if (countApiMentions(sources) !== countPathHits(sources) && !asJson) {
+    console.log(`note: ${unreadable.length} call site(s) could not be read statically and are NOT covered below:`)
+    for (const u of unreadable) console.log(`  ${u}`)
+    console.log('')
   }
 
   // A path that cannot exist. If the worker answers anything but 404/404 for this, the probe
@@ -108,7 +182,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const unknown = results.filter((r) => r.state === 'unknown').map((r) => r.path)
 
   if (asJson) {
-    console.log(JSON.stringify({ ok: missing.length === 0 && unknown.length === 0, api: redact(base), required, missing, unknown }, null, 2))
+    console.log(JSON.stringify({ ok: missing.length === 0 && unknown.length === 0, api: redact(base), required, missing, unknown, unreadableCallSites: unreadable }, null, 2))
   } else {
     console.log(`check-deploy-order — ${redact(base)}`)
     for (const r of results) {
