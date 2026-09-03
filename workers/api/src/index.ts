@@ -1043,7 +1043,7 @@ function getRootDomains(env: Env): string[] {
  */
 export function getChain(env: Env) {
   if (env.NETWORK === 'op-mainnet') return optimism
-  if (env.NETWORK === 'local') return { ...foundry, id: 31337 }
+  if (env.NETWORK === 'local') return foundry
   return optimismSepolia
 }
 
