@@ -23,6 +23,42 @@ export type RegisterMessage = {
   deadline: bigint
 }
 
+export const ApplyTypes = {
+  Apply: [
+    { name: 'parent', type: 'string' },
+    { name: 'label', type: 'string' },
+    { name: 'owner', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const
+
+export type ApplyMessage = {
+  parent: string
+  label: string
+  owner: `0x${string}`
+  nonce: bigint
+  deadline: bigint
+}
+
+export const ApproveApplicationTypes = {
+  ApproveApplication: [
+    { name: 'id', type: 'string' },
+    { name: 'decision', type: 'string' },
+    { name: 'reason', type: 'string' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const
+
+export type ApproveApplicationMessage = {
+  id: string
+  decision: string
+  reason: string
+  nonce: bigint
+  deadline: bigint
+}
+
 export const SetAddrTypes = {
   SetAddr: [
     { name: 'node', type: 'bytes32' },
