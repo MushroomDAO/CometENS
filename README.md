@@ -68,6 +68,11 @@ pnpm bootstrap:community --root your.eth --owner 0x… --dry-run
 | Gateway Worker | https://cometens-gateway.jhfnetboy.workers.dev |
 | API Worker | https://cometens-api.jhfnetboy.workers.dev |
 
+> ⚠️ **这台 API worker 上还没有申请/审批那组端点**(`/apply` `/approval-mode`
+> `/applications` `/approve`)—— 代码在本仓库里,但**没部署 = 没上线**。
+> 也就是说:仓库里的注册页会调它们,而线上这台目前返回 404。
+> 自己跑一遍看现状:`pnpm check:deploy-order`。
+
 > **地址的唯一事实来源是 `workers/*/wrangler.toml`**,不是这张表也不是 `.env.local` ——
 > 本地文件漂移过。`pnpm check:chain` 会读 wrangler 并核对链上状态,请以它为准。
 
