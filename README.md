@@ -129,8 +129,9 @@ pnpm check:approval-sha <PR>  # 合并前:批准的 commit 是不是当前 head
 但在此之前**没有任何东西执行它**,所以没人发现它根本编译不过。
 
 > 网关 worker 是带自有 lockfile 的独立 pnpm 项目。
-> 第一次跑 `check:typecheck-scope` 前先 `cd workers/gateway && pnpm install`,
-> 否则它会报缺依赖(它会明说是缺依赖,不会伪装成类型错误)。
+> 第一次跑 `check:typecheck-scope` 前先 `cd workers/gateway && pnpm install`。
+> 忘了的话它**会以 `error TS2688` 的形式出现**(找不到 `@cloudflare/workers-types` 的类型定义),
+> 但同一段输出里带着 `(deps: cd workers/gateway && pnpm install)` —— **看那一行,不要照着 TS 码去查**。
 
 Cloudflare Workers 部署:
 
