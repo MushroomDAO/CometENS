@@ -111,6 +111,8 @@ async function deployContract(
 
 // ─── Gateway server ───────────────────────────────────────────────────────────
 
+// Kept: it documents how a signed gateway response is assembled, which the assertions below
+// rely on being true. `void` marks it deliberately unused rather than forgotten.
 function _buildSignedResponse(result: Hex, expires: bigint, resolverAddr: Address): Hex {
   const messageHash = keccak256(
     encodePacked(
@@ -212,6 +214,7 @@ describe('E2E: CCIP-Read resolution flow', () => {
     const labelhash = keccak256(toBytes('alice')) as Hex
     const _root = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
 
+    void _root // kept for documentation of the encoding under test
     // Note: for testing we use raw namehash parts; in production this matches ENS namehash
     const parentOfAliceTest = namehash('test.eth')
     let tx = await l2Wallet.writeContract({
@@ -324,3 +327,5 @@ describe('E2E: CCIP-Read resolution flow', () => {
     expect(res.status).toBe(400)
   })
 })
+
+void _buildSignedResponse

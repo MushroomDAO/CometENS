@@ -8,7 +8,7 @@
  * before any module-level code runs (using dynamic import inside each test).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { TestExecutionContext } from '../worker-types'
+import type { TestExecutionContext, TestKVNamespace } from '../worker-types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import { keccak256, toBytes, type Hex, type Address } from 'viem'
