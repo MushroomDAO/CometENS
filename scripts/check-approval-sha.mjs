@@ -155,6 +155,22 @@ function describeDelta(approved, head, base) {
 
 const indent = (t) => t.split('\n').map((l) => `  ${l}`).join('\n')
 
+/**
+ * The lines a SHA_MISMATCH prints, as data.
+ *
+ * Extracted because `main()` had never been executed by anything: the tests import only the
+ * pure functions, `node --check` validates syntax but not scope, and a crash exits 1 exactly
+ * like a normal refusal — so a `ReferenceError` on this very path survived review, CI, and a
+ * caller doing `check:approval-sha N && merge`. Three layers, all silent.
+ *
+ * Returning lines instead of printing them puts the branch inside the tests' reach.
+ */
+export function mismatchReport(v, base) {
+  const lines = ['', 'Ask the reviewer to re-approve at the current head, or merge the approved commit.']
+  for (const sha of ownCommits(v.approved, v.head, base)?.shas ?? []) lines.push(`  ${sha}`)
+  return lines
+}
+
 function main() {
   const pr = process.argv[2]
   if (!pr) {
@@ -189,18 +205,7 @@ function main() {
     describeDelta(v.approved, v.head, baseRef)
     console.error('\nAsk the reviewer to re-approve at the current head, or merge the approved commit.')
 
-  // The shas, printed rather than judged.
-  //
-  // The reviewer asked for the mirror question — not "did what I approved get in?" but "is
-  // everything that got in something I approved?" — and it is the sharper one: the two give the
-  // same answer whenever a branch has a single source, and only come apart once commits arrive
-  // from more than one place.
-  //
-  // This script cannot answer it. Doing so needs the set of every head that was ever approved,
-  // which lives in the reviewer's own records; a script that assumed a shape for those records
-  // would be inventing a trust boundary that does not exist today. So it prints the shas and
-  // leaves the comparison to a reader who has that set.
-  for (const sha of ownCommits(approved, head, base)?.shas ?? []) console.error(`  ${sha}`)
+  for (const line of mismatchReport(v, baseRef)) console.error(line)
   }
   process.exit(1)
 }

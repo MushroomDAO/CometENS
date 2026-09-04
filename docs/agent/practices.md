@@ -176,7 +176,10 @@ rebase 改变 sha,而 APPROVE 记在旧 sha 上,于是"照协议做"反而让这
 > `--reporter=json --outputFile.json=…` —— **落盘的那个 `.log` 只剩 35 字节,
 > 内容是「JSON report written to …」,人读的失败输出一个字都没留下。**
 > 我复现:默认 804 字节含 `AssertionError`;加 json reporter 后 35 字节、`AssertionError` 0 处。
-> 他能恢复是因为 vitest 的 JSON 恰好带 `message` —— **那是运气不是设计**,而现场已经没了。
+> 他当时能恢复是因为 vitest 的 JSON 恰好带 `message`,并把那叫作运气。
+> **后来出现了反例**:同一个间歇失败再现时,JSON 里那个 suite 的 `message` 字段是**空的**。
+> 所以这条要说得更强 —— **不只是 json 把人读的那部分从 stdout 拿走了,
+> 是 json 有时连失败原因本身都不带。**
 >
 > **和管道丢掉未预料部分是同一个病,只是这次丢的是全部。**
 > 要机器可读就两个都要:`… > run.log 2>&1` 之外**另存**一份 json,而不是把 stdout 换掉。

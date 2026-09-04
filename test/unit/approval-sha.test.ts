@@ -169,3 +169,34 @@ describe('ownCommits — nothing reachable from base counts as this branch', () 
     expect(r.shas).toContain(baseTip) // over-reports, which is why exact:false must be surfaced
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mismatchReport — the branch that had never been executed
+//
+// The SHA_MISMATCH path shipped with a `ReferenceError` in it and nothing caught it:
+//   - `node --check` validates syntax, not scope
+//   - the tests imported only pure functions, so `main()` was never driven (grep `main()` → 0)
+//   - a crash exits 1, and a normal refusal also exits 1, so `check:approval-sha N && merge`
+//     could not tell them apart
+// Three layers, all silent. These assertions exist so that path has at least one caller.
+// @ts-expect-error — plain .mjs script, no type declarations.
+import { mismatchReport } from '../../scripts/check-approval-sha.mjs'
+
+describe('mismatchReport — the path that used to throw', () => {
+  const v = { approved: 'a'.repeat(40), head: 'b'.repeat(40) }
+
+  it('runs at all without throwing', () => {
+    // The whole point. Before the fix this threw ReferenceError on `approved`.
+    expect(() => mismatchReport(v, 'no-such-base')).not.toThrow()
+  })
+
+  it('tells the reader what to do', () => {
+    expect(mismatchReport(v, 'no-such-base').join('\n')).toContain('re-approve')
+  })
+
+  it('returns lines rather than printing (control)', () => {
+    // If it printed instead, the assertions above would pass on an empty return value.
+    expect(Array.isArray(mismatchReport(v, 'no-such-base'))).toBe(true)
+    expect(mismatchReport(v, 'no-such-base').length).toBeGreaterThan(1)
+  })
+})
