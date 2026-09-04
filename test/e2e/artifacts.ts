@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Abi, Hex } from 'viem'
 
 /**
  * Read a Foundry build artifact, and say what to do when it isn't there.
@@ -16,7 +17,15 @@ import { join } from 'node:path'
  * produces `contracts/out/`, so the second run is green and the evidence — along with the
  * state that caused it — is gone. I diagnosed this three times today before it stuck.
  */
-export function loadArtifact(contractsDir: string, name: string): { abi: unknown[]; bytecode: { object: string } } {
+/**
+ * The return type is `Abi` / `Hex`, not `unknown[]` / `string`.
+ *
+ * Before this helper each caller did `JSON.parse(...)`, which is `any` — so `bytecode.object`
+ * flowed into viem's `` `0x${string}` `` parameters unchecked. Naming a weaker type here turned
+ * that `any` into `string` and surfaced four real mismatches. They were never new bugs; they
+ * were what the `any` had been covering.
+ */
+export function loadArtifact(contractsDir: string, name: string): { abi: Abi; bytecode: { object: Hex } } {
   const path = join(contractsDir, 'out', `${name}.sol`, `${name}.json`)
   if (!existsSync(path)) {
     const outDir = join(contractsDir, 'out')

@@ -20,7 +20,6 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
-import { readFileSync } from 'fs'
 import { loadArtifact } from './artifacts'
 import { join } from 'path'
 import { buildDomain, ApplyTypes, ApproveApplicationTypes } from '../../server/gateway/manage/schemas'
