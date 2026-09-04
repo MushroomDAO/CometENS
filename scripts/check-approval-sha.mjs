@@ -188,6 +188,19 @@ function main() {
   if (v.code === 'SHA_MISMATCH') {
     describeDelta(v.approved, v.head, baseRef)
     console.error('\nAsk the reviewer to re-approve at the current head, or merge the approved commit.')
+
+  // The shas, printed rather than judged.
+  //
+  // The reviewer asked for the mirror question — not "did what I approved get in?" but "is
+  // everything that got in something I approved?" — and it is the sharper one: the two give the
+  // same answer whenever a branch has a single source, and only come apart once commits arrive
+  // from more than one place.
+  //
+  // This script cannot answer it. Doing so needs the set of every head that was ever approved,
+  // which lives in the reviewer's own records; a script that assumed a shape for those records
+  // would be inventing a trust boundary that does not exist today. So it prints the shas and
+  // leaves the comparison to a reader who has that set.
+  for (const sha of ownCommits(approved, head, base)?.shas ?? []) console.error(`  ${sha}`)
   }
   process.exit(1)
 }
