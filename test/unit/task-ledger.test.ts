@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 /**
@@ -25,6 +26,33 @@ import { join } from 'node:path'
  * carried entirely by them.
  */
 const TASKS = join(__dirname, '..', '..', 'docs', 'agent', 'tasks.md')
+const ROOT = join(__dirname, '..', '..')
+
+/**
+ * Squash-merged PR numbers, read from commit subjects: `feat(x): … (#74)`.
+ *
+ * No network, no CI coupling — the repository already knows which PRs landed. The shape came
+ * from the reviewer, who proposed it for a DIFFERENT failure (a completed followup citing a PR
+ * that never existed) which has never actually occurred, so it was not built. This one has
+ * occurred, which is the difference that decides it.
+ */
+function mergedPrNumbers(): Set<string> {
+  // No `-n` bound, deliberately. An earlier version read only the last 400 subjects, which is
+  // the SILENT half of the failure this file just fixed the loud half of:
+  //
+  //   shallow clone -> the set is EMPTY   -> the "populated" control sees it
+  //   an -n bound   -> the set is PARTIAL -> nothing sees it
+  //
+  // Constructed rather than argued: with `-n 30` the set holds 28 entries — comfortably past
+  // the >5 control — while omitting #35, so a task left at `PR_OPEN (PR #35)` passes fully
+  // green. With no bound it fails, naming the entry. (Third time in this repo that "derived
+  // nothing" is loud and "derived some of it" is silent; see #51.)
+  //
+  // The bound bought nothing: `--format=%s` over 232 subjects and over 10000 costs the same at
+  // this scale. It only sold a silent failure that would arrive with commit 401.
+  const log = execFileSync('git', ['log', '--format=%s'], { cwd: ROOT, encoding: 'utf8' })
+  return new Set([...log.matchAll(/\(#(\d+)\)/g)].map((m) => m[1]))
+}
 
 /** Task headings whose status is PR_OPEN, with whatever follows the status. */
 export function prOpenEntries(source: string): Array<{ line: string; hasNumber: boolean }> {
@@ -36,6 +64,62 @@ export function prOpenEntries(source: string): Array<{ line: string; hasNumber: 
   }
   return out
 }
+
+/**
+ * A `PR_OPEN` task whose PR has already merged.
+ *
+ * The guard above checks the FORMAT of the citation. Nothing checked where it POINTS — and the
+ * two come apart: T1.7.2 sat at `PR_OPEN (PR #74)` for thirty-five minutes after #74 merged,
+ * correctly formatted the whole time. Merging is exactly the "release event" the protocol above
+ * says must bring someone back to this file, and nothing did.
+ *
+ * Found by hand while re-checking whether the BLOCKED tasks' blockers still held — that is,
+ * by an audit that happens only when someone thinks to run it. Which is the argument for
+ * this test.
+ */
+describe('no PR_OPEN task points at an already-merged PR', () => {
+  const merged = mergedPrNumbers()
+
+  it('every PR_OPEN citation names a PR that has NOT landed', () => {
+    const stale = prOpenEntries(readFileSync(TASKS, 'utf8'))
+      .map((e) => ({ line: e.line, pr: e.line.match(/PR #(\d+)/)?.[1] }))
+      .filter((e) => e.pr && merged.has(e.pr))
+      .map((e) => e.line)
+    expect(stale, 'a task is still PR_OPEN but its PR is merged — mark it DONE').toEqual([])
+  })
+
+  // Without this the assertion above passes on an empty log, a broken regex, or a set that is
+  // simply never populated — and would keep passing forever.
+  //
+  // NOT hypothetical: this fired on the first CI run of the PR that added it. GitHub's default
+  // checkout is shallow (one commit), so the set was empty, and the main assertion above went
+  // GREEN because "no stale entry" is vacuously true when nothing is known to be merged. The
+  // fix is `fetch-depth: 0` in .github/workflows/test.yml; the message below names it, because
+  // a bare "expected 0 to be greater than 5" sends the reader to the wrong file.
+  it('the merged-PR set is actually populated (control)', () => {
+    const shallow =
+      execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: ROOT, encoding: 'utf8' }).trim() ===
+      'true'
+    expect(
+      merged.size,
+      shallow
+        ? 'shallow clone — commit subjects are not visible, so this guard is inert. Set fetch-depth: 0 on actions/checkout.'
+        : 'no `(#n)` found in the last 400 commit subjects — the squash-merge convention changed, or the regex broke.',
+    ).toBeGreaterThan(5)
+  })
+
+  it('an OPEN pr number is absent from the set (control)', () => {
+    // Proves the set discriminates rather than containing everything. #9999 has never existed.
+    expect(merged.has('9999')).toBe(false)
+  })
+
+  it('WOULD catch a stale entry (must-fail control)', () => {
+    const pr = [...merged][0]
+    const fake = `### T9.9.9 something  \`PR_OPEN (PR #${pr})\``
+    expect(/PR #(\d+)/.exec(fake)?.[1]).toBe(pr)
+    expect(merged.has(pr)).toBe(true)
+  })
+})
 
 describe('every PR_OPEN task carries its PR number', () => {
   const source = readFileSync(TASKS, 'utf8')
