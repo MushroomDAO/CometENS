@@ -20,7 +20,18 @@ import { join } from 'node:path'
 
 const DIST = process.argv[2] ?? 'dist'
 
-/** A credential sitting in a URL path: `…/v2/<key>` or `…/v3/<key>`. */
+/**
+ * A credential sitting in a URL path: `…/v2/<key>` or `…/v3/<key>`.
+ *
+ * Deliberately the SAME shape as preflight check 3a, and deliberately not wider. The reviewer
+ * measured 8 real provider URL forms: Alchemy and Infura are caught; QuickNode, Ankr, dRPC,
+ * Chainstack and BlastAPI are not. Reaching them means matching path segments that are
+ * indistinguishable from uncredentialed ones — the same trap that got the `0x{64}` scan deleted.
+ *
+ * The two copies have already diverged once (this one carries `g` and an extra character in the
+ * class). They are near-duplicates on purpose — one scans a file corpus, one scans an env map —
+ * but if a third appears, that is the moment to export one and import it everywhere.
+ */
 export const PROVIDER_KEY_IN_URL = /https?:\/\/[^\s"'`]*\/(v2|v3)\/[A-Za-z0-9_-]{16,}/g
 
 /**

@@ -584,27 +584,44 @@ describe('preflight 3d — a self-hosted frontend must not silently point at us'
 // It is a WARN, not a FAIL: a `VITE_` RPC URL is legitimate — the browser has to read the chain
 // from somewhere. What it must not carry is a credential.
 describe('preflight 3a — provider key inside a VITE_ URL', () => {
-  const RE = /https?:\/\/[^\s"']*\/(v2|v3)\/[A-Za-z0-9_-]{16,}/
+  // Drives staticChecks() rather than re-typing the pattern.
+  //
+  // The first version of this block declared its own `const RE = /…/` and asserted against
+  // that. All four assertions were true, and all four were unrelated to whether check 3a still
+  // works: the reviewer mutated `(v2|v3)` to `(vZZ)` inside preflight.mjs — disabling 3a
+  // entirely — and the suite stayed at 69 passed.
+  //
+  // That is the very shape this PR is about. Check 3's PASS is true and gets read as "nothing
+  // is exposed"; a green `describe('preflight 3a …')` is true and gets read as "3a is covered".
+  // The block next door (check:dist-secrets) imports the exported constant and DID go red under
+  // the same mutation — the two look identical and differ only by an import.
+  const row = (env: Record<string, string>) =>
+    (staticChecks(env, 'testnet') as Array<{ title: string; level: string }>).find((r) =>
+      r.title.includes('provider key inside a VITE_ URL'),
+    )
 
-  it('flags an Alchemy URL with a key', () => {
-    expect(RE.test('https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn')).toBe(true)
+  it('WARNs on an Alchemy URL carrying a key', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn' })?.level).toBe('WARN')
   })
 
-  it('flags an Infura URL with a key', () => {
-    // A second provider, because a pattern fitted to one vendor's URL shape is not a check.
-    expect(RE.test('https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef')).toBe(true)
+  it('WARNs on Infura too — a pattern fitted to one vendor is not a check', () => {
+    expect(row({ VITE_L1_SEPOLIA_RPC_URL: 'https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef' })?.level).toBe('WARN')
   })
 
-  // THE CONTROLS. Without these, `/./` would pass both assertions above while making the check
-  // fire on the very endpoints the fix tells people to use.
-  it('does NOT flag the public endpoints the docs now recommend', () => {
-    for (const u of ['https://sepolia.optimism.io', 'https://ethereum-sepolia-rpc.publicnode.com']) {
-      expect(RE.test(u)).toBe(false)
-    }
+  // THE CONTROLS. Without these, a check that WARNed unconditionally would satisfy both
+  // assertions above while firing on the very endpoints the fix recommends.
+  it('PASSes on the public endpoints the docs recommend', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://sepolia.optimism.io' })?.level).toBe('PASS')
+    expect(row({ VITE_L1_SEPOLIA_RPC_URL: 'https://ethereum-sepolia-rpc.publicnode.com' })?.level).toBe('PASS')
   })
 
-  it('does NOT flag a short path segment that cannot be a key', () => {
-    expect(RE.test('https://opt-sepolia.g.alchemy.com/v2/short')).toBe(false)
+  it('PASSes on a path segment too short to be a key', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://opt-sepolia.g.alchemy.com/v2/short' })?.level).toBe('PASS')
+  })
+
+  it('the check exists at all (control)', () => {
+    // Without this, every assertion above would pass vacuously on `undefined?.level`.
+    expect(row({})).toBeDefined()
   })
 })
 

@@ -331,7 +331,13 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
       'The key is in the URL path, so `pnpm build` bakes it into dist/ and anyone loading the page can read it. ' +
       'Use a public RPC for VITE_ variables, or accept that this key is public and restrict it at the provider.')
   } else {
-    add(3, 'PASS', 'provider key inside a VITE_ URL', 'no VITE_ URL carries a provider key')
+    // Says what it looked for, not "nothing is exposed". The reviewer measured the gap on 8
+    // real provider URL shapes: Alchemy and Infura are caught; QuickNode (`quiknode.pro/<key>/`),
+    // Ankr, dRPC (`?dkey=`), Chainstack and BlastAPI are NOT. Widening the pattern to reach them
+    // is the wrong fix for the same reason the `0x{64}` scan was deleted: `quiknode.pro/<32hex>/`
+    // is indistinguishable from an uncredentialed path segment, so it would start false-positiving,
+    // and a check that cries wolf gets ignored. Narrow and honest beats wide and noisy.
+    add(3, 'PASS', 'provider key inside a VITE_ URL', 'no VITE_ URL carries a `/v2/<key>` or `/v3/<key>` credential')
   }
 
   // 3b — role separation. One key for all three roles means a single leak lets an attacker
