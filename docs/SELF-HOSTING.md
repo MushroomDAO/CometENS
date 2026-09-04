@@ -178,7 +178,8 @@ VITE_GATEWAY_URL=https://<你的 gateway worker>.workers.dev
 >
 > 带 key 的那个留给**服务端**变量(`OP_SEPOLIA_RPC_URL` / worker 的 secret),它们不进浏览器包。
 >
-> 自己核一次:`pnpm build && grep -rc 'alchemy\|infura' dist/` —— **应该是 0**。
+> 自己核一次:**`pnpm build && pnpm check:dist-secrets`** ——
+> 它扫的是【真正会被上传的那些文件】,发现凭据就退出非零,并把命中处遮码打印出来。
 
 > 这两个默认值(`src/config.ts`)是为了让本仓库的开发者不配任何东西就能跑起来。
 > 对**自建者**它们是错的默认值:不覆盖就等于把解析和写入都托给我们,

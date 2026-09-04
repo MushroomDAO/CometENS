@@ -607,3 +607,43 @@ describe('preflight 3a — provider key inside a VITE_ URL', () => {
     expect(RE.test('https://opt-sepolia.g.alchemy.com/v2/short')).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// check:dist-secrets — the same question asked of the ARTIFACT, not the environment.
+//
+// preflight 3a looks at env vars; this looks at what actually gets uploaded. They come apart:
+// the env can be clean while a stale `dist/` still holds a key.
+//
+// The first version of the scanner ALSO looked for `\b0x[0-9a-fA-F]{64}\b`. On a clean build it
+// reported 7 hits — all 32-byte constants viem ships (namehashes, `0xffff…` masks). Same
+// pattern, decisive against an env file, useless against a JS bundle. It was removed rather
+// than tuned, because a check that fires on every clean build trains people to ignore it.
+// @ts-expect-error — plain .mjs script, no type declarations.
+import { PROVIDER_KEY_IN_URL } from '../../scripts/check-dist-secrets.mjs'
+
+describe('check:dist-secrets — provider key in a bundled URL', () => {
+  const hits = (s: string) => [...s.matchAll(PROVIDER_KEY_IN_URL)].length
+
+  it('finds a key inside a bundled URL', () => {
+    expect(hits('t.transport=http("https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn")')).toBe(1)
+  })
+
+  it('does NOT fire on the public endpoints, even inside JS', () => {
+    expect(hits('http("https://sepolia.optimism.io"),http("https://ethereum-sepolia-rpc.publicnode.com")')).toBe(0)
+  })
+
+  // THE CONTROL that got the private-key pattern deleted: viem's own constants must not match.
+  it('does NOT fire on 32-byte constants a bundle legitimately contains', () => {
+    const viemish =
+      'const M=0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffn,' +
+      'N="0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae"'
+    expect(hits(viemish)).toBe(0)
+  })
+
+  it('the pattern is global, so several keys in one file are all reported', () => {
+    // A non-global regex would report the first and hide the rest — and this exact build had two.
+    const two = 'a="https://opt-sepolia.g.alchemy.com/v2/aaaaaaaaaaaaaaaaaaaa";' +
+                'b="https://eth-sepolia.g.alchemy.com/v2/bbbbbbbbbbbbbbbbbbbb"'
+    expect(hits(two)).toBe(2)
+  })
+})
