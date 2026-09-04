@@ -48,6 +48,12 @@
 - **`pnpm vitest run test/unit/` 漏掉整个 e2e + integration(28 文件/600 条 vs 34/644)**,
   而被漏掉的 `e2e/upstream-api.test.ts` 恰好是 #45 那格 CONTRACT INVARIANT 的所在。
   直接写 `pnpm test`,也不会随新增目录过期。
+
+  **2026-09-04 补:这条也管你【汇报】出去的那个数,不只管合并前那一跑。**
+  我连着两条消息报「659 passed」,而 659 是 `test/unit/` 一个目录的数;
+  全量是 **698 passed | 9 skipped(707)**。评审两次从 JSON reporter 直读到真数才发现。
+  **一个没人重新推导的数字,在交接里会被当作已核实** —— 维护者照它核 headroom 就对不上。
+  汇报里给数之前跑 `pnpm test`,或者写明那个数的范围。
 - **原来没有 `git fetch`**。没 fetch 的 rebase 用的是可能已落后的本地跟踪引用 ——
   正是本协议要防的错误,发生在上一层。
 
