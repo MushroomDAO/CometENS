@@ -106,7 +106,8 @@ CometENS 完全不走。结果:新名字即时解析,老名字额外获得去信
 ```bash
 pnpm dev            # 前端 dev server,端口 4173
 pnpm build          # 生产构建
-pnpm typecheck      # 类型检查(注意:不覆盖 workers/,见 FU-5)
+pnpm typecheck      # 类型检查(窄口径:只 src/)
+pnpm check:typecheck-scope   # 宽口径:test/ server/ sdk/ + 两个 worker,带错误预算
 pnpm test           # 全部测试
 
 pnpm vitest run test/unit/        # 单元测试(快,无网络)
@@ -118,7 +119,19 @@ cd contracts && forge test        # Solidity 测试
 pnpm check:chain    # 链与合约连通性
 pnpm preflight      # 部署前配置校验
 pnpm delegate       # registrar 授权 / 查询 / 撤销(模式 A)
+pnpm check:approval-sha <PR>  # 合并前:批准的 commit 是不是当前 head
 ```
+
+`pnpm typecheck` 保持窄口径(`src/`)并始终 rc=0 —— 一个红着的门禁会没人看。
+更宽的范围由 `pnpm check:typecheck-scope` 管,它跑一个**允许有错误预算**的配置,
+**超预算和低于预算都失败**(低于时要求同一个提交里把预算一起降下来)。
+它还单独跑 `workers/gateway` 自己的 tsconfig —— 那份配置一直存在、写得也对,
+但在此之前**没有任何东西执行它**,所以没人发现它根本编译不过。
+
+> 网关 worker 是带自有 lockfile 的独立 pnpm 项目。
+> 第一次跑 `check:typecheck-scope` 前先 `cd workers/gateway && pnpm install`。
+> 忘了的话它**会以 `error TS2688` 的形式出现**(找不到 `@cloudflare/workers-types` 的类型定义),
+> 但同一段输出里带着 `(deps: cd workers/gateway && pnpm install)` —— **看那一行,不要照着 TS 码去查**。
 
 Cloudflare Workers 部署:
 
