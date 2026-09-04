@@ -163,6 +163,24 @@ VITE_API_URL=https://<你的 api worker>.workers.dev
 VITE_GATEWAY_URL=https://<你的 gateway worker>.workers.dev
 ```
 
+> ⚠️ **这两个 `VITE_` 的 RPC 网址会被编译进浏览器包,任何访客都读得到。**
+>
+> 如果你填的是 Alchemy / Infura 这类带 key 的网址(`…/v2/<key>`、`…/v3/<key>`),
+> **那把 key 就等于公开了** —— 不是"有风险",是 `pnpm build` 之后它就在 `dist/` 的 JS 里。
+>
+> 上面第 42 行那条警告说的是**私钥**;`preflight` 的检查 3 也只认私钥形状,
+> **所以它对带 key 的 RPC 网址会显示 PASS**(检查 3a 现在会额外 WARN)。
+>
+> **前端只做公开读,用公共端点就够**:
+>
+>     VITE_L2_RPC_URL=https://sepolia.optimism.io
+>     VITE_L1_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+>
+> 带 key 的那个留给**服务端**变量(`OP_SEPOLIA_RPC_URL` / worker 的 secret),它们不进浏览器包。
+>
+> 自己核一次:**`pnpm build && pnpm check:dist-secrets`** ——
+> 它扫的是【真正会被上传的那些文件】,发现凭据就退出非零,并把命中处遮码打印出来。
+
 > 这两个默认值(`src/config.ts`)是为了让本仓库的开发者不配任何东西就能跑起来。
 > 对**自建者**它们是错的默认值:不覆盖就等于把解析和写入都托给我们,
 > 而构建过程不会有任何提示。`pnpm preflight` 现在会检出这一点。
