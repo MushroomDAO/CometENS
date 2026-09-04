@@ -28,3 +28,15 @@
 - [x] FU-6 · B · src=T1.6.1 · 2026-09-04 · 所有写端点(/register /set-addr /set-text /set-contenthash /add-registrar /remove-registrar /transfer-subnode)都用裸 verifyTypedData + if(!ok) throw 401 的模式,而畸形签名会让 viem 抛异常、绕过那行 → 返回 500 而不是 401。把签名判断说成服务端故障。**已完成(2026-09-04)**:九处全部收编到 requireValidSignature 单一入口,端点清单从源码推导。**判据(pr-daemon 给的,比「逐个加 try/catch」强)**:给每个写端点各喂一个畸形签名,断言拿到 401 而不是 5xx —— 前者能证明覆盖完整,后者只能证明改过
 - [x] FU-7 · C · src=T1.6.2 · 2026-09-04 · /apply 与 /approval-mode 在线上 testnet API worker 上是 404(实测),即前端可以先于 worker 上线。已在前端 fail-closed(canSubmit),但**部署顺序本身没有任何机械约束** —— **已完成(2026-09-04)**:新增 pnpm check:deploy-order —— 从前端源码推导所需端点、逐个探活,三态(存在/缺失/查不了)且带必然不存在路径的自检对照。实跑当场抓出线上缺的那 4 个
 - [x] FU-8 · B · src=T1.6.3-nit · 2026-09-04 · **仓库没有 DOM 测试环境**(`vitest.config.ts` 是 `environment: 'node'`,jsdom/happy-dom 都没装),所以 `renderQueue`、`OpPanel`、`lookup` 的**所有 DOM 接线都没有守卫** —— 只有被抽出来的纯逻辑有。这次想验的「每张卡片带自己的理由」正是纯 DOM 性质,自己写 stub 等于测 stub。加 happy-dom 是对的方向,但 worktree 的 `node_modules` 是指向主 checkout 的**符号链接**,在 worktree 里装会改动所有 checkout 共享的安装状态 —— 要在主 checkout 上做,并单独一个 PR。**2026-09-04 部分完成**:按 pr-daemon 的建议改为瞄准会破坏那条性质的重构形状(断言 admin.html 无 id 含 reason + admin-queue.ts 用 createElement 而非 byId),见 test/unit/admin-reason-scope.test.ts。DOM 环境本身仍未装
+- [ ] FU-9 · B · src=PR#73 · 2026-09-04 · **我合并了一个没被正式 APPROVE 的 sha。**
+  评审的 APPROVE 落在 `39c49cf`,我合进 preview 的是 `e7c5393`,差三个文件。
+  我读的是 `gh pr view --json reviewDecision` 返回的 `APPROVED` —— **那是仓库级摘要,
+  不带 sha**,把它读成"这个 sha 已通过"是把作用域比问题小的证据当成了答案(取证规程)。
+  而我在同一个会话里【早些时候就看见过】"review 落在 39c49cfe"这行字,信息在手上没用。
+  没出问题的唯一原因是评审恰好在合并前把那三个文件验完了 —— **下次未必这么巧**。
+  做法:新增 `scripts/check-approval-sha.mjs`(**尚不存在,所以这里不写成可跑的命令** ——
+  文档里凡是 `pnpm` 后面跟脚本名的写法都会被 `docs-commands.test.ts` 当成真命令核对 ——
+  它抓住了我两次:第一次是这条提案本身,第二次是我用来解释这条守卫的那句话),
+  比对最后一条 APPROVE 的 commit 与当前 head,
+  不一致就退出非零;合并前跑它。放在本仓库,不动 pilot 的 git-guard(那是 skill 的文件)。
+  (评审说他自己在 #62 上反复提醒的正是这条,这次轮到他撞上 —— 所以更该做成机械检查。)

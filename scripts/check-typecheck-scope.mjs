@@ -76,9 +76,41 @@ const WORKER_SOURCES = execFileSync('git', ['ls-files', 'workers/**/*.ts'], { en
   .split('\n')
   .filter((f) => f && !f.includes('node_modules'))
 
-/** Worker files not yet in any typecheck scope, each with the task that will fix it. */
-const KNOWN_UNCOVERED = {
-  'workers/gateway/src/index.ts': 'T1.7.2 — needs Cloudflare runtime globals',
+/**
+ * Worker files not yet in any typecheck scope, each with the task that will fix it.
+ *
+ * Empty as of T1.7.2. Kept rather than deleted because the check below still has to be able
+ * to say "this file is nobody's" — an empty exemption table means every worker source is
+ * genuinely covered, which is a different statement from having no table.
+ */
+const KNOWN_UNCOVERED = {}
+
+/**
+ * Scopes that are typechecked by their OWN tsconfig rather than by tsconfig.wide.json.
+ *
+ * The gateway worker cannot join the wide scope: it needs `@cloudflare/workers-types`, and
+ * putting that in a shared `types` array is global — it overrides the DOM/Node `Response` and
+ * `fetch` that the rest of the repo depends on. Measured: doing that took the error count from
+ * 72 to 93. A separate project is the fix, because `types` is then global only within it.
+ *
+ * `workers/gateway/tsconfig.json` already existed and was already correct in shape — but
+ * NOTHING RAN IT, so nobody had discovered that it did not compile at all (~40 TS2300/TS2451
+ * from @types/node arriving through ethers' undici-types reference; skipLibCheck was missing).
+ * A config that describes an intention nobody executes is not coverage. That is the whole
+ * reason this list exists here rather than in a comment somewhere.
+ */
+const OWN_TSCONFIG = [{ dir: 'workers/gateway', covers: ['workers/gateway/src/index.ts'] }]
+
+for (const { dir } of OWN_TSCONFIG) {
+  try {
+    execFileSync('npx', ['tsc', '--noEmit'], { cwd: dir, encoding: 'utf8', stdio: 'pipe' })
+    console.log(`  ${dir}: own tsconfig, 0 errors`)
+  } catch (e) {
+    console.error(`FAIL: ${dir} does not typecheck under its own tsconfig:`)
+    console.error(`${e.stdout ?? ''}${e.stderr ?? ''}`.trim())
+    console.error(`(deps: cd ${dir} && pnpm install)`)
+    process.exit(1)
+  }
 }
 
 // --listFiles prints one ABSOLUTE path per line, and only for files tsc actually compiled.
@@ -103,7 +135,10 @@ if (!WORKER_SOURCES.length) {
   process.exit(1)
 }
 
-const lost = WORKER_SOURCES.filter((f) => !isCompiled(f) && !(f in KNOWN_UNCOVERED))
+const ownCovered = new Set(OWN_TSCONFIG.flatMap((o) => o.covers))
+const lost = WORKER_SOURCES.filter(
+  (f) => !isCompiled(f) && !ownCovered.has(f) && !(f in KNOWN_UNCOVERED),
+)
 if (lost.length) {
   console.error(`FAIL: worker source in nobody's typecheck scope: ${lost.join(', ')}`)
   console.error('Either something stopped importing it, or it is new and was never covered.')
@@ -112,7 +147,7 @@ if (lost.length) {
   process.exit(1)
 }
 
-const staleExemptions = Object.keys(KNOWN_UNCOVERED).filter((f) => isCompiled(f))
+const staleExemptions = Object.keys(KNOWN_UNCOVERED).filter((f) => isCompiled(f) || ownCovered.has(f))
 if (staleExemptions.length) {
   console.error(`FAIL: covered now, but still exempted: ${staleExemptions.join(', ')}`)
   console.error('Good news with a one-line fix: drop it from KNOWN_UNCOVERED and close its task.')

@@ -7,14 +7,25 @@
  * self-hosting a one-environment-variable affair — the self-host path must never require our
  * infrastructure (see docs/agent/architecture.md).
  *
- * The abstraction is deliberately viem's `Account`, not a bespoke interface: viem's
+ * The abstraction is deliberately a viem account type, not a bespoke interface: viem's
  * `toAccount()` already accepts arbitrary sign functions, so a KMS-backed signer is a drop-in
  * at this boundary and nothing downstream changes.
+ *
+ * `LocalAccount`, not `Account`. `Account` is `OneOf<JsonRpcAccount | LocalAccount |
+ * SmartAccount>`, and `JsonRpcAccount` has no `signMessage` — so declaring `Account` made
+ * `signer.signMessage` optional at every call site, and the gateway's CCIP-Read signing path
+ * read as "possibly undefined" when this function cannot return such an account: every path
+ * through it ends at `privateKeyToAccount`, which is a `LocalAccount`. The declaration was
+ * wider than anything the function can produce, and the width showed up as a warning about a
+ * failure that cannot happen.
+ *
+ * This does not close the KMS seam: `toAccount()` on a `CustomSource` returns `LocalAccount`
+ * too, so a KMS-backed signer still drops in here unchanged.
  *
  * This module does NOT implement KMS. That is T1.5.3, and it needs infrastructure.
  */
 import { privateKeyToAccount } from 'viem/accounts'
-import type { Account, Hex } from 'viem'
+import type { Hex, LocalAccount } from 'viem'
 
 /**
  * The three roles, kept distinct because one key doing all three means a single leak
@@ -62,7 +73,7 @@ export function resolveKeySource(
  * Throws with the variable NAME and never the value — an error string ends up in logs and
  * pasted reports, and this repo has already shipped one credential leak that way (#30).
  */
-export function createSigner(role: SignerRole, env: Record<string, string | undefined>): Account {
+export function createSigner(role: SignerRole, env: Record<string, string | undefined>): LocalAccount {
   assertNoConflictingKeys(role, env)
   const source = resolveKeySource(role, env)
   if (!source) {
@@ -131,7 +142,7 @@ function assertNoConflictingKeys(role: SignerRole, env: Record<string, string | 
 export function tryCreateSigner(
   role: SignerRole,
   env: Record<string, string | undefined>,
-): Account | null {
+): LocalAccount | null {
   try {
     return createSigner(role, env)
   } catch {

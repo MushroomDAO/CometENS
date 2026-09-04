@@ -393,7 +393,7 @@
 
 ---
 
-### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/  `IN_PROGRESS`
+### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/  `DONE (PR #73)`
 - **优先级**:mid
 - **来源**:由 FU-5 提升(§2.5:"某条其实是真 feature/bug 规模的 → 提升为正常 task")。
   做 FU-5 时发现剩余工作量不是一次收尾能完成的,而且它**已经藏过一个生产 bug**
@@ -449,7 +449,7 @@
   受影响:`sdk/CometENS.ts:71`、`server/gateway/index.ts:60`、
   `test/e2e/{register-multi-root,transfer-subnode}.test.ts`、`test/integration/deployed.test.ts`(×4)
 
-### T1.7.2 把 typecheck 覆盖到 gateway worker  `READY`
+### T1.7.2 把 typecheck 覆盖到 gateway worker  `PR_OPEN (PR #74)`
 - **优先级**:mid(**高于它看起来的样子** —— 七端点 500 那个生产 bug 就长在这个目录)
 - **来源**:由 T1.7.1 拆出(pr-daemon 在 #73 指出标题与验收命令范围不一致)。
 - ⚠️ **这条标题我改过一次**。原本叫「覆盖到 `workers/`」——**而实测下来 `workers/` 里
@@ -474,7 +474,27 @@
   会覆盖 DOM/Node 的 `Response`/`fetch`,实测 72 → 93(凭空 30 条 `TS18046`)。
   两条路:给 `workers/` 单独 tsconfig(带那个包),或照
   `workers/api/src/index.ts` 已有的做法把全局逐个做成局部接口(#72 已做了三个)。
-- **验收命令**:`pnpm typecheck`(include 含 `workers` 后仍 rc=0)
+- **验收命令**:`pnpm check:typecheck-scope`(它会连 `workers/gateway` 的自有 tsconfig 一起跑)
+- **做完后发现真实形状和预想的不一样**:`workers/gateway/tsconfig.json` **本来就存在**,
+  而且写得对(`types: ["@cloudflare/workers-types"]`、`strict`、`include: ["src"]`)。
+  **但没有任何东西跑它。** 于是没人知道它**根本编译不过** —— 一跑就是约 40 条
+  TS2300/TS2451,因为 ethers 的 undici-types 通过 `/// <reference types="node" />` 把
+  `@types/node` 拉了进来,和 Cloudflare 全局撞车,而它缺 `skipLibCheck`。
+  **一份描述意图、无人执行的配置不是覆盖。** 所以这条 task 不是"新建 tsconfig",
+  是"让已有的那份真的跑起来",并且把它接进 `check:typecheck-scope`。
+- **顺带对齐了严格度**:那份 tsconfig 没开 `noUnusedLocals` / `noUnusedParameters`
+  (根 tsconfig 在 #55 开了)。不对齐的话,「gateway 已被类型检查」承诺的比它做的多。
+  开了之后抓出两条,**第二条不是清理**:
+  - `privateKeyToAccount` 死导入(T1.5.1 引入 `createSigner` 后遗留)
+  - 证明模式的 catch 里**算出了失败原因然后丢掉** —— 调用者拿到
+    "Proof generation failed",运营方拿到**空**,因为这个 worker 里一条 `console.*` 都没有。
+    改为服务端日志,**不进响应体**:#30 就是从响应体漏了 RPC key 出去的。
+- **还修了一个声明比实现宽造成的假警报**:`createSigner` 声明返回 viem `Account`,
+  而 `Account = OneOf<JsonRpcAccount | LocalAccount | SmartAccount>`,`JsonRpcAccount` 没有
+  `signMessage` —— 于是网关的 CCIP-Read 签名路径被报"possibly undefined",
+  而这个函数每条路径都终结在 `privateKeyToAccount`(一个 `LocalAccount`)。
+  收窄到 `LocalAccount`。**KMS 接缝没关**:`toAccount()` 对 `CustomSource` 也返回
+  `LocalAccount`,已核 viem 的 `GetAccountReturnType` 确认。
 - **涉及文件**:`tsconfig.json` 或新增 `workers/tsconfig.json`、`workers/**`
 - **证据**:
 - **涉及文件**:`tsconfig.json`、`workers/api/src/index.ts`、`sdk/CometENS.ts`、
