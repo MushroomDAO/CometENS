@@ -273,18 +273,27 @@ owner(有 ROLE_REGISTRAR)   → 可注册
 **⚠️ 第 5 步没有 tx** —— 它是 `eth_call` 模拟,失败的交易不必上链烧 gas。
 所以上表 1–4 行可以按 hash 查,第 5 行要自己调:
 
+**这四条都是 `eth_call`,不需要任何私钥。**
+
 ```bash
 R=0x673c11ceda4f7a853e0d395c3653fd90fe7afd2d      # 那次实跑的 registry
 D=0xcd5b2762FA074C050653427a6889ECEb19d729eb      # 撤销后的委托方
 O=0xb5600060e6de5E11D3636731964218E53caadf0E      # owner(仍持有 ROLE_REGISTRAR)
+Z=0x0000000000000000000000000000000000000000      # 零地址要写满 20 字节
 
-cast call $R "register(string,address,address,address,uint256,uint64)" x $D 0x0 0x0 0 99999999999 --from $D
-#   → revert 0x4b27a133 = EACUnauthorizedAccountRoles, args (0, 1, $D)
-cast call $R "register(string,address,address,address,uint256,uint64)" x $O 0x0 0x0 0 99999999999 --from $O
-#   → 成功
-cast call $R "hasRootRoles(uint256,address)" 1 $D    # → false
-cast call $R "hasRootRoles(uint256,address)" 1 $O    # → true
+cast call $R "register(string,address,address,address,uint256,uint64)" x $D $Z $Z 0 99999999999 --from $D
+#   → execution reverted, data: 0x4b27a133… = EACUnauthorizedAccountRoles, args (0, 1, $D)
+cast call $R "register(string,address,address,address,uint256,uint64)" x $O $Z $Z 0 99999999999 --from $O
+#   → 0x7521d1ca…(成功,返回 token id)
+cast call $R "hasRootRoles(uint256,address)(bool)" 1 $D    # → false
+cast call $R "hasRootRoles(uint256,address)(bool)" 1 $O    # → true
 ```
+
+> 初版这段**逐字照抄跑不起来**:零地址写成 `0x0`(`cast` 不接受,要写满 20 字节),
+> 且 `hasRootRoles` 少了 `(bool)` 返回类型标注,打印的是 `0x00…00` 而不是 `false`。
+> PR#104 评审逐字执行后报 `parser error` 才发现。
+> **一段声称「任何人自己就能复核」的说明,第三方粘贴后拿到的却是解析错误 ——
+> 他最可能的结论不是「我打错了」,是「这东西查不了」。**
 
 ⚠️ 上游明写合约未定稿(F10),所以这里证明的是**机制成立**,不是这些地址将来还在。
 

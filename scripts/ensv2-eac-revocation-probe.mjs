@@ -179,7 +179,7 @@ log(`    hasRootRoles = ${hasAfter}   tx ${hash}`)
 step('revoke', { tx: hash, hasRole: hasAfter })
 
 // ── 5. 撤销后再注册 —— 必须失败 ──────────────────────────────────────────────
-log('[5] [委托方] register("after-revoke") —— 期望 revert …')
+log(`[5] [委托方] register("${PROBE_LABEL}") —— 期望 revert …`)   // 打印真正用的 label,不是写死的字面量
 let step5 = { reverted: false }
 try {
   // 先用 simulate:失败的交易不必真的上链烧 gas,而 revert 数据一样拿得到。
@@ -246,7 +246,8 @@ const PASS = core && step5.eacError === true
 // RPC 没回 revert data,或 ABI 里少了这个 error 定义(第一次跑正是后者)。
 // **我们看不见原因,就不该替它下结论**,两个方向都不行。
 const INCONCLUSIVE = core && !PASS
-if (asJson) console.log(JSON.stringify({ ...out, registry: REGISTRY, pass: PASS }, null, 2))
+// --json 也要能分辨三态 —— 只给 pass 会让 FAIL 和 INCONCLUSIVE 在下游读起来一样。
+if (asJson) console.log(JSON.stringify({ ...out, registry: REGISTRY, pass: PASS, inconclusive: INCONCLUSIVE }, null, 2))
 else {
   log('\n' + '─'.repeat(70))
   log(`  registry            ${REGISTRY}`)
