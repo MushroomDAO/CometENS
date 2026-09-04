@@ -37,7 +37,20 @@ const ROOT = join(__dirname, '..', '..')
  * occurred, which is the difference that decides it.
  */
 function mergedPrNumbers(): Set<string> {
-  const log = execFileSync('git', ['log', '--format=%s', '-n', '400'], { cwd: ROOT, encoding: 'utf8' })
+  // No `-n` bound, deliberately. An earlier version read only the last 400 subjects, which is
+  // the SILENT half of the failure this file just fixed the loud half of:
+  //
+  //   shallow clone -> the set is EMPTY   -> the "populated" control sees it
+  //   an -n bound   -> the set is PARTIAL -> nothing sees it
+  //
+  // Constructed rather than argued: with `-n 30` the set holds 28 entries — comfortably past
+  // the >5 control — while omitting #35, so a task left at `PR_OPEN (PR #35)` passes fully
+  // green. With no bound it fails, naming the entry. (Third time in this repo that "derived
+  // nothing" is loud and "derived some of it" is silent; see #51.)
+  //
+  // The bound bought nothing: `--format=%s` over 232 subjects and over 10000 costs the same at
+  // this scale. It only sold a silent failure that would arrive with commit 401.
+  const log = execFileSync('git', ['log', '--format=%s'], { cwd: ROOT, encoding: 'utf8' })
   return new Set([...log.matchAll(/\(#(\d+)\)/g)].map((m) => m[1]))
 }
 
