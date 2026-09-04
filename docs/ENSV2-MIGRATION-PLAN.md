@@ -258,6 +258,34 @@ owner(有 ROLE_REGISTRAR)   → 可注册
 委托方用的是**一次性生成的钥匙**,不是复用 owner —— 否则第 5 步的 revert 可能来自
 「owner 恰好还有别的 role」而不是撤销生效。**判据要求两个身份真的不同。**
 
+#### 判据不是「revert 了」,是「revert 点名了缺的那个 role」
+
+`EACUnauthorizedAccountRoles` 是**带参数的** custom error —— revert data 里写着
+`resource=0`、`roleBitmap=1`、`account=<委托方>`。所以第三方不需要靠「陌生地址也报同一个错」
+去旁证,**错误本身就点名了这个地址缺 `ROLE_REGISTRAR`**。
+
+探针的 `PASS` 里包含这一条(`step5.eacError`),不是只看有没有 revert ——
+初版把它算出来、打印出来却没放进判决,任何原因的 revert 都算过;PR#104 评审逮到了。
+判据做过变异测试:把识别串改成永不命中 → `exit 2`,改回 → `exit 0`。
+
+#### 自己复核(不需要我们的私钥,四个 hash + 一个公共 RPC 就够)
+
+**⚠️ 第 5 步没有 tx** —— 它是 `eth_call` 模拟,失败的交易不必上链烧 gas。
+所以上表 1–4 行可以按 hash 查,第 5 行要自己调:
+
+```bash
+R=0x673c11ceda4f7a853e0d395c3653fd90fe7afd2d      # 那次实跑的 registry
+D=0xcd5b2762FA074C050653427a6889ECEb19d729eb      # 撤销后的委托方
+O=0xb5600060e6de5E11D3636731964218E53caadf0E      # owner(仍持有 ROLE_REGISTRAR)
+
+cast call $R "register(string,address,address,address,uint256,uint64)" x $D 0x0 0x0 0 99999999999 --from $D
+#   → revert 0x4b27a133 = EACUnauthorizedAccountRoles, args (0, 1, $D)
+cast call $R "register(string,address,address,address,uint256,uint64)" x $O 0x0 0x0 0 99999999999 --from $O
+#   → 成功
+cast call $R "hasRootRoles(uint256,address)" 1 $D    # → false
+cast call $R "hasRootRoles(uint256,address)" 1 $O    # → true
+```
+
 ⚠️ 上游明写合约未定稿(F10),所以这里证明的是**机制成立**,不是这些地址将来还在。
 
 ### 4.2 更正:这个和 B2 不是一回事,而 B2 已经过了
@@ -297,15 +325,28 @@ B2 不是做不了,是**没人把那把钥匙和这条判据对上**。
 **B2 是核按钮,EAC 是阀门。** 前者一直可用只是没人验;后者是 ENSv2 才给得了的,
 而它才是日常托管真正需要的那个 —— 社区不必为了停掉一个失控的 registrar 而让全体用户断解析。
 
-#### 一个只有实跑才会撞见的坑
+#### 一个只有实跑才会撞见的坑(以及我第一次给的理由是错的)
 
-第一次跑我撤的是 `forest.aastar.eth` 的 resolver,**判据没变**(仍走我们的路径)。
-原因:ENS 通配解析**往上走** —— `forest.aastar.eth` 清零后,
-`alice.forest.aastar.eth` 落到祖父 `aastar.eth`,而它还指着我们。
+第一次跑我撤的是 `forest.aastar.eth` 的 resolver,**判据没变**。
+我当时把原因写成「通配解析往上走,所以清自己那一层撤不掉」——
+**结论对,理由只对一半,而照那个理由给的处方是错的。**(PR#104 评审在祖父已清零的
+同一个区块上做了对照,钉死了这一点。)
 
-**对委托托管的含义**:社区若把自己的名字挂在我们的域名下(而不是用自己的 `.eth`),
-**他们清自己那一层是撤不掉的**。这条要写进 `DELEGATED-HOSTING.md` ——
-它决定「模式 B 到底给不给得了真正的退出权」。
+真正的规则是:**清成 `0x0` 是把控制权交上去,改指到自己的 resolver 才是拿回来。**
+证据是同一区块下的两行读数 —— `aastar.eth` 已清零时,
+`alice.forest.aastar.eth` 仍走我们的路径,**正因为 `forest.aastar.eth` 自己还指着我们**。
+
+所以决定退出权的不是「往上走」,是**社区手上有没有那个 L1 节点**。实测:
+
+```
+alice.aastar.eth    owner=0x0        resolver=0x0        ← L1 上根本不存在,纯 offchain 通配
+forest.aastar.eth   owner=0xb56000…  resolver=0xA54D63…  ← 存在,但 owner 是我们
+```
+
+**对委托托管的含义**:我们默认发出去的名字是第一行那种形态 ——
+社区手上**没有任何 L1 节点**,不是「清了没用」,是「没有可清的东西」。
+若要真的提供退出权,发名时必须**把 L1 子节点的 owner 转给对方**,而不是只给一条通配记录。
+已按这个口径重写 `DELEGATED-HOSTING.md` 的「怎么收回」。
 
 ---
 
@@ -321,7 +362,7 @@ B2 不是做不了,是**没人把那把钥匙和这条判据对上**。
 | Task | 内容 | 依赖 |
 |---|---|---|
 | T4.1.0 | 建立本地文档镜像 + 同步脚本（`pnpm docs:ens`），把我们依赖的上游事实摘进 `docs/reference/ENSV2-UPSTREAM.md` | ✅ **本 PR 已完成** |
-| T4.1.1 | 在 Sepolia 上跑通 ENSv2：部署一个 PermissionedRegistry，注册一个子名，`grantRoles` / `revokeRoles` 各跑一次并留下 tx hash | 地址表已就位（`docs/reference/ensv2-deployments-sepolia.md`，`contracts-v2@97a5729`，部署于 2026-07-30） |
+| T4.1.1 | ~~在 Sepolia 上跑通 ENSv2~~ → ✅ **已完成**，`pnpm probe:ensv2-eac --execute`，tx 见 §4.1 | — |
 | T4.1.2 | 把 `resolve()` 的回归测试指向 UniversalResolverV2，并加 `test.offchaindemo.eth` / `ur.integration-tests.eth` 两条外部基线 | 无 |
 | T4.1.3 | 放开 `bootstrap-community.mjs` / `delegate.mjs` 的 `.eth` 专用校验 —— **前置于 M3 与 DNS 名字，不是当前 bug**（见下） | M3 或 V2 DNS 落地时才必须 |
 | T4.1.4 | 写路径 resolver 地址：**当前不适用**（见下），等 M4.2 引入 EAC 写路径时一并立规矩 | M4.2 |

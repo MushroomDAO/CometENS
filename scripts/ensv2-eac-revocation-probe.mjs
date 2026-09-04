@@ -71,7 +71,15 @@ const REGISTRY_ABI = parseAbi([
   'function revokeRootRoles(uint256 roleBitmap, address account) returns (bool)',
   'function hasRootRoles(uint256 roleBitmap, address account) view returns (bool)',
   'function findOwner(string label) view returns (address)',
+  // ⚠️ **这一行是判据能不能成立的关键。** 少了它 viem 解不出 custom error 的名字,
+  // `eacError` 就恒假 —— 而机制其实是好的。第一次跑就栽在这里:探针报 INCONCLUSIVE,
+  // 原因不是链上有问题,是**我的 ABI 里没告诉 viem 这个错叫什么**。
+  // 量具缺一格,读数就和真故障同形。
+  'error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)',
 ])
+// 选择器兜底:某些路径下 viem 只给原始 data 而不解码。
+// `cast sig 'EACUnauthorizedAccountRoles(uint256,uint256,address)'` = 0x4b27a133
+const EAC_UNAUTHORIZED_SELECTOR = '0x4b27a133'
 
 const owner = privateKeyToAccount(OWNER_KEY)
 const pub = createPublicClient({ chain: sepolia, transport: http(RPC) })
@@ -143,6 +151,9 @@ await wait(hash)
 
 // ── 3. 委托方注册 —— 应当成功 ────────────────────────────────────────────────
 const expiry = BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 3600)
+// 第 5 步和 5b 用**同一个** label,这样两格之间唯一变化的是身份。
+// 带时间戳是为了保证它在这个新部署的 registry 里没被注册过。
+const PROBE_LABEL = `after-revoke-${Date.now()}`
 log('[3] [委托方] register("delegated") …')
 let step3 = { ok: false }
 try {
@@ -174,7 +185,7 @@ try {
   // 先用 simulate:失败的交易不必真的上链烧 gas,而 revert 数据一样拿得到。
   await pub.simulateContract({
     account: delegate, address: REGISTRY, abi: REGISTRY_ABI, functionName: 'register',
-    args: ['after-revoke', delegate.address, '0x0000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000', 0n, expiry],
+    args: [PROBE_LABEL, delegate.address, '0x0000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000', 0n, expiry],
   })
   step5 = { reverted: false, note: '没有 revert —— 撤销没有生效' }
   log('    ⚠️ 没有 revert')
@@ -184,13 +195,57 @@ try {
   // 打出来是一个没有 ✅ 的 "reverted",看着像判据勉强通过。**分不清「撤销生效」和「别的原因失败」的
   // 通过,不算通过。** 对照组(从未授权的地址)在同一个 registry 上 revert 的正是
   // EACUnauthorizedAccountRoles,所以这里必须能认出同一个名字。
-  const s = [String(e), e?.message, e?.details, e?.cause?.message, e?.metaMessages?.join(' ')].filter(Boolean).join(' ')
-  step5 = { reverted: true, eacError: s.includes('EACUnauthorizedAccountRoles'), detail: String(e.shortMessage ?? e.message).split('\n')[0].slice(0, 160) }
+  const s = [String(e), e?.message, e?.details, e?.cause?.message, e?.cause?.data,
+             e?.metaMessages?.join(' ')].filter(Boolean).map(String).join(' ')
+  // 两条路都认:解码后的名字,或原始 selector。只认其一都会在对方那条路上恒假。
+  const eacError = s.includes('EACUnauthorizedAccountRoles') || s.includes(EAC_UNAUTHORIZED_SELECTOR)
+  step5 = { reverted: true, eacError, detail: String(e.shortMessage ?? e.message).split('\n')[0].slice(0, 160) }
   log(`    reverted${step5.eacError ? ' — EACUnauthorizedAccountRoles ✅' : ''}`)
 }
 step('register-after-revoke', step5)
 
-const PASS = step3.ok && hasBefore === true && hasAfter === false && step5.reverted
+// ── 5b. 同一个 label,换一个**有权限**的身份 —— 把 label 这个变量夹死 ──────────
+// Codex 在 PR#104 评审里指出的缺口:第 3 步注册 "delegated"、第 5 步注册 "after-revoke",
+// **撤销之外还差了一个变量**。某个实现完全可能因为 label 里的连字符(或别的 label 策略)
+// 拒绝后者而接受前者,而读数和「撤销生效」一模一样。
+// 所以这一格用**同一个 label**、只换身份:owner 有 ROLE_REGISTRAR,必须成功。
+log('[5b] [owner] 同一个 label 的授权对照 —— 期望成功 …')
+let step5b = { ok: false }
+try {
+  await pub.simulateContract({
+    account: owner.address, address: REGISTRY, abi: REGISTRY_ABI, functionName: 'register',
+    args: [PROBE_LABEL, owner.address, '0x0000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000', 0n, expiry],
+  })
+  step5b = { ok: true, label: PROBE_LABEL }
+  log(`    成功 —— 所以第 5 步的 revert 不是这个 label 本身的问题`)
+} catch (e) {
+  step5b = { ok: false, label: PROBE_LABEL, error: String(e.shortMessage ?? e.message).split('\n')[0].slice(0, 160) }
+  log(`    ⚠️ 也失败了:${step5b.error}`)
+}
+step('control-same-label-authorized', step5b)
+
+// ── 5c. 撤销必须不可由委托方自行撤回 ─────────────────────────────────────────
+// 评审补的一格:如果将来 T4.2.1 多授了 ROLE_REGISTRAR_ADMIN,委托方就能把自己加回来,
+// 而上面每一格仍然全绿 —— 「撤销生效」和「撤销可被对方推翻」在现有判据下读数相同。
+const delegateHasAdmin = await pub.readContract({ address: REGISTRY, abi: REGISTRY_ABI, functionName: 'hasRootRoles', args: [ROLE_REGISTRAR_ADMIN, delegate.address] })
+log(`[5c] 委托方持有 ROLE_REGISTRAR_ADMIN = ${delegateHasAdmin}  (必须为 false,否则他能把自己加回来)`)
+step('delegate-cannot-regrant', { hasAdmin: delegateHasAdmin })
+
+// ── 判决 ─────────────────────────────────────────────────────────────────────
+// **写下的判据必须变成执行的判据。** 上一版把 eacError 算出来、打印出来,却没放进 PASS ——
+// 于是任何原因的 revert 都算通过,而紧挨着它的注释正说着「分不清『撤销生效』和
+// 『别的原因失败』的通过,不算通过」。**注释描述的是它没做到的那件事。**(PR#104 评审指出)
+//
+// 三态而不是两态:某些 RPC 不回 revert data,eacError 会恒假。那种情况下
+// 机制可能是好的、我们只是看不见 —— 判成 FAIL 是错的,判成 PASS 更错。
+// 所以单列 INCONCLUSIVE(exit 2),不和 PASS 共用出口 —— 那正是 #101 那条的形状。
+const core = step3.ok && hasBefore === true && hasAfter === false
+     && step5.reverted && step5b.ok && delegateHasAdmin === false
+const PASS = core && step5.eacError === true
+// core 全对、确实 revert 了,但认不出是 EACUnauthorizedAccountRoles ——
+// RPC 没回 revert data,或 ABI 里少了这个 error 定义(第一次跑正是后者)。
+// **我们看不见原因,就不该替它下结论**,两个方向都不行。
+const INCONCLUSIVE = core && !PASS
 if (asJson) console.log(JSON.stringify({ ...out, registry: REGISTRY, pass: PASS }, null, 2))
 else {
   log('\n' + '─'.repeat(70))
@@ -199,9 +254,18 @@ else {
   log(`  撤销前 hasRootRoles  ${hasBefore}`)
   log(`  撤销后 hasRootRoles  ${hasAfter}`)
   log(`  撤销后可注册         ${step5.reverted ? 'no (revert)' : 'YES ⚠️'}`)
+  log(`  revert 原因是 EAC    ${step5.eacError === true}   ← 判据(不只是「revert 了」)`)
+  log(`  同 label 授权对照     ${step5b.ok ? 'owner 可注册 —— 排除 label 因素' : '⚠️ owner 也失败,label 本身有问题'}`)
+  log(`  委托方能自行加回      ${delegateHasAdmin}   (必须 false)`)
   log('─'.repeat(70))
-  log(PASS
-    ? '\nEAC_PROBE: PASS — B2「撤销可验证」在 ENSv2 上成立,且证据是链上的 tx,不是我们的承诺。'
-    : '\nEAC_PROBE: FAIL — 生命周期没有走通,见上面各步。')
+  if (PASS) log('\nEAC_PROBE: PASS — 撤销后连注册权都没了,而且 revert 点名了缺的正是 ROLE_REGISTRAR。')
+  else if (!INCONCLUSIVE) log('\nEAC_PROBE: FAIL — 生命周期没有走通,见上面各步。')
+}
+if (INCONCLUSIVE) {
+  console.error('\nEAC_PROBE: INCONCLUSIVE (exit 2) — 生命周期每一格都对,但第 5 步的 revert 认不出原因。')
+  console.error(`  revert: ${step5.detail ?? '(无)'}`)
+  console.error('  多半是 RPC 没回 revert data。换一个会回 revert data 的 RPC 再跑;')
+  console.error('  **不要**把这个当通过 —— 「撤销生效」和「因为别的原因失败」在这里读数相同。')
+  process.exit(2)
 }
 process.exit(PASS ? 0 : 1)

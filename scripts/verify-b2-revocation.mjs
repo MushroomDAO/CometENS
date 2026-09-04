@@ -157,9 +157,12 @@ try {
 const restored = await resolveVia()
 const finalResolver = await pub.readContract({ address: ENS_REGISTRY, abi: REG_ABI, functionName: 'resolver', args: [rootNode] })
 
-// 判据:撤销后**不再走我们的 resolver**。
-// 注意不能用「解析报错」当判据 —— UR 完全可能仍然返回成功但走了别的(v1 镜像)路径,
-// 而那恰恰说明我们这套已经不生效了。所以比的是 resolver 这一列,不是 ok 这一列。
+// 判据:撤销后**不再触发 OffchainLookup**(见文件头)。
+//
+// ⚠️ 这里原本留着第一版的一句注释:「所以比的是 resolver 这一列,不是 ok 这一列」。
+// **那正是被今天的实跑证伪的那个判据**(对 v1 名字 URv2 恒报 ENSV1Resolver 镜像),
+// 而代码早就不那么做了。留着它,下一个人会照注释去「修」代码 —— 第四次踩同一个坑。
+// PR#104 评审逮到了这处矛盾。删掉,不留。
 const stopped = before.offchainLookup === true && after?.offchainLookup === false
 const recovered = restored.offchainLookup === true
 const safe = finalResolver.toLowerCase() === ourResolver.toLowerCase()
