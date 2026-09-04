@@ -38,7 +38,6 @@ import {
   type Hex,
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
-import { privateKeyToAccount } from 'viem/accounts'
 import { createSigner } from '../../../server/gateway/signer'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
@@ -584,7 +583,17 @@ export default {
         try {
           return await handleProofMode(calldata as Hex, sender as Hex, env)
         } catch (e) {
+          // Logged, not returned. The reason was already being computed here and then dropped
+          // on the floor, so a proof-mode failure was undiagnosable: the caller got
+          // "Proof generation failed" and the operator got nothing at all — this worker had no
+          // console output anywhere.
+          //
+          // It stays out of the response body deliberately. #30 shipped a credential leak
+          // through exactly that path: an upstream error string carrying the RPC provider key,
+          // returned to anonymous callers. Worker logs are the operator's own; a response body
+          // is the whole internet's.
           const message = e instanceof Error ? e.message : String(e)
+          console.error('[proof-mode] proof generation failed:', message)
           return new Response(JSON.stringify({ error: 'Proof generation failed' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },

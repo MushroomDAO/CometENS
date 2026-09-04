@@ -74,6 +74,15 @@ jobs:
       # 500 (#72) for weeks because nothing typechecked it. It runs against a budget rather than
       # zero, so widening coverage did not require fixing every error first; the budget is only
       # allowed to go down. See T1.7.1.
+      # The gateway worker is a separate pnpm project with its own lockfile (it needs
+      # @cloudflare/workers-types, which cannot go in a shared `types` array without
+      # overriding the DOM/Node globals the rest of the repo uses). Its deps are not
+      # installed by the root install, so check:typecheck-scope would fail here as
+      # "cannot find module ethers" — a missing install reported as a type error.
+      - name: Install gateway worker deps
+        run: pnpm install --frozen-lockfile
+        working-directory: workers/gateway
+
       - name: Typecheck scope budget
         run: pnpm check:typecheck-scope
 

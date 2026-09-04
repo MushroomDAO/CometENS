@@ -14,9 +14,15 @@ import { join } from 'node:path'
  * is gone and nobody has reason to open this file; `→ PR_OPEN` lands while the branch is in
  * hand and the PR number is on screen. So the number gets written at the cheap moment.
  *
- * ⚠️ THIS GUARD IS VACUOUS TODAY — there are zero `PR_OPEN` entries. Per practices.md
- * 「判据的第一份工作是约束现在」a criterion that cannot be run on the present is not yet a
- * criterion, so the must-fail control below IS the run: it proves the matcher discriminates.
+ * ⚠️ WAS VACUOUS WHEN WRITTEN — there were zero `PR_OPEN` entries, so per practices.md
+ * 「判据的第一份工作是约束现在」the must-fail control below WAS the run: it proved the matcher
+ * discriminates even with nothing to discriminate.
+ *
+ * It is not vacuous any more. T1.7.2 (#74) is the first real entry it examines, and the first
+ * thing it did was reject `PR_OPEN` (PR#74) — the number outside the backticks and with no
+ * space. Written by the same person who wrote this guard, one commit after writing it. The
+ * controls stay regardless: the day the last PR_OPEN entry clears, this goes back to being
+ * carried entirely by them.
  */
 const TASKS = join(__dirname, '..', '..', 'docs', 'agent', 'tasks.md')
 
