@@ -303,8 +303,39 @@ L2 (Optimism) —— L2Records + Gateway
 **A 的吸引力**是免费和即时:L2 写入没有 gas 暴露,用户注册不用等 L1 确认。
 
 ⚠️ **两个方案我都没有实现过,上面这张表是从文档和实测数据推的,不是实跑对比。**
-真要定,M4.1 应该加一条:在 Sepolia 上把 B 的最小闭环跑通(社区 registry + 一个子名 + 用
-标准 ENS 客户端解析出来),然后拿两边的实际体验对比。
+
+#### 🔴 B 有一个前置步骤,而我把它整个漏了(2026-09-04 实测)
+
+方案 B 要求子名注册进 ENSv2 registry。**前提是根域名在 ENSv2 里存在。它不存在。**
+
+在 ENSv2 的 `ETHRegistry`(Sepolia `0xbdc85dd5…f0e2`)上实查:
+
+```
+aastar .eth   state=RESERVED   owner=0x0   subregistry=0x0   expiry=2027-05-30
+nick   .eth   state=RESERVED   owner=0x0   subregistry=0x0
+vitalik.eth   state=RESERVED   owner=0x0   subregistry=0x0
+ens    .eth   state=RESERVED   owner=0x0   subregistry=0x0
+```
+
+**没有任何 `.eth` 名字迁进 v2**,全部停在 `RESERVED` —— 这正是 `migration.mdx` 描述的
+premigration 阶段:v1 的活跃名字被批量**预留**在 v2,owner 必须主动把 v1 token
+转给迁移控制器才能领取 v2 版本。它们现在的解析全部走 `ENSV1Resolver` 镜像。
+
+**所以两个方案的前置条件不对称,而 §4 的对比表此前没有这一行:**
+
+| | A 按层拆 | B 整体迁 L1 |
+|---|---|---|
+| 需要先把根域名迁进 ENSv2 吗 | **不需要** —— 继续用 v1 的 resolver 指针,今天就能做 | **需要** —— 先走 `UnlockedMigrationController` |
+| 主网上今天可行吗 | 可行(不依赖 v2) | **不可行** —— v2 主网根本没部署(§7 未决 6) |
+
+**这条把 P3 从「选哪个更好」变成「B 现在还选不了」。** A 今天就能落地;
+B 至少要等两件事:ENSv2 上主网,以及我们决定把 `aastar.eth` 迁进去。
+
+⚠️ **迁移这一步我没有在测试网上试。** 不是因为花钱 —— 是因为
+`migration.mdx` 写明迁移后 **v1 的注册与续费路径会被停用**,
+而我们当前整套测试网部署正建立在 v1 的 resolver 指针上。
+**这不是一笔可以随手回滚的测试网交易,它会改变线上测试环境的形态。**
+要试的话应当另起一个我们自己注册的测试名字,不要拿 `aastar.eth` 试。
 
 ---
 
@@ -549,6 +580,14 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
    现在有了本地镜像，后续判断一律以镜像为准 —— 预览域名的哈希前缀说不清它对应哪个 PR。
 4. **ENSv2 没有把 L2 registry 变成一等公民。** 文档只说 "improved support for existing L2 solutions"。
    我们的 L2 价值主张没有被吃掉 —— 但也意味着**没有官方的 L2 registry 可以直接用**，L2 那一半仍然自建自维护。
+6. **ENSv2 上没有任何 `.eth` 名字被真正注册**(2026-09-04 实测):`aastar` / `nick` /
+   `vitalik` / `ens` 在 `ETHRegistry` 上全是 `RESERVED`,不是 `REGISTERED`。
+   premigration 只是把 v1 的活跃名字**预留**在 v2,要 owner 主动迁移才生效。
+   **这意味着方案 B 的前置(根域名进 v2)在 Sepolia 上都还没有人做过**,
+   我们会是自己路径上的第一个 —— 而主网连 v2 都没有。
+7. **迁移这一步没有实测。** 它会停用 v1 的注册/续费路径,而我们整套测试网建立在 v1 指针上。
+   要试须另起一个测试名字,不能拿 `aastar.eth` 试。
+
 5. **mutable tokenId 会打穿索引。** 如果 P1 选了换，所有存了 tokenId 的地方（前端、SDK、KV 缓存）
    都要改成存 labelhash + 监听 `TokenRegenerated`。
 
