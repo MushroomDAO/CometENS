@@ -321,15 +321,32 @@ ens    .eth   state=RESERVED   owner=0x0   subregistry=0x0
 premigration 阶段:v1 的活跃名字被批量**预留**在 v2,owner 必须主动把 v1 token
 转给迁移控制器才能领取 v2 版本。它们现在的解析全部走 `ENSV1Resolver` 镜像。
 
-**所以两个方案的前置条件不对称,而 §4 的对比表此前没有这一行:**
+**⚠️ 上一版这里写着「A 不需要迁根域名,今天就能做」。那是错的,当天就被实测推翻。**
 
-| | A 按层拆 | B 整体迁 L1 |
-|---|---|---|
-| 需要先把根域名迁进 ENSv2 吗 | **不需要** —— 继续用 v1 的 resolver 指针,今天就能做 | **需要** —— 先走 `UnlockedMigrationController` |
-| 主网上今天可行吗 | 可行(不依赖 v2) | **不可行** —— v2 主网根本没部署(§7 未决 6) |
+我当时把「维持现状」当成了「方案 A」。**A 的核心是用 EAC 管治理,而 EAC 的 role 活在
+PermissionedRegistry 里** —— 要给 `aastar.eth` 挂一个 registry,它得先在 v2 里
+`REGISTERED` 且能设 subregistry。实测(以 v1 owner 身份模拟):
 
-**这条把 P3 从「选哪个更好」变成「B 现在还选不了」。** A 今天就能落地;
-B 至少要等两件事:ENSv2 上主网,以及我们决定把 `aastar.eth` 迁进去。
+```
+ETHRegistry.setSubregistry(aastar.eth 的 tokenId, UserRegistryImpl)
+  → revert 0x4b27a133 = EACUnauthorizedAccountRoles
+```
+
+**没迁移就挂不上 registry,所以 A 和 B 的前置是一样的。** 正确的三分是:
+
+| | 维持现状 | A 按层拆 | B 整体迁 L1 |
+|---|---|---|---|
+| 子名数据在哪 | L2 | L2 | L1 |
+| 治理/委托靠什么 | 我们的 `onlyOwner` | **EAC** | **EAC** |
+| 要先把根域名迁进 ENSv2 吗 | 不要 | **要** | **要** |
+| 主网今天可行吗 | ✅ 正在跑 | ❌ v2 主网没部署 | ❌ 同左 |
+| 社区能拿到「阀门」吗 | ❌ 只有核按钮(B2) | ✅ | ✅ |
+
+**所以整个迁移 —— 包括「阀门」这个唯一值钱的卖点 —— 都卡在同一件事上:
+把根域名迁进 ENSv2。而那件事在主网上今天做不了,因为 v2 没部署。**
+
+这也解释了为什么维护者定的「0.8 是基础版本、0.9 是实验分支、v2 正式发布后再合回」
+是对的节奏:**在根域名能迁之前,A 和 B 都只能是实验。**
 
 ⚠️ **迁移这一步我没有在测试网上试。** 不是因为花钱 —— 是因为
 `migration.mdx` 写明迁移后 **v1 的注册与续费路径会被停用**,
@@ -583,8 +600,10 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
 6. **ENSv2 上没有任何 `.eth` 名字被真正注册**(2026-09-04 实测):`aastar` / `nick` /
    `vitalik` / `ens` 在 `ETHRegistry` 上全是 `RESERVED`,不是 `REGISTERED`。
    premigration 只是把 v1 的活跃名字**预留**在 v2,要 owner 主动迁移才生效。
-   **这意味着方案 B 的前置(根域名进 v2)在 Sepolia 上都还没有人做过**,
+   **这意味着迁移的前置(根域名进 v2)在 Sepolia 上都还没有人做过**,
    我们会是自己路径上的第一个 —— 而主网连 v2 都没有。
+   ⚠️ 这条**两个方案都卡**:实测 `setSubregistry` 在未迁移的名字上
+   revert `EACUnauthorizedAccountRoles`,所以 A 的 EAC 治理同样要先迁。
 7. **迁移这一步没有实测。** 它会停用 v1 的注册/续费路径,而我们整套测试网建立在 v1 指针上。
    要试须另起一个测试名字,不能拿 `aastar.eth` 试。
 
