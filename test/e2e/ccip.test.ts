@@ -26,7 +26,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
-import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 import { createServer, type Server } from 'http'
 import { L2RecordsReader } from '../../server/gateway/readers/L2RecordsReader'
@@ -98,9 +98,7 @@ async function deployContract(
   rpcPort: number,
   chain: typeof l1Chain,
 ): Promise<Address> {
-  const artifact = JSON.parse(
-    readFileSync(join(CONTRACTS_DIR, 'out', `${artifactName}.sol`, `${artifactName}.json`), 'utf8')
-  )
+  const artifact = loadArtifact(CONTRACTS_DIR, artifactName)
   const wallet = createWalletClient({ account: deployer, chain, transport: http(`http://127.0.0.1:${rpcPort}`) })
   const pub = createPublicClient({ chain, transport: http(`http://127.0.0.1:${rpcPort}`) })
   const txHash = await wallet.deployContract({ abi: artifact.abi, bytecode: artifact.bytecode.object, args })

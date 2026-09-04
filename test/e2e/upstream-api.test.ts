@@ -22,7 +22,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
-import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 import { createServer, type Server } from 'http'
 
@@ -80,9 +80,7 @@ async function deployL2Records(): Promise<Address> {
 }
 
 async function deployArtifact(name: string): Promise<Address> {
-  const artifact = JSON.parse(
-    readFileSync(join(CONTRACTS_DIR, 'out', `${name}.sol`, `${name}.json`), 'utf8')
-  )
+  const artifact = loadArtifact(CONTRACTS_DIR, name)
   const wallet = createWalletClient({ account: deployer, chain: anvilChain, transport: http(`http://127.0.0.1:${ANVIL_PORT}`) })
   const pub    = createPublicClient({ chain: anvilChain, transport: http(`http://127.0.0.1:${ANVIL_PORT}`) })
   const txHash = await wallet.deployContract({ abi: artifact.abi, bytecode: artifact.bytecode.object, args: [deployer.address] })

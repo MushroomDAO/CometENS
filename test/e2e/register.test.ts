@@ -23,7 +23,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
-import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -70,9 +70,7 @@ async function waitForAnvil(port: number, retries = 20): Promise<void> {
 // ─── Deploy helper ────────────────────────────────────────────────────────────
 
 async function deployL2Records(): Promise<Address> {
-  const artifact = JSON.parse(
-    readFileSync(join(CONTRACTS_DIR, 'out', 'L2Records.sol', 'L2Records.json'), 'utf8')
-  )
+  const artifact = loadArtifact(CONTRACTS_DIR, 'L2Records')
   const abi = artifact.abi
   const bytecode: Hex = artifact.bytecode.object
 
