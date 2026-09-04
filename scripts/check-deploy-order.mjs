@@ -137,6 +137,24 @@ async function probe(base, path) {
     }
   }
   const getStatus = await one({ method: 'GET' })
+
+  // The POST probe sends `{}` — and that is SAFE TO RUN AGAINST PRODUCTION.
+  //
+  // Worth stating because it looks alarming and it stopped someone: a reviewer declined to run
+  // this check against the live testnet worker for exactly this reason, and lost the one probe
+  // that can distinguish "POST-only endpoint, absent" from "POST-only endpoint, deployed"
+  // (a GET returns 404 either way).
+  //
+  // Why it cannot write, verified rather than assumed:
+  //   - all seven write paths (/register /apply /approve /set-addr /transfer-subnode
+  //     /set-text /set-contenthash) dispatch into ONE handler, `handleManage`
+  //   - its first statement reads `payload.from` and throws `Invalid from address` (400) when
+  //     it is absent or malformed
+  //   - `{}` has no `from`, so it is rejected there — BEFORE any signature check, and before
+  //     anything touches KV or sends a transaction
+  //
+  // So the probe reaches routing and stops. If a future endpoint bypasses `handleManage`, this
+  // reasoning expires with it — that is the thing to re-check, not the word "POST".
   const postStatus = await one({
     method: 'POST',
     headers: { 'content-type': 'application/json' },
