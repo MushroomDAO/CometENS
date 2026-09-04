@@ -9,6 +9,7 @@
     "build": "vite build",
     "check:chain": "node scripts/check-chain.mjs",
     "check:approval-sha": "node scripts/check-approval-sha.mjs",
+    "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
     "check:deploy-order": "node scripts/check-deploy-order.mjs",
     "check:typecheck-scope": "node scripts/check-typecheck-scope.mjs",
     "check:skipped": "node scripts/check-skipped.mjs",

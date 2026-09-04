@@ -48,3 +48,50 @@
   做法:在 DELEGATED-HOSTING.md 的枚举里加一行。
   若委托方确实需要原因:响应体带**不透明 id**、日志写 id + 原因 —— 委托方拿到的是可向 host 引用的凭据
   而非原因本身,代价一行,**且把"要不要给你看"从技术问题变回运营问题**。
+- [x] FU-11 · B · src=集成测试 · 2026-09-04 · **4 格集成测试断言的形态,与链上现状不一致。**
+  (原本写的是「而链上已经换了」—— **那是推断**。我测到的是**现状**,
+  「换过」需要历史读数,而我没有取过。评审指出的,改成只说观测到的。)
+  维护者换 Alchemy key 之后集成测试从 9 红降到 4 红(剩下的不是配置能修的)。逐个探测链上字节码,
+  三个地址正好是三种合约:
+
+  | 地址 | `gatewayUrl()` | `verifier()` | `resolveWithProof` 选择器 | 类型 |
+  |---|---|---|---|---|
+  | `0xA54D63a6…` | ✓ | ✓ | ✗ | **HybridResolver** ← `aastar.eth` 与 `forest.aastar.eth` 现在都指向它 |
+  | `0x17D4d74d…` | ✗ | ✓ | ✗ | OPResolver ← `L1_OP_RESOLVER_ADDRESS`,测试断言的那个 |
+  | `0xe138Ec90…` | ✓ | ✗ | ✓ | OffchainResolver ← 旧的 `VITE_L1_OFFCHAIN_RESOLVER_ADDRESS` |
+
+  证据是**链上的**,不是文档:直接查 ENS 注册表得到 `aastar.eth → 0xA54D63a6…`,
+  再用函数选择器逐个探测那三个地址的字节码。
+
+  失败的四格分两类:两格断言「域名的 resolver == OPResolver」,两格调 `resolveWithProof`
+  ——**而部署的 Hybrid 两样都不满足**(它不是 OPResolver,也没有 `resolveWithProof`)。
+
+  **2026-09-04 补:解析路径是活的,所以问题的性质降级了。**
+  评审指出按选择器搜字节码只证明「函数在不在」,**不证明「解析路径能不能工作」** ——
+  CCIP-read 的入口是 `resolve(bytes,bytes)` + revert `OffchainLookup`,`resolveWithProof` 只是回调。
+  对线上 Hybrid 打一次真实的 `resolve(DNS-encoded aastar.eth, addr(node))`:
+
+      Hybrid(0xA54D63a6…)     → **直接返回数据,没有 revert**
+      OPResolver(0x17D4d74d…) → revert(无 data)
+
+  而 `HybridResolver.sol:151` 里确实有 `revert OffchainLookup(...)`,即 CCIP 路径存在。
+  所以「Hybrid 没有 `resolveWithProof`」**不意味着解析坏了** ——
+  那两格测试记录的是**过期的回调形状**,不是线上故障。
+  **对维护者的意义**:问题从「线上可能坏了」降到「测试记录了旧形态」,这对排优先级有用。
+
+  ⚠️ 这一步我又踩了一次选择器:`toFunctionSelector` 对 error 签名给出 `0x7376d14c`,
+  而 `keccak("OffchainLookup(address,string[],bytes,bytes4,bytes)")[:4]` = **`0x556f1830`**(正确)。
+  今天第三次「错的选择器产生真实但无关的读数」,而评审在给判据时**特意提醒过这一条**。
+  这次不影响结论(根本没 revert),但它说明**这个坑不会因为被写下来就消失**。
+
+  **维护者已拍板(2026-09-04):形态保持不动。**
+  于是这四格是**长期已知红,不是待办** —— 上面所有读数留在这里,
+  谁将来要动 resolver 都能直接用,不必重查一遍链。
+  ~~需要维护者拍板的是一句话:HybridResolver 是不是当前预期的线上形态?~~
+  - 是 → 这四格测试过期,应改成断言 Hybrid 及其验证路径(它有 `verifier`,走证明模式)
+  - 否 → 是线上配置错了,域名该指回 OPResolver
+
+  ⚠️ **我没有为了让它变绿去改 `L1_OP_RESOLVER_ADDRESS`** —— 那会把不一致藏起来。
+  README 把 `0xA54D63a6…` 记为 HybridResolver 且两个域名一致指向它(不像一次误操作),
+  所以「是」的可能性大;但**这是部署事实,不是我能判的**。
+
