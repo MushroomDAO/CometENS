@@ -17,10 +17,21 @@
 // (我最初把那句话的出处记成了 ensv2-readiness,实际在 multichain.mdx)。
 // 手工核对引文这件事,双方都会出错 —— 所以它该由脚本做。
 //
-// ⚠️ **镜像没克隆时本脚本 exit 0,但会打印 NOT CHECKED。**
-// 这是个真实的空档,不是形式:CI 里没有 vendor/ens-docs,所以 CI 跑它等于什么都没查。
-// 这里照实喊出来,而不是打印一行绿字 —— 一个在缺少输入时静默通过的检查,
-// 比没有检查更危险,因为它会让人以为查过了。
+// **本地宽容,CI 严格** —— 镜像没克隆时:
+//   本地(无 CI 环境变量) → exit 0 + 大声打印 NOT CHECKED
+//                          开发机不该因为没克隆一份 gitignore 的镜像就红。
+//   CI(CI=true)         → **exit 1**
+//                          CI 里「没有镜像」不是一种可接受的状态,而是这道闸门失效了。
+//
+// 这条分叉是 PR#102 评审逼出来的,而它当时的诊断一字不差:
+//
+//   > 会出现最糟的组合:CI 里一行绿色的 check:ensv2-citations,而它一条引文都没核过。
+//
+// 那正是本脚本上一版在 CI 里的状态 —— `vendor/ens-docs/` 是 gitignored,
+// workflow 又没引用过它,所以它**结构上不可能**检查到任何东西,
+// 却会在有人接进 CI 的那天打出一行绿字。
+// 我自己在这个文件头写过「一个在缺少输入时静默通过的检查,比没有检查更危险」,
+// 然后写出了一个正好如此的检查。保留这段话,因为它现在指的是被修掉的那一版。
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -48,11 +59,19 @@ for (const row of rows) {
   for (const m of row.matchAll(/"([^"]{12,})"/g)) citations.push({ id, quote: m[1] })
 }
 
+// GitHub Actions 设 CI=true;其它 CI 大多也设。--strict 供本地复现 CI 行为。
+const STRICT = process.argv.includes('--strict') || !!process.env.CI
+
 if (!existsSync(MIRROR)) {
   const msg = `CITATIONS: NOT CHECKED — no local mirror at vendor/ens-docs/. Run \`pnpm docs:ens\` first.\n` +
               `CITATIONS: ${citations.length} quoted citation(s) in ENSV2-UPSTREAM.md §3 were NOT verified against anything.`
-  if (asJson) console.log(JSON.stringify({ checked: false, citations: citations.length }, null, 2))
+  if (asJson) console.log(JSON.stringify({ checked: false, strict: STRICT, citations: citations.length }, null, 2))
   else console.log(msg)
+  if (STRICT) {
+    console.error('\nCITATIONS: FAIL (strict) — 在 CI 里「没有镜像」不是一种可接受的状态。')
+    console.error('workflow 必须先跑 `pnpm docs:ens`,否则这道闸门会打出绿字而一条引文都没核过。')
+    process.exit(1)
+  }
   process.exit(0)
 }
 

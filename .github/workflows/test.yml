@@ -148,3 +148,38 @@ jobs:
       - name: Solidity tests
         run: forge test
         working-directory: contracts
+
+  # 独立 job,不并进 `test` —— 它红的原因和测试红的原因是两回事:
+  # 这里红只意味着「我们引的某句上游原文,在今天的上游里找不到了」,
+  # 而 test 红意味着代码坏了。混在一起会让前者盖住后者的注意力。
+  #
+  # ⚠️ 它对准的是**移动靶**:`pnpm docs:ens` 拉的是上游默认分支的当前 HEAD。
+  # 所以一个与本仓库无关的上游改写,会让**别人的 PR** 变红。这是刻意的 ——
+  # 那正是我们想第一时间知道的事(docs/reference/ENSV2-UPSTREAM.md 的全部价值
+  # 就是「这些引文可核对」),而红的修法只有两条、都很短:
+  # 要么按新措辞更新那条引文,要么它确实被上游删了、于是依赖它的判断需要重估。
+  #
+  # 这个 job 存在的直接原因:上一版 check:ensv2-citations **在 CI 里结构上不可能
+  # 检查到任何东西** —— vendor/ens-docs/ 是 gitignored,而没有任何 workflow 引用它。
+  # 它会在被接进 CI 的那天打出一行绿字,而一条引文都没核过。
+  # 现在脚本在 CI=true 下把「没有镜像」当失败,所以底下 docs:ens 那一步一旦被删,
+  # 这个 job 会红,而不是安静地退化成空转。
+  citations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 必须在检查之前。少了这一步,脚本在 CI 下 exit 1 而不是假装通过。
+      - name: Mirror the upstream ENS docs
+        run: pnpm docs:ens
+
+      - name: Every quoted citation must exist upstream
+        run: pnpm check:ensv2-citations
