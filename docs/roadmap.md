@@ -35,6 +35,10 @@ L1 解析按记录年龄自动路由 —— 新记录（< ~7 天）走签名模�
 
 **ENS V2 影响评估（2026-04）**：ENS V2 = 纯 L1 registry 重写（Namechain 已取消）。CCIP-Read/ERC-3668/IExtendedResolver 接口**完全不变**。CometENS 的 OPResolver + Gateway 零修改可运行，上线后再跟进 V2 subregistry 迁移（可选、一笔交易）。详见 [docs/ensv2-impact-analysis.md](ensv2-impact-analysis.md)。
 
+> ⚠️ **上面这段已被 2026-09 的评估部分取代。** 「接口完全不变 / 零修改可运行」仍然成立;
+> 但它没有回答「V2 内置了多少我们正在自己造的东西」——答案是九处,其中包括 M1 验收项 **B2
+> 「撤销可验证」至今验收不掉的根因**。迁移方案见 [docs/ENSV2-MIGRATION-PLAN.md](ENSV2-MIGRATION-PLAN.md)。
+
 **注**：B2（插件架构）已删除 — 开源免费项目，单一职责原则，根域名管理足够控制访问。D1（Durable Objects）已删除 — 链上唯一性保证足够。D2（Rate Limiting）已关闭 — EIP-712 鉴权是真正的门卫。
 
 ---
