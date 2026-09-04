@@ -51,6 +51,16 @@ const KNOWN = [
  * seven-endpoint 500 for weeks precisely because nothing typechecked it (#72).
  *
  * So the coverage is asserted directly rather than assumed from the include list.
+ *
+ * HOW FRAGILE, measured rather than assumed — my first description of this was too alarming:
+ *   - `describe.skip` on every importing test    → still compiled. Compilation is
+ *                                                  independent of execution.
+ *   - specifier hoisted to `const WP = '…'`      → still compiled. tsc follows a
+ *                                                  literal-typed const through `import(WP)`.
+ *   - no in-scope file imports it at all         → NOT compiled. This is the only way it
+ *                                                  goes, and it is what this check catches.
+ * The control below uses `workers/gateway/src/index.ts`, which is genuinely in that last
+ * state today — so the matcher is known to be able to answer "no", not just "yes".
  */
 const MUST_BE_COMPILED = ['workers/api/src/index.ts']
 
@@ -63,8 +73,32 @@ function run(args) {
   }
 }
 
-const listed = run(['--noEmit', '--listFiles'])
-const missing = MUST_BE_COMPILED.filter((f) => !listed.includes(`/${f}\n`) && !listed.includes(`/${f}`))
+// --listFiles prints one ABSOLUTE path per line, and only for files tsc actually compiled.
+// Matched as a whole-line suffix rather than a substring: `includes('/workers/api/src/index.ts')`
+// would also be satisfied by `/vendor/copy/workers/api/src/index.ts`, and a check that can be
+// satisfied by the wrong file is not a check. (The first version of this had a second clause
+// testing the same string with a trailing newline — dead, since the substring test subsumed it.)
+const compiled = new Set(
+  run(['--noEmit', '--listFiles'])
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean),
+)
+const isCompiled = (f) => [...compiled].some((p) => p === f || p.endsWith(`/${f}`))
+const missing = MUST_BE_COMPILED.filter((f) => !isCompiled(f))
+
+// The matcher must be able to say no. Without this, a bug that made isCompiled always true
+// would leave every assertion below passing while checking nothing.
+if (isCompiled('workers/gateway/src/index.ts')) {
+  console.error('FAIL: the gateway worker IS compiled now — good, but this control assumed it was not.')
+  console.error('Move it into MUST_BE_COMPILED and pick another known-absent file for the control.')
+  process.exit(1)
+}
+if (isCompiled('this/file/does/not/exist.ts')) {
+  console.error('FAIL: isCompiled returned true for a path that cannot exist — the matcher is broken.')
+  process.exit(1)
+}
+
 if (missing.length) {
   console.error(`FAIL: not in the compiled set: ${missing.join(', ')}`)
   console.error('Whatever used to import it stopped. Add it to an include, or restore the import —')
