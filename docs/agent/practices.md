@@ -55,12 +55,27 @@
   **一个没人重新推导的数字,在交接里会被当作已核实** —— 维护者照它核 headroom 就对不上。
   汇报里给数之前跑 `pnpm test`,或者写明那个数的范围。
 
-  **而且要连 `skipped` 一起报,不能只报 `passed`。** 写这条时实测撞到:同一棵树、
-  几分钟内、同一条 `pnpm test`,先给 `659 passed | 48 skipped`,再给 `698 passed | 9 skipped` ——
-  **代码一个字没动**,差别是 anvil 那会儿还没就绪,e2e 整批跳过了。
-  `total`(707)两次都一样,而**只报 `passed` 的话,这个差会读成"少了 39 个测试"**。
-  规范形态:**`passed | skipped (total)` 三个数一起给** —— `passed` 变了而 `total` 没变,
-  说明变的是前置条件,不是测试本身。
+  **而且要连 `Test Files` 那一行和 `skipped` 一起报,不能只报 `passed`。**
+  写这条时实测撞到:同一棵树、几分钟内、同一条 `pnpm test`,先给
+  `659 passed | 48 skipped`,再给 `698 passed | 9 skipped` —— **代码一个字没动**,
+  差别是 anvil 那会儿还没就绪,e2e 整批跳过了。`total`(707)两次都一样,
+  而**只报 `passed` 的话,这个差会读成"少了 39 个测试"**。
+
+  ⚠️ **但不要从这三个数推因。** 我第一版写的是「`passed` 变了而 `total` 没变,
+  说明变的是前置条件,不是测试本身」—— **这个蕴含不成立**,评审造探针推翻了,我复现如下:
+
+      // beforeAll 里抛异常
+      PROBE_FAIL=0 → Test Files 1 passed      Tests 3 passed (3)
+      PROBE_FAIL=1 → Test Files 1 failed      Tests 3 skipped (3)   ← failed 仍是 0
+
+  **一个硬失败,在测试级读数上和"前置条件整批跳过"逐格相同**:`total` 不变、`passed` 降、
+  `skipped` 升、`failed` 仍是 0。三个数一个都分不开。
+  评审当晚在 #62 上撞到的正是这个读数(`Test Files 1 failed | 40 passed` +
+  `694 passed | 13 skipped (707)`),**而按我第一版的措辞,他会把一次真实失败判成"前置条件"**。
+
+  规范形态:**`Test Files 通过/失败` + `passed | skipped (total)` 一起给**。
+  能从中读出的只有:**`total` 没变而 `passed` 降,说明那批没跑 —— 不说明为什么。**
+  为什么在 `Test Files` 那一行,不在这三个数里。
 - **原来没有 `git fetch`**。没 fetch 的 rebase 用的是可能已落后的本地跟踪引用 ——
   正是本协议要防的错误,发生在上一层。
 
