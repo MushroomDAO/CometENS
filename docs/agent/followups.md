@@ -64,6 +64,24 @@
   失败的四格分两类:两格断言「域名的 resolver == OPResolver」,两格调 `resolveWithProof`
   ——**而部署的 Hybrid 两样都不满足**(它不是 OPResolver,也没有 `resolveWithProof`)。
 
+  **2026-09-04 补:解析路径是活的,所以问题的性质降级了。**
+  评审指出按选择器搜字节码只证明「函数在不在」,**不证明「解析路径能不能工作」** ——
+  CCIP-read 的入口是 `resolve(bytes,bytes)` + revert `OffchainLookup`,`resolveWithProof` 只是回调。
+  对线上 Hybrid 打一次真实的 `resolve(DNS-encoded aastar.eth, addr(node))`:
+
+      Hybrid(0xA54D63a6…)     → **直接返回数据,没有 revert**
+      OPResolver(0x17D4d74d…) → revert(无 data)
+
+  而 `HybridResolver.sol:151` 里确实有 `revert OffchainLookup(...)`,即 CCIP 路径存在。
+  所以「Hybrid 没有 `resolveWithProof`」**不意味着解析坏了** ——
+  那两格测试记录的是**过期的回调形状**,不是线上故障。
+  **对维护者的意义**:问题从「线上可能坏了」降到「测试记录了旧形态」,这对排优先级有用。
+
+  ⚠️ 这一步我又踩了一次选择器:`toFunctionSelector` 对 error 签名给出 `0x7376d14c`,
+  而 `keccak("OffchainLookup(address,string[],bytes,bytes4,bytes)")[:4]` = **`0x556f1830`**(正确)。
+  今天第三次「错的选择器产生真实但无关的读数」,而评审在给判据时**特意提醒过这一条**。
+  这次不影响结论(根本没 revert),但它说明**这个坑不会因为被写下来就消失**。
+
   **需要维护者拍板的是一句话:HybridResolver 是不是当前预期的线上形态?**
   - 是 → 这四格测试过期,应改成断言 Hybrid 及其验证路径(它有 `verifier`,走证明模式)
   - 否 → 是线上配置错了,域名该指回 OPResolver
