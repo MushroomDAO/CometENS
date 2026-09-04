@@ -113,6 +113,16 @@ describe('ownCommits — nothing reachable from base counts as this branch', () 
     return git('rev-parse', 'HEAD')
   }
 
+  // 30s, not the 10s default. This hook is not a normal setup: it creates a real repository in
+  // a temp dir and drives ~10 git subprocesses through it. The default hook timeout is a
+  // wall-clock budget sized for in-memory setup, and under the full suite's parallelism this
+  // file has been measured at 11644ms — 1.6s over.
+  //
+  // It failed that way three times before anyone caught it (#62, #83, #85 review runs), and it
+  // failed in EXACTLY the shape docs/agent/practices.md describes: a timed-out `beforeAll`
+  // reports `failed=0` with its tests recorded as SKIPPED, so the summary line reads like a
+  // precondition skip. We wrote that shape into the protocol over two rounds, and then it ran
+  // three times inside our own suite.
   beforeAll(() => {
     repo = mkdtempSync(pjoin(tmpdir(), 'approval-sha-'))
     git('init', '-q', '-b', 'main')
@@ -129,7 +139,7 @@ describe('ownCommits — nothing reachable from base counts as this branch', () 
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '-q', '--no-ff', 'main', '-m', 'merge main')
 
     head = commit('feat2') // ← the only genuinely new work on this branch
-  })
+  }, 30_000)
 
   afterAll(() => rmSync(repo, { recursive: true, force: true }))
 
