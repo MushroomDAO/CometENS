@@ -42,9 +42,13 @@
    —— 撤销后 `OffchainLookup` 不再触发(tx `0xf0d556f9…`),改回后恢复(tx `0x2bf77cd4…`)。
    此前记作「需要域名持有者的 L1 私钥」而未决 —— **那把钥匙一直在 `.env.local` 里**,
    `0xb5600060…` 就是 `aastar.eth` 的 registry owner。**它不是做不了,是没人把钥匙和判据对上。**
-   ⚠️ 撤销必须发生在**真正挂着我们 resolver 的那一层**:实跑时先撤 `forest.aastar.eth` 无效,
-   因为 ENS 通配解析往上走,落到仍指向我们的 `aastar.eth`。**社区若把名字挂在我们域名下,
-   清自己那一层撤不掉** —— 这条要写进 DELEGATED-HOSTING.md。
+   ⚠️ **撤销必须改对那一层,而且方向不能反**:
+   `setResolver(0x0)` = **把控制权交上去**(解析继续往上找,落到仍指向我们的祖先);
+   `setResolver(社区自己的 resolver)` = **拿回来**。
+   实跑时先撤 `forest.aastar.eth` 设成 `0x0` 所以无效 —— 不是「撤不掉」,是撤反了。
+   真正的约束是**社区手上有没有那个 L1 节点**:本服务默认发出的名字(如 `alice.aastar.eth`)
+   在 L1 上 `owner` 与 `resolver` **都是 `0x0`**,根本不存在,**没有可改的东西**。
+   完整的三种情形与运营方的对应义务见 [`DELEGATED-HOSTING.md`](../DELEGATED-HOSTING.md) 的「怎么收回」。
 3. **信任模型如实披露**:`docs/DELEGATED-HOSTING.md` 必须写明
    ——「已发出的子域,运营方(合约 owner)在技术上有能力覆写记录、转移 NFT;
    这不是 bug 而是运营逃生舱;若不接受,请走模式 A 自部署」。
