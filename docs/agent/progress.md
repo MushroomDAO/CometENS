@@ -229,6 +229,23 @@ cd <worktree> && pnpm install
 
 `pnpm check:deploy-order` → **all 16 endpoints present**。
 
+> ⚠️ **「present」是存在,不是能用 —— 这两个必须分开报。** 部署后逐个打只读端点:
+>
+> | 端点 | 结果 | 依赖 |
+> |---|---|---|
+> | `/lookup` | ✅ `{"found":false,"names":[]}` | KV,不走 RPC |
+> | `/root-domains` | ✅ 三个根域 | env var |
+> | `/check-label` | ❌ opt-sepolia alchemy 报错 | **L2 RPC** |
+> | `/resolve-status` | ❌ `{"error":"L2 RPC unreachable"}` | **L2 RPC** |
+>
+> **所以这次部署修好的是路由,不是服务。** 凡是需要 L2 RPC 的路径仍然不工作,
+> 而原因几乎可以肯定是上面那条(Alchemy app 没开 OPT_SEPOLIA)——
+> **说"几乎"是因为线上 worker 的 `OP_RPC_URL` 是 secret,我读不到它的值**,
+> 只能从行为推断它和 `.env.local` 里那个是同一个 app。**这一步要维护者在控制台确认。**
+>
+> 我第一版汇报只写了「16/16 present」。**那句话为真,而它读起来像"服务好了"** ——
+> 和这一篇里 `验收通过 ≠ 已上线` 是同一族的第三次:**present ≠ working**。
+
 七个写端点各发一次 `POST {}` → **全部 400**,不是 500 —— 这同时验了两件事:
 #72 修的那个「成功路径全 500」确实上线了,而 `{}` 被 `from` 校验挡在任何写入之前
 (#90 那段推理的实跑证据)。
