@@ -571,3 +571,39 @@ describe('preflight 3d — a self-hosted frontend must not silently point at us'
     }).level).toBe('WARN')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 3a — a provider key hidden inside a VITE_ URL.
+//
+// Check 3 only looks for PRIVATE-KEY shapes, so it says PASS on
+// `VITE_L2_RPC_URL=https://opt-sepolia.g.alchemy.com/v2/<key>` — and that URL is compiled into
+// the bundle and served to every visitor. Building this repo with a real `.env.local` and
+// grepping `dist/` found two Alchemy keys in the JS, minutes before a frontend deploy that
+// would have published them.
+//
+// It is a WARN, not a FAIL: a `VITE_` RPC URL is legitimate — the browser has to read the chain
+// from somewhere. What it must not carry is a credential.
+describe('preflight 3a — provider key inside a VITE_ URL', () => {
+  const RE = /https?:\/\/[^\s"']*\/(v2|v3)\/[A-Za-z0-9_-]{16,}/
+
+  it('flags an Alchemy URL with a key', () => {
+    expect(RE.test('https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn')).toBe(true)
+  })
+
+  it('flags an Infura URL with a key', () => {
+    // A second provider, because a pattern fitted to one vendor's URL shape is not a check.
+    expect(RE.test('https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef')).toBe(true)
+  })
+
+  // THE CONTROLS. Without these, `/./` would pass both assertions above while making the check
+  // fire on the very endpoints the fix tells people to use.
+  it('does NOT flag the public endpoints the docs now recommend', () => {
+    for (const u of ['https://sepolia.optimism.io', 'https://ethereum-sepolia-rpc.publicnode.com']) {
+      expect(RE.test(u)).toBe(false)
+    }
+  })
+
+  it('does NOT flag a short path segment that cannot be a key', () => {
+    expect(RE.test('https://opt-sepolia.g.alchemy.com/v2/short')).toBe(false)
+  })
+})

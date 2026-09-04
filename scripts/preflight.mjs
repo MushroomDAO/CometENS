@@ -307,6 +307,33 @@ export function staticChecks(env, envName = 'testnet', repoDefaults = undefined)
     add(3, 'PASS', 'key exposed to browser bundle', 'no VITE_ variable holds a private key')
   }
 
+  // 3a — a provider key hidden inside a VITE_ URL.
+  //
+  // Check 3 above only looks for PRIVATE-KEY shapes, so it says PASS on
+  // `VITE_L2_RPC_URL=https://opt-sepolia.g.alchemy.com/v2/<key>` — and that URL is compiled
+  // into the bundle and served to every visitor, key included.
+  //
+  // Not hypothetical: building this repo with a real `.env.local` and grepping `dist/` found
+  // two Alchemy keys in the JS, minutes before a frontend deploy that would have published
+  // them. And SELF-HOSTING.md walks the reader straight into it — it says
+  // `VITE_L1_SEPOLIA_RPC_URL=<一个 Ethereum Sepolia RPC>`, and for most people that string is
+  // a provider URL with their key in the path.
+  //
+  // WARN, not FAIL: a `VITE_` RPC URL is legitimate — the browser has to read the chain from
+  // somewhere. What it must not carry is a credential. Public endpoints
+  // (https://sepolia.optimism.io) do the same job for a frontend that only reads.
+  const PROVIDER_KEY_IN_URL = /https?:\/\/[^\s"']*\/(v2|v3)\/[A-Za-z0-9_-]{16,}/
+  const urlKeys = Object.keys(env).filter(
+    (k) => k.startsWith('VITE_') && PROVIDER_KEY_IN_URL.test(env[k] ?? ''),
+  )
+  if (urlKeys.length) {
+    add(3, 'WARN', 'provider key inside a VITE_ URL', `bundled and served publicly: ${urlKeys.join(', ')}`,
+      'The key is in the URL path, so `pnpm build` bakes it into dist/ and anyone loading the page can read it. ' +
+      'Use a public RPC for VITE_ variables, or accept that this key is public and restrict it at the provider.')
+  } else {
+    add(3, 'PASS', 'provider key inside a VITE_ URL', 'no VITE_ URL carries a provider key')
+  }
+
   // 3b — role separation. One key for all three roles means a single leak lets an attacker
   // both forge resolution responses and seize subdomains.
   //
