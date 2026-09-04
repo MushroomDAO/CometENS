@@ -195,6 +195,27 @@ cd <worktree> && pnpm install
 **剩下三条里有两条需要的是同一样东西:一个外部的人。** 它们不是被工程量卡住的,
 是被「我按定义不在那个总体里」卡住的 —— 再跑多少次判据都不会解除。
 
+## ⚠️ 两个 Alchemy app 的网络都没开对(2026-09-04 实测)
+
+清理后在主 checkout 跑全量(worktree 里这些是 skipped,因为没有 `.env.local`),
+`integration/deployed.test.ts` 全红。**直接打 RPC 拿到的是这个:**
+
+    OP Sepolia key  → "OPT_SEPOLIA is not enabled for this app"
+                       https://dashboard.alchemy.com/apps/kq627jmqgo9tu1n9/networks
+    ETH Sepolia key → "ETH_SEPOLIA is not enabled for this app"
+                       https://dashboard.alchemy.com/apps/pi3lpnaizikvt8z4/networks
+
+**这不是新问题** —— #30 就写过「它们打的 Alchemy app 没有启用 OPT_SEPOLIA,每次调用都失败,
+正是 T1.0.1 那个配置漂移,**在生产上也存在**」。**它至今仍在,而且两个网络都没开,不只 OP。**
+
+后果:
+- `integration/deployed.test.ts` 9 格全红(只在有 `.env.local` 的 checkout 里可见)
+- 线上 `/check-label` `/check-owner` 走错误路径 —— 这正是 #30 那次泄露的触发条件
+- 任何需要 RPC 的路径都不工作
+
+**这条改变了 key 轮换那件事的形状**:不只是「换一个被泄露的 key」,
+而是**新 app 必须把对应网络打开**,否则换完仍然全红。Alchemy 的报错直接给了控制台 URL。
+
 ## 部署与验收(2026-09-04,维护者授权)
 
 从 `preview`(`ecf9b83`)部署 `cometens-api --env testnet`。**部署前后用同一组探针**:
@@ -221,12 +242,18 @@ cd <worktree> && pnpm install
 | 路径 | 线上 | 仓库 |
 |---|---|---|
 | `/` | `CometENS 控制台` | `CometENS — 社区域名分发` |
-| `/lookup` | **回落到首页 —— 该页线上不存在** | `查询域名 · CometENS` |
+| `/lookup` | **200,但内容是首页** —— SPA 回落,该页未部署 | `查询域名 · CometENS` |
 | `/register` | `Register Subdomain — CometENS` | `申请子域名 — CometENS` |
 | `/admin` | `Admin — CometENS` | `CometENS 管理控制台` |
 
 也就是说 **T1.1.1(设计系统)/ T1.1.2(落地页)/ T1.1.3(公开查询页)/ T1.1.4(管理控制台)/
 T1.6.2(申请入口)/ T1.6.3(审批队列)全都不在线上。**
+
+> ⚠️ `/lookup` 那一格**不能用状态码核**:它返回 **200**,不是 404。
+> **一个只看状态码的探针分不开「页面在」和「SPA 回落」—— 两者都是 200;分开它们的是内容。**
+> 这和上面 `/approval-mode` 的 404 承重是同一把尺子的另一面:
+> 那个 404 承重,是因为它是**只读端点**,不能用「写端点对 GET 就是 404」解释。
+> **状态码什么时候是证据,取决于那个端点的性质。**
 
 **这不改变界面验收的结论,但改变它的读法。** 那五条判据核的是**仓库**里的页面 ——
 措辞一直是「代码侧」,而**读的人会默认"验收通过"等于"用户看得到"**。
