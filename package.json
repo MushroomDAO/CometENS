@@ -11,6 +11,7 @@
     "check:approval-sha": "node scripts/check-approval-sha.mjs",
     "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
     "check:deploy-order": "node scripts/check-deploy-order.mjs",
+    "check:ensv2-citations": "node scripts/check-ensv2-citations.mjs",
     "check:ensv2": "node scripts/check-ensv2-resolution.mjs",
     "check:typecheck-scope": "node scripts/check-typecheck-scope.mjs",
     "check:skipped": "node scripts/check-skipped.mjs",
