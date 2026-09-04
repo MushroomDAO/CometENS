@@ -12,6 +12,7 @@
     "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
     "check:deploy-order": "node scripts/check-deploy-order.mjs",
     "check:ensv2-citations": "node scripts/check-ensv2-citations.mjs",
+    "probe:ensv2-eac": "node scripts/ensv2-eac-revocation-probe.mjs",
     "check:ensv2": "node scripts/check-ensv2-resolution.mjs",
     "check:typecheck-scope": "node scripts/check-typecheck-scope.mjs",
     "check:skipped": "node scripts/check-skipped.mjs",

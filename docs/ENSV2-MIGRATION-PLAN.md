@@ -229,6 +229,40 @@ L2 (Optimism) —— L2Records + Gateway
                        └─────────────────────────────────────┘
 ```
 
+### 4.1 B2「撤销可验证」—— 已在 Sepolia 实证(2026-09-04)
+
+M1 的验收项 B2 卡了整个里程碑。它卡住不是因为没做,而是**现有结构里做不出来**:
+`L2RecordsV3.removeRegistrar()` 是 `onlyOwner`,owner 是我们 —— 社区只能拿到一句承诺,
+**没有任何链上凭据能让他们自己验证「我们撤不掉他」**。
+
+`pnpm probe:ensv2-eac --execute` 在 ENSv2 的真实 Sepolia 部署上跑完了整个生命周期:
+
+| 步骤 | 结果 | tx |
+|---|---|---|
+| 1. 社区部署自己的 registry(VerifiableFactory) | `0x673c11ce…fd2d` | [`0x38e71b4e…`](https://sepolia.etherscan.io/tx/0x38e71b4eb762b394f010475d3925e0850c3c9e5898ae0d6f9dd46a56ea0e5d55) |
+| 2. 授 `ROLE_REGISTRAR` 给「CometENS」 | `hasRootRoles = true` | [`0xd17e2860…`](https://sepolia.etherscan.io/tx/0xd17e2860ed3546a8a2a433deb718c91366ce71cc020a8a519e7ce506ea979bf0) |
+| 3. 委托方注册子名 `delegated` | **成功**,`findOwner` 归委托方 | [`0xf007bf4b…`](https://sepolia.etherscan.io/tx/0xf007bf4b606aac192e322fa24445534ce0c57babc49533bbc385feac87f8e05e) |
+| 4. **社区撤销** ← 这就是 B2 | `hasRootRoles = false` | [`0x25ee90c8…`](https://sepolia.etherscan.io/tx/0x25ee90c82ca7d95e01937ded650ea54086135009b0ab7aedafe4380abef0f7e8) |
+| 5. 委托方再注册 | **revert** | — |
+
+**判据是第 5 步,而它需要对照组才算数。** 在同一个 registry 上实测:
+
+```
+owner(有 ROLE_REGISTRAR)   → 可注册
+从未授权的陌生地址          → revert: EACUnauthorizedAccountRoles
+撤销后的委托方              → revert(同一类)
+```
+
+委托方用的是**一次性生成的钥匙**,不是复用 owner —— 否则第 5 步的 revert 可能来自
+「owner 恰好还有别的 role」而不是撤销生效。**判据要求两个身份真的不同。**
+
+意义:社区不需要相信我们的承诺,也不需要拿到我们的私钥。**他们自己发一笔交易,
+然后任何人拿这几个 hash 就能复核。** 这是 CometENS 现有结构给不出的东西。
+
+⚠️ 上游明写合约未定稿(F10),所以这里证明的是**机制成立**,不是这些地址将来还在。
+
+---
+
 **一句话说清 v0.9.0 卖点**：社区把「发子名」这个 role 授给我们，**而且能自己一笔交易收回去** ——
 不需要相信我们的承诺，不需要拿到我们的私钥，链上看得见。
 
@@ -277,7 +311,7 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
 | Task | 内容 |
 |---|---|
 | T4.2.1 | 用 EAC role 模型重写委托托管：`ROLE_REGISTRAR` 授给我们，`ROLE_SET_RESOLVER` 留给社区 |
-| T4.2.2 | **B2「撤销可验证」改成真验收**：社区 `revokeRoles` → 我们的 registrar 立刻发不出新子名 → 给出 tx hash 和失败回执 |
+| T4.2.2 | ~~B2「撤销可验证」改成真验收~~ → ✅ **已在 Sepolia 实证,见 §4.1**(tx hash 在那里) |
 | T4.2.3 | `delegate` CLI 重写：`grant` / `revoke` / `status` 三个子命令直接打 EAC |
 | T4.2.4 | `DELEGATED-HOSTING.md` 重写信任模型章节 —— 从「我们承诺不作恶」改成「你随时可以撤，这是命令」 |
 
