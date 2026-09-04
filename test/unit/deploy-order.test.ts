@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { getChain } from '../../workers/api/src/index'
-// @ts-expect-error — plain .mjs module, no type declarations
 import {
   requiredEndpoints, classify, redact, readFrontendSources,
   countApiMentions, countPathHits, unreadableCallSites,
   DEFINITION_MODULE,
+  // @ts-expect-error — plain .mjs module, no type declarations
 } from '../../scripts/check-deploy-order.mjs'
 
 /**

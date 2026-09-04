@@ -351,7 +351,7 @@ describe('preflight 3b — three roles, three keys', () => {
     L2_RECORDS_ADDRESS: `0x${'ab'.repeat(20)}`,
     ROOT_DOMAIN: 'community.eth',
   }
-  const check3b = (env) => staticChecks({ ...base, ...env }).find((c) => String(c.id) === '3b')
+  const check3b = (env: any) => staticChecks({ ...base, ...env }).find((c: any) => String(c.id) === '3b')
 
   it('three distinct keys PASS', () => {
     const c = check3b({ WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner })
@@ -404,8 +404,8 @@ describe('preflight 3b — three roles, three keys', () => {
       PRIVATE_KEY_SUPPLIER: K.gateway,
       PRIVATE_KEY_JASON: K.owner,
     })
-    expect(checks.find((c) => c.id === '3b').level).toBe('PASS')
-    const nudge = checks.find((c) => String(c.id) === '3c')
+    expect(checks.find((c: any) => c.id === '3b').level).toBe('PASS')
+    const nudge = checks.find((c: any) => String(c.id) === '3c')
     expect(nudge.level).toBe('WARN')
     expect(nudge.detail).toContain('WORKER_EOA_PRIVATE_KEY')
   })
@@ -413,7 +413,7 @@ describe('preflight 3b — three roles, three keys', () => {
   it('a clean modern config produces NO legacy nudge (control)', () => {
     // Without this, always emitting 3c would pass the assertion above.
     const checks = staticChecks({ ...base, WRITER_KEY: K.writer, GATEWAY_SIGNER_KEY: K.gateway, OWNER_KEY: K.owner })
-    expect(checks.find((c) => String(c.id) === '3c')).toBeUndefined()
+    expect(checks.find((c: any) => String(c.id) === '3c')).toBeUndefined()
   })
 
   it('two names for one role with DIFFERENT keys is a FAIL, whatever the severity setting', () => {
@@ -450,7 +450,7 @@ describe('preflight and the workers must read the SAME variables', () => {
     // duplicated. Drift would make preflight check variables nobody reads and report PASS on a
     // deployment whose real keys it never looked at — a false green, not a missing check.
     const { ROLE_ENV_VARS } = await import('../../server/gateway/signer')
-    const fromPreflight = KEY_ROLES.map((r) => r.names.join(','))
+    const fromPreflight = KEY_ROLES.map((r: any) => r.names.join(','))
     const fromSigner = Object.values(ROLE_ENV_VARS).map((n) => n.join(','))
     expect(fromPreflight).toEqual(fromSigner)
   })

@@ -46,7 +46,13 @@ const RETRACTED: Array<{ phrase: string; why: string; where: string; allowIn?: E
     where: 'PR #45',
   },
   {
-    allowIn: [{ file: 'docs/agent/followups.md', count: 1 }],
+    allowIn: [
+      { file: 'docs/agent/followups.md', count: 1 },
+      // T1.7.1 quotes it to record that I asserted it TWICE without checking, and what the
+      // cause actually is (viem's chain generics). The guard flagged this on the way in —
+      // which is the exemption doing its job, not being worked around.
+      { file: 'docs/agent/tasks.md', count: 1 },
+    ],
     phrase: 'viem 重复安装',
     why: 'typecheck 的 113 个错误里 viem 类型冲突只占 1 条(sdk)。大头是 @types/node 没装。',
     where: 'PR #48 — 按目录二分:src=0 / +sdk=1 / +server=10 / +test=109',

@@ -18,7 +18,6 @@ import {
   encodePacked,
   encodeFunctionData,
   decodeFunctionResult,
-  decodeErrorResult,
   encodeAbiParameters,
   toHex,
   type Hex,
@@ -112,7 +111,7 @@ async function deployContract(
 
 // ─── Gateway server ───────────────────────────────────────────────────────────
 
-function buildSignedResponse(result: Hex, expires: bigint, resolverAddr: Address): Hex {
+function _buildSignedResponse(result: Hex, expires: bigint, resolverAddr: Address): Hex {
   const messageHash = keccak256(
     encodePacked(
       ['bytes2', 'address', 'uint64', 'bytes32'],
@@ -211,7 +210,7 @@ describe('E2E: CCIP-Read resolution flow', () => {
     const l2Pub = createPublicClient({ chain: l2Chain, transport: http(`http://127.0.0.1:${L2_PORT}`) })
 
     const labelhash = keccak256(toBytes('alice')) as Hex
-    const root = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+    const _root = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
 
     // Note: for testing we use raw namehash parts; in production this matches ENS namehash
     const parentOfAliceTest = namehash('test.eth')

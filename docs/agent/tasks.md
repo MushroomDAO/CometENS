@@ -392,7 +392,7 @@
 
 ---
 
-### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/ workers/  `READY`
+### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/ workers/  `IN_PROGRESS`
 - **优先级**:mid
 - **来源**:由 FU-5 提升(§2.5:"某条其实是真 feature/bug 规模的 → 提升为正常 task")。
   做 FU-5 时发现剩余工作量不是一次收尾能完成的,而且它**已经藏过一个生产 bug**
@@ -415,8 +415,15 @@
      把它加进 `types` 是**全局**生效,会覆盖 DOM/Node 的 `Response`/`fetch`,
      实测 72 → 93(凭空多出 30 条 `TS18046 unknown`)。要么给 `workers/` 单独 tsconfig,
      要么照 `test/worker-types.ts` 的做法在 worker 里声明局部类型。
-  2. **`TS2719` viem 类型冲突**(`server/gateway/index.ts:71`、`sdk/CometENS.ts:76`)——
-     `workers/gateway` 自带 node_modules 造成同版本 viem 两份物理安装。
+  2. **`TS2719` / `TS2345` / `TS2322` viem **链泛型**冲突**(`sdk/CometENS.ts:76`、
+     `server/gateway/index.ts:71`、两处 e2e 的 `deployContract`、`test/integration` 两处)。
+     **不是重复安装** —— 实测 `node_modules/.pnpm` 里 viem 恰好 1 份,`workers/gateway` 里 0 份。
+     真因是 `createPublicClient({ chain: optimism })` 产生**带链的**类型:
+     `getBlock()` 的 `transactions` 联合在带链客户端上有 11 个成员、在无链客户端上只有 3 个,
+     所以 `private l2Client: PublicClient` 这种裸标注**不是放宽,是另一个类型**。
+     ⚠️ 我两次断言过"根因是 viem 重复安装"(FU-5 一次、本 task 描述一次),**两次都没验过**。
+     试过 `ReturnType<typeof createPublicClient>`,错误从 13 挪到 14(换了位置没减少),
+     所以这一类需要逐处按实际链泛型标注,不是一行能扫掉的。
   3. `TS6133` 未使用变量、`TS7006` 隐式 any 等,逐个修即可。
 - **验收命令**:`pnpm typecheck`(把 tsconfig 的 include 扩到
   `["src","test","server","sdk"]` 之后仍 rc=0)

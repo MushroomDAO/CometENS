@@ -162,7 +162,7 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     })
 
     // Build a fake result (resolver address itself)
-    const fakeResult = encodeFunctionData({
+    const _fakeResult = encodeFunctionData({
       abi: [{ type: 'function', name: 'addr', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }] as const,
       functionName: 'addr',
       args: [node],

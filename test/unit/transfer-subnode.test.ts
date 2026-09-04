@@ -58,8 +58,8 @@ vi.mock('viem/accounts', async (importOriginal) => {
 
 function makeEnv(overrides: Partial<{
   WORKER_EOA_PRIVATE_KEY: string
-  NONCE_STORE: DurableObjectNamespace
-  RECORD_CACHE: KVNamespace
+  NONCE_STORE: unknown
+  RECORD_CACHE: TestKVNamespace
 }> = {}): any {
   return {
     NETWORK: 'op-sepolia',

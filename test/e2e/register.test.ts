@@ -13,7 +13,6 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  parseEther,
   keccak256,
   toBytes,
   toHex,
@@ -23,7 +22,7 @@ import {
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
-import { execSync, spawn, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 

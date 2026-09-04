@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TestExecutionContext } from '../worker-types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import type { Address } from 'viem'
@@ -94,7 +95,7 @@ async function postRegister(body: Record<string, unknown>, env = makeEnv()) {
       body: JSON.stringify(body),
     }),
     env,
-    {} as ExecutionContext,
+    {} as unknown as TestExecutionContext,
   )
 }
 

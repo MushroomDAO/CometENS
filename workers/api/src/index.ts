@@ -28,7 +28,7 @@ import {
   type Address,
 } from 'viem'
 import { optimismSepolia, optimism, foundry } from 'viem/chains'
-import { privateKeyToAccount } from 'viem/accounts'
+
 import { L2RecordsWriterV2 } from '../../../server/gateway/writer/L2RecordsWriterV2'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 import {
@@ -65,6 +65,35 @@ const RECORD_CACHE_TTL = 300
 const CHALLENGE_PERIOD: Record<string, number> = {
   'op-mainnet': 302_400,   // 3.5 days (post-Granite)
   'op-sepolia': 302_400,   // same parameter on testnet
+}
+
+/**
+ * The Cloudflare runtime shapes this worker actually uses, declared locally.
+ *
+ * NOT `@cloudflare/workers-types`: adding that package to tsconfig's `types` makes its
+ * definitions GLOBAL, overriding the DOM/Node `Response`, `fetch` and friends for every file
+ * in the project. Measured while extending typecheck coverage (T1.7.1): 72 errors → 93, with
+ * 30 new `TS18046 … is of type 'unknown'` that exist only because of that override.
+ *
+ * Only the members this file touches are declared. A narrower shape is not a limitation here —
+ * it is what lets the same source typecheck under the root project AND under wrangler, which
+ * supplies the real globals.
+ */
+export interface KVNamespace {
+  get(key: string): Promise<string | null>
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
+  delete(key: string): Promise<void>
+  list(options?: { prefix?: string }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean }>
+}
+
+export interface AnalyticsEngineDataset {
+  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
+}
+
+/** The third argument to `fetch`; this worker never calls into it. */
+export interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void
+  passThroughOnException(): void
 }
 
 export interface Env {
@@ -121,7 +150,10 @@ function trackEvent(analytics: AnalyticsEngineDataset | undefined, event: string
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  // `ctx` is declared even though nothing uses it: the runtime passes three arguments, and a
+  // two-parameter signature makes every caller that passes the real third one a type error —
+  // which is exactly what the tests were doing.
+  async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname
 
