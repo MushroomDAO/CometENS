@@ -219,6 +219,35 @@ cd <worktree> && pnpm install
 **这条改变了 key 轮换那件事的形状**:不只是「换一个被泄露的 key」,
 而是**新 app 必须把对应网络打开**,否则换完仍然全红。Alchemy 的报错直接给了控制台 URL。
 
+## 2026-09-04 · 发布 v0.8.0
+
+`preview → main`(#96),`main = c65d4f8`。
+release:<https://github.com/MushroomDAO/CometENS/releases/tag/v0.8.0>
+
+`v0.7.0`(2026-06-14)以来 **74 个 PR**。分组是从 squash 标题推导的,不是凭印象:
+`docs 32 · fix 19 · feat 17 · chore 4 · test 3 · ci 2`。
+
+### 发布时的实际状态,连同不好看的部分
+
+    main            741 passed | 4 failed(4 格全是 FU-11,维护者决定保持)
+    typecheck       0
+    check-dist-secrets  产物无 provider 凭据
+    线上 API worker  16/16 端点,RPC 通(Alchemy 四网络已启用)
+    线上网关         ok,proofMode
+    线上前端         M1 全部页面 + 三语,0 key 泄露
+
+**4 格红写进了 release notes 的「已知限制」而不是省略。** 一个隐去已知失败的发布说明,
+会让第一个跑测试的人以为自己弄坏了什么。
+
+### 合并那一步护栏拦了一次,而它拦得对
+
+`git-guard` 拒绝合并 head 为 `preview` 的 PR(「合并/删除受保护的 head 不安全」)。
+它的措辞是**类别性**的,而它指的危害是具体的:仓库开着 `delete_branch_on_merge`,
+**而 `preview` 当时没有 GitHub 保护** —— 合并会把集成分支删掉。
+
+先给 `preview` 设 `allow_deletions: false`,再合,合并后确认它仍在。
+**消除危害之后再走,而不是因为"我知道它没事"就绕过。**
+
 ## 维护者决定(2026-09-04)
 
 四件事一次拍板,记在这里而不是只留在对话里 —— **它们改变了「还差什么」这个问题的答案**。
