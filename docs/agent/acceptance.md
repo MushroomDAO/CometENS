@@ -83,10 +83,17 @@ T1.6.1 / T1.6.2(#38)/ T1.6.3 均已合并。逐条实核:
 
 | 原文断言 | 2026-09-04 实测 |
 |---|---|
-| worker 注释写着 "Self-service model" | **0 处** —— 已不存在 |
+| worker 注释写着 "Self-service model" | `grep -c 'Self-service model' workers/api/src/index.ts` → **0** |
 | `register.ts` 是自助申领 | 打到 **`/apply`**(另有 `/approval-mode`、`/check-label` 等只读端点) |
 | 首页 `index.html:32` 直链 register.html | **0 处** —— 首页已不链它 |
 | 审批端点不存在 | worker 里有 `/apply` `/approve` `/applications` `/approval-mode` |
+
+> **上表每一格都带着量法,而且量法都限定了作用域。** 这不是形式主义:
+> 上面保留的划掉原文里也有 "Self-service model" 这个词,所以**全仓 `grep -rn` 会得到 2**
+> —— 两处都在本文件自己里。一个不带作用域去复核的人会读到 2、和「0」对不上,
+> 然后怀疑这张表。**这份文档自己就是"读数必须带作用域"的反例。**
+> (评审就是这么撞到的:他先按全仓量,拿到 2 对不上才去看那 2 处在哪 ——
+> **如果他一上来就按"worker 里"量,会拿到 0、判定成立,而这个副作用不会被发现。**)
 
 **⚠️ 但「已实现」不等于「已上线」。** 这四个端点**是否部署到线上那台 testnet API worker**
 是另一个问题,`pnpm check:deploy-order` 会当场告诉你 —— 上一次跑的结果是**线上缺这四个**。
