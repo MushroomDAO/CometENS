@@ -72,6 +72,39 @@ const short = (s) => (typeof s === 'string' ? s.slice(0, 7) : String(s))
  * Filtering the merged content away would hide the half that the merge-protocol lesson says
  * matters most.
  */
+/**
+ * The commits this branch itself added since the approval.
+ *
+ * `approved..head` alone is NOT that set: a squash-merge commit brought in from the base is
+ * itself a non-merge commit and lands squarely in that range. Excluding the base (`^base`) is
+ * what makes the label true — without it, #74's squash commit was listed as new work on this
+ * branch, and a label that names something the command does not compute is how a reader ends
+ * up re-reviewing the wrong thing.
+ *
+ * `exact: false` means the base ref was not resolvable (a fresh clone, a differently-named
+ * remote) and the wider range was used. The caller must SAY so: over-reporting is tolerable,
+ * over-reporting silently is not.
+ *
+ * Exported with an injectable `cwd` so the structural invariant — nothing reachable from base
+ * may appear here — can be asserted against a purpose-built repository rather than against
+ * whatever this one happens to look like today. Verifying it by running it on one real PR, as
+ * the first version did, tests the state of that afternoon; this tests the property.
+ */
+export function ownCommits(approved, head, base, cwd = process.cwd()) {
+  for (const args of [
+    ['log', '--format=%H', '--no-merges', `${approved}..${head}`, `^${base}`],
+    ['log', '--format=%H', '--no-merges', `${approved}..${head}`],
+  ]) {
+    try {
+      const out = execFileSync('git', args, { encoding: 'utf8', cwd, stdio: ['ignore', 'pipe', 'ignore'] })
+      return { shas: out.split('\n').filter(Boolean), exact: args.length === 5 }
+    } catch {
+      // fall through to the wider range
+    }
+  }
+  return null
+}
+
 function describeDelta(approved, head, base) {
   const stat = (range) => {
     try {
@@ -80,26 +113,6 @@ function describeDelta(approved, head, base) {
       return null
     }
   }
-  // `approved..head` alone is not "this branch's own commits": a squash-merge commit brought
-  // in from the base is itself a non-merge commit and shows up in that range. Excluding the
-  // base (`^base`) is what makes the label true. Verified both ways on this PR — without the
-  // exclusion it listed #74's squash commit as new work on this branch.
-  const own = (approved, head, base) => {
-    for (const args of [
-      ['log', '--oneline', '--no-merges', `${approved}..${head}`, `^${base}`],
-      ['log', '--oneline', '--no-merges', `${approved}..${head}`],
-    ]) {
-      try {
-        return { text: execFileSync('git', args, { encoding: 'utf8' }).trim(), exact: args.length === 5 }
-      } catch {
-        // The base ref may not exist locally (a fresh clone, a different remote name). Fall
-        // back to the wider range rather than printing nothing — but say which one was used,
-        // because the wider one over-reports and a reader must be able to tell.
-      }
-    }
-    return null
-  }
-
   const full = stat(`${approved}..${head}`)
   if (full === null) {
     console.error('\n  (cannot diff locally; fetch the branch to see what changed)')
@@ -110,14 +123,17 @@ function describeDelta(approved, head, base) {
     return
   }
 
-  const commits = own(approved, head, base)
+  const commits = ownCommits(approved, head, base)
   if (commits?.exact) {
     console.error('\nNew commits on this branch since the approval:')
   } else {
     console.error('\nCommits since the approval (could not exclude the base branch, so this')
     console.error('OVER-REPORTS — merged-in commits are listed here too):')
   }
-  console.error(commits?.text ? indent(commits.text) : '  (none — everything below arrived via a merge)')
+  const lines = commits?.shas.length
+    ? execFileSync('git', ['log', '--oneline', '--no-walk', ...commits.shas], { encoding: 'utf8' }).trim()
+    : ''
+  console.error(lines ? indent(lines) : '  (none — everything below arrived via a merge)')
 
   console.error('\nFull file delta since the approval (may include base-branch content merged in,')
   console.error('already reviewed on its own but never reviewed IN COMBINATION with this branch):')
