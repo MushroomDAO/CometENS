@@ -38,32 +38,31 @@ const KNOWN = [
 ]
 
 /**
- * Files that MUST end up in the compiled set, even though `include` never names them.
+ * Every worker source file must be ACCOUNTED FOR: either compiled, or listed below with a
+ * reason. Derived from the filesystem rather than hand-listed, because a hand-written list
+ * has the same hole it is meant to close — a third worker file added later belongs to nobody,
+ * is silently not typechecked, and the list still says everything is fine. (Fourth place in
+ * this repo where enumerating reality beats enumerating expectations; see #70.)
  *
- * `workers/api/src/index.ts` is covered only because unit tests import it and tsc follows
- * imports. That is real coverage — an injected type error in it does fail this check, verified
- * by probe — but it is coverage held up by somebody else's import statement. Delete the last
- * test that imports the worker and the coverage disappears with it, silently, while this
- * script still prints "OK": zero errors in a file nobody compiled looks exactly like zero
- * errors in a clean one.
+ * `workers/api/src/index.ts` is compiled only because tests import it and tsc follows imports.
+ * That is real coverage — but it is held up by somebody else's import statement, and it was
+ * this file that carried the seven-endpoint 500 for weeks because nothing typechecked it (#72).
  *
- * That matters more here than anywhere else in the repo: this is the file that carried the
- * seven-endpoint 500 for weeks precisely because nothing typechecked it (#72).
+ * HOW FRAGILE, measured rather than assumed. It survives more than I first claimed:
+ *   - `describe.skip` on every importing test  → still compiled (compilation ≠ execution)
+ *   - specifier hoisted to `const WP = '…'`    → still compiled (tsc follows a literal const)
+ *   - no in-scope file imports it at all       → NOT compiled ← the only way it goes
  *
- * So the coverage is asserted directly rather than assumed from the include list.
+ * The risk is not the COUNT of imports (15 sites across 7 files) but their KIND: only 2 are
+ * static top-level; the other 13 are `await import()` inside test bodies — exactly what
+ * routine test refactoring rewrites, by someone who has no idea they are deciding whether a
+ * production file gets typechecked. Those 13 are the loose anchor, not the 7 files.
  *
- * HOW FRAGILE, measured rather than assumed — my first description of this was too alarming:
- *   - `describe.skip` on every importing test    → still compiled. Compilation is
- *                                                  independent of execution.
- *   - specifier hoisted to `const WP = '…'`      → still compiled. tsc follows a
- *                                                  literal-typed const through `import(WP)`.
- *   - no in-scope file imports it at all         → NOT compiled. This is the only way it
- *                                                  goes, and it is what this check catches.
- * The control below uses `workers/gateway/src/index.ts`, which is genuinely in that last
- * state today — so the matcher is known to be able to answer "no", not just "yes".
+ * That fragility USED to be silent: coverage could vanish while this script still printed OK,
+ * because a file nobody compiled reports zero errors exactly like a clean one. It is not
+ * silent any more — that is what the check below is, and removing every import now exits 1
+ * and names the file (verified by building that state with a probe config).
  */
-const MUST_BE_COMPILED = ['workers/api/src/index.ts']
-
 function run(args) {
   try {
     return execFileSync('npx', ['tsc', '-p', 'tsconfig.wide.json', ...args], { encoding: 'utf8' })
@@ -73,38 +72,55 @@ function run(args) {
   }
 }
 
+const WORKER_SOURCES = execFileSync('git', ['ls-files', 'workers/**/*.ts'], { encoding: 'utf8' })
+  .split('\n')
+  .filter((f) => f && !f.includes('node_modules'))
+
+/** Worker files not yet in any typecheck scope, each with the task that will fix it. */
+const KNOWN_UNCOVERED = {
+  'workers/gateway/src/index.ts': 'T1.7.2 — needs Cloudflare runtime globals',
+}
+
 // --listFiles prints one ABSOLUTE path per line, and only for files tsc actually compiled.
 // Matched as a whole-line suffix rather than a substring: `includes('/workers/api/src/index.ts')`
 // would also be satisfied by `/vendor/copy/workers/api/src/index.ts`, and a check that can be
-// satisfied by the wrong file is not a check. (The first version of this had a second clause
-// testing the same string with a trailing newline — dead, since the substring test subsumed it.)
-const compiled = new Set(
-  run(['--noEmit', '--listFiles'])
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean),
-)
-const isCompiled = (f) => [...compiled].some((p) => p === f || p.endsWith(`/${f}`))
-const missing = MUST_BE_COMPILED.filter((f) => !isCompiled(f))
+// satisfied by the wrong file is not a check.
+const compiled = run(['--noEmit', '--listFiles'])
+  .split('\n')
+  .map((l) => l.trim())
+  .filter(Boolean)
+const isCompiled = (f) => compiled.some((p) => p === f || p.endsWith(`/${f}`))
 
-// The matcher must be able to say no. Without this, a bug that made isCompiled always true
-// would leave every assertion below passing while checking nothing.
-if (isCompiled('workers/gateway/src/index.ts')) {
-  console.error('FAIL: the gateway worker IS compiled now — good, but this control assumed it was not.')
-  console.error('Move it into MUST_BE_COMPILED and pick another known-absent file for the control.')
-  process.exit(1)
-}
+// The matcher must be able to say no. Without this, a bug making isCompiled always true would
+// leave every assertion below passing while checking nothing.
 if (isCompiled('this/file/does/not/exist.ts')) {
-  console.error('FAIL: isCompiled returned true for a path that cannot exist — the matcher is broken.')
+  console.error('FAIL: isCompiled said yes to a path that cannot exist — the matcher is broken.')
   process.exit(1)
 }
 
-if (missing.length) {
-  console.error(`FAIL: not in the compiled set: ${missing.join(', ')}`)
-  console.error('Whatever used to import it stopped. Add it to an include, or restore the import —')
-  console.error('an uncompiled file reports zero errors exactly like a clean one.')
+if (!WORKER_SOURCES.length) {
+  console.error('FAIL: found no worker sources at all. The glob broke; this check is inert.')
   process.exit(1)
 }
+
+const lost = WORKER_SOURCES.filter((f) => !isCompiled(f) && !(f in KNOWN_UNCOVERED))
+if (lost.length) {
+  console.error(`FAIL: worker source in nobody's typecheck scope: ${lost.join(', ')}`)
+  console.error('Either something stopped importing it, or it is new and was never covered.')
+  console.error('A file nobody compiled reports zero errors exactly like a clean one.')
+  console.error('Add it to a tsconfig include, or to KNOWN_UNCOVERED with the task that will fix it.')
+  process.exit(1)
+}
+
+const staleExemptions = Object.keys(KNOWN_UNCOVERED).filter((f) => isCompiled(f))
+if (staleExemptions.length) {
+  console.error(`FAIL: covered now, but still exempted: ${staleExemptions.join(', ')}`)
+  console.error('Good news with a one-line fix: drop it from KNOWN_UNCOVERED and close its task.')
+  console.error('A stale exemption is how a list stops describing anything.')
+  process.exit(1)
+}
+
+for (const [f, why] of Object.entries(KNOWN_UNCOVERED)) console.log(`  not covered: ${f} — ${why}`)
 
 const out = run(['--noEmit'])
 
