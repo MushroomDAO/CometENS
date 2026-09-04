@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 /**
@@ -25,6 +26,20 @@ import { join } from 'node:path'
  * carried entirely by them.
  */
 const TASKS = join(__dirname, '..', '..', 'docs', 'agent', 'tasks.md')
+const ROOT = join(__dirname, '..', '..')
+
+/**
+ * Squash-merged PR numbers, read from commit subjects: `feat(x): … (#74)`.
+ *
+ * No network, no CI coupling — the repository already knows which PRs landed. The shape came
+ * from the reviewer, who proposed it for a DIFFERENT failure (a completed followup citing a PR
+ * that never existed) which has never actually occurred, so it was not built. This one has
+ * occurred, which is the difference that decides it.
+ */
+function mergedPrNumbers(): Set<string> {
+  const log = execFileSync('git', ['log', '--format=%s', '-n', '400'], { cwd: ROOT, encoding: 'utf8' })
+  return new Set([...log.matchAll(/\(#(\d+)\)/g)].map((m) => m[1]))
+}
 
 /** Task headings whose status is PR_OPEN, with whatever follows the status. */
 export function prOpenEntries(source: string): Array<{ line: string; hasNumber: boolean }> {
@@ -36,6 +51,48 @@ export function prOpenEntries(source: string): Array<{ line: string; hasNumber: 
   }
   return out
 }
+
+/**
+ * A `PR_OPEN` task whose PR has already merged.
+ *
+ * The guard above checks the FORMAT of the citation. Nothing checked where it POINTS — and the
+ * two come apart: T1.7.2 sat at `PR_OPEN (PR #74)` for thirty-five minutes after #74 merged,
+ * correctly formatted the whole time. Merging is exactly the "release event" the protocol above
+ * says must bring someone back to this file, and nothing did.
+ *
+ * Found by hand while re-checking whether the BLOCKED tasks' blockers still held — that is,
+ * by an audit that happens only when someone thinks to run it. Which is the argument for
+ * this test.
+ */
+describe('no PR_OPEN task points at an already-merged PR', () => {
+  const merged = mergedPrNumbers()
+
+  it('every PR_OPEN citation names a PR that has NOT landed', () => {
+    const stale = prOpenEntries(readFileSync(TASKS, 'utf8'))
+      .map((e) => ({ line: e.line, pr: e.line.match(/PR #(\d+)/)?.[1] }))
+      .filter((e) => e.pr && merged.has(e.pr))
+      .map((e) => e.line)
+    expect(stale, 'a task is still PR_OPEN but its PR is merged — mark it DONE').toEqual([])
+  })
+
+  // Without this the assertion above passes on an empty log, a broken regex, or a set that is
+  // simply never populated — and would keep passing forever.
+  it('the merged-PR set is actually populated (control)', () => {
+    expect(merged.size).toBeGreaterThan(5)
+  })
+
+  it('an OPEN pr number is absent from the set (control)', () => {
+    // Proves the set discriminates rather than containing everything. #9999 has never existed.
+    expect(merged.has('9999')).toBe(false)
+  })
+
+  it('WOULD catch a stale entry (must-fail control)', () => {
+    const pr = [...merged][0]
+    const fake = `### T9.9.9 something  \`PR_OPEN (PR #${pr})\``
+    expect(/PR #(\d+)/.exec(fake)?.[1]).toBe(pr)
+    expect(merged.has(pr)).toBe(true)
+  })
+})
 
 describe('every PR_OPEN task carries its PR number', () => {
   const source = readFileSync(TASKS, 'utf8')
