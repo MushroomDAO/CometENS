@@ -392,6 +392,38 @@
 
 ---
 
+### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/ workers/  `READY`
+- **优先级**:mid
+- **来源**:由 FU-5 提升(§2.5:"某条其实是真 feature/bug 规模的 → 提升为正常 task")。
+  做 FU-5 时发现剩余工作量不是一次收尾能完成的,而且它**已经藏过一个生产 bug**
+  (七个写端点的成功路径全 500,见 PR #72)。
+- **已完成的部分**(PR #72):装 `@types/node`;`test/worker-types.ts` 局部类型垫片;
+  修掉 7 处 `TS18004`(那个生产 bug)。
+- **实测基线**(2026-09-04,逐个跑出来的,不是估的):
+
+  | include | 错误数 |
+  |---|---|
+  | `["src"]` | **0**(当前) |
+  | `+ server` | 1 |
+  | `+ sdk` | 4 |
+  | `+ test` | 53 |
+
+- **剩余的 53 条按性质分三类**:
+  1. **worker 的 Cloudflare 全局类型**(`KVNamespace` / `ExecutionContext` /
+     `AnalyticsEngineDataset` / `DurableObjectNamespace`)以及由此派生的 `TS2554`
+     (fetch 签名 2 vs 3 参数)。**不能靠 `@cloudflare/workers-types` 解决** ——
+     把它加进 `types` 是**全局**生效,会覆盖 DOM/Node 的 `Response`/`fetch`,
+     实测 72 → 93(凭空多出 30 条 `TS18046 unknown`)。要么给 `workers/` 单独 tsconfig,
+     要么照 `test/worker-types.ts` 的做法在 worker 里声明局部类型。
+  2. **`TS2719` viem 类型冲突**(`server/gateway/index.ts:71`、`sdk/CometENS.ts:76`)——
+     `workers/gateway` 自带 node_modules 造成同版本 viem 两份物理安装。
+  3. `TS6133` 未使用变量、`TS7006` 隐式 any 等,逐个修即可。
+- **验收命令**:`pnpm typecheck`(把 tsconfig 的 include 扩到
+  `["src","test","server","sdk"]` 之后仍 rc=0)
+- **涉及文件**:`tsconfig.json`、`workers/api/src/index.ts`、`sdk/CometENS.ts`、
+  `server/gateway/index.ts`、若干 `test/**`
+- **证据**:
+
 ## BLOCKED — 需要用户拍板,夜间不得自行决定
 
 ### TB.1 主网部署(D4)  `BLOCKED`

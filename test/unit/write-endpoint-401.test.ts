@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TestExecutionContext } from '../worker-types'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { optimismSepolia } from 'viem/chains'
@@ -122,7 +123,7 @@ async function post(path: string) {
       body: JSON.stringify(malformedBody()),
     }),
     env() as any,
-    {} as ExecutionContext,
+    {} as unknown as TestExecutionContext,
   )
 }
 
@@ -163,7 +164,7 @@ describe('a malformed signature is 401, never 5xx', () => {
         const worker = (await import('../../workers/api/src/index')).default
         const res = await worker.fetch(
           new Request(`https://api.test${path}`, { method: 'GET' }),
-          env() as any, {} as ExecutionContext,
+          env() as any, {} as unknown as TestExecutionContext,
         )
         expect({ path, status: res.status }).not.toMatchObject({ status: 404 })
       }),
@@ -176,7 +177,7 @@ describe('a malformed signature is 401, never 5xx', () => {
     const worker = (await import('../../workers/api/src/index')).default
     const res = await worker.fetch(
       new Request('https://api.test/register', { method: 'GET' }),
-      env() as any, {} as ExecutionContext,
+      env() as any, {} as unknown as TestExecutionContext,
     )
     expect(res.status).toBe(404)
   })
@@ -213,7 +214,7 @@ describe('a malformed signature is 401, never 5xx', () => {
       new Request('https://api.test/register', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       }),
-      env() as any, {} as ExecutionContext,
+      env() as any, {} as unknown as TestExecutionContext,
     )
     expect(res.status).toBe(401)
   })

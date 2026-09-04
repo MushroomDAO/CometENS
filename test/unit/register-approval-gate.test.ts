@@ -23,7 +23,12 @@ vi.mock('viem', async (importOriginal) => {
   const actual = await importOriginal<typeof import('viem')>()
   return {
     ...actual,
-    createPublicClient: vi.fn().mockReturnValue({ readContract: mockReadContract }),
+    // waitForTransactionReceipt too: the writer awaits it after sending, and a mock missing it
+    // turns every successful write into a 500 that looks exactly like a product failure.
+    createPublicClient: vi.fn().mockReturnValue({
+      readContract: mockReadContract,
+      waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success', blockNumber: 1n }),
+    }),
     createWalletClient: vi.fn().mockReturnValue({ writeContract: vi.fn().mockResolvedValue('0xtx'), chain: optimismSepolia }),
     http: vi.fn().mockReturnValue({}),
   }
@@ -51,6 +56,9 @@ function makeEnv(overrides: Record<string, unknown> = {}): any {
     ROOT_DOMAIN: 'aastar.eth',
     ROOT_DOMAINS: 'aastar.eth',
     OP_RPC_URL: 'http://localhost:8545',
+    // Present so the success path is actually reachable. Without it requireWriter throws 503
+    // first, and every assertion about a successful write is answered by the wrong branch.
+    WRITER_KEY: `0x${'44'.repeat(32)}`,
     ...overrides,
   }
 }
@@ -109,8 +117,14 @@ describe('/register under APPROVAL_MODE=manual', () => {
   it('still lets the contract OWNER grant (control)', async () => {
     // The admin console grants through this endpoint. A fix that closed /register outright
     // would pass the assertion above while breaking the flow manual mode exists to serve.
+    //
+    // Asserts 200, not `not.toBe(409)`. The weaker form is what let a ReferenceError on the
+    // success path sit undetected for four PRs: `json({ ok, … })` lost its `ok` variable when
+    // #47 replaced `const ok = await verifyTypedData(...)` with a helper, so every successful
+    // write returned 500 — which is also not 409, so this test stayed green.
     const res = await postRegister(await signedRegister(owner, 'bob'), makeEnv({ APPROVAL_MODE: 'manual' }))
-    expect(res.status).not.toBe(409)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, action: 'register' })
   })
 
   it('the same stranger request succeeds under auto (control)', async () => {

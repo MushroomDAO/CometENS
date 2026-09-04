@@ -13,6 +13,7 @@
  * immediately and merely reported "pending".
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import type { TestExecutionContext } from '../worker-types'
 import {
   createPublicClient, createWalletClient, http, namehash, keccak256, toBytes,
   type Hex, type Address,
@@ -89,7 +90,7 @@ async function post(path: string, body: unknown, env: any) {
     new Request(`https://api.test${path}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     }),
-    env, {} as ExecutionContext,
+    env, {} as unknown as TestExecutionContext,
   )
 }
 

@@ -606,7 +606,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-addr', txHash })
+    return json({ ok: true, action: 'set-addr', txHash })
   }
 
   // ── /register ─────────────────────────────────────────────────────────────
@@ -705,7 +705,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     // Include estimated L1 resolve time so frontend can show countdown
     const resolveEstimate = await buildResolveEstimate(env)
-    return json({ ok, action: 'register', txHash, ...resolveEstimate })
+    return json({ ok: true, action: 'register', txHash, ...resolveEstimate })
   }
 
   // ── /set-text ─────────────────────────────────────────────────────────────
@@ -746,7 +746,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-text', txHash })
+    return json({ ok: true, action: 'set-text', txHash })
   }
 
   // ── /set-contenthash ──────────────────────────────────────────────────────
@@ -785,7 +785,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-contenthash', txHash })
+    return json({ ok: true, action: 'set-contenthash', txHash })
   }
 
   // ── /add-registrar ────────────────────────────────────────────────────────
@@ -898,7 +898,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
-    return json({ ok, action: 'add-registrar', txHash })
+    return json({ ok: true, action: 'add-registrar', txHash })
   }
 
   // ── /remove-registrar ─────────────────────────────────────────────────────
@@ -925,7 +925,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
-    return json({ ok, action: 'remove-registrar', txHash })
+    return json({ ok: true, action: 'remove-registrar', txHash })
   }
 
   // ── /transfer-subnode ─────────────────────────────────────────────────────
@@ -974,7 +974,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       await env.RECORD_CACHE.delete(`addr60:${message.node}`)
     }
 
-    return json({ ok, action: 'transfer-subnode', txHash })
+    return json({ ok: true, action: 'transfer-subnode', txHash })
   }
 
   return jsonError('Unknown endpoint', 404)

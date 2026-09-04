@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TestExecutionContext } from '../worker-types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import type { Address } from 'viem'
@@ -95,7 +96,7 @@ async function signedBody(label = 'alice') {
 
 async function post(body: Record<string, unknown>, env = makeEnv()) {
   const worker = (await import('../../workers/api/src/index')).default
-  return worker.fetch(applyRequest(body), env, {} as ExecutionContext)
+  return worker.fetch(applyRequest(body), env, {} as unknown as TestExecutionContext)
 }
 
 beforeEach(() => {
