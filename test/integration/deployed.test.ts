@@ -38,7 +38,7 @@ const L1_OP_RESOLVER = (process.env.L1_OP_RESOLVER_ADDRESS ?? '') as Address
 const PRIVATE_KEY = (process.env.PRIVATE_KEY_JASON ?? '') as Hex
 const SIGNER_PK   = (process.env.PRIVATE_KEY_SUPPLIER ?? PRIVATE_KEY) as Hex
 
-const SKIP = !OP_RPC || !L2_ADDR || L2_ADDR === '' || !PRIVATE_KEY
+const SKIP = !OP_RPC || !L2_ADDR || (L2_ADDR as string) === '' || !PRIVATE_KEY
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
@@ -162,12 +162,13 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
     })
 
     // Build a fake result (resolver address itself)
-    const fakeResult = encodeFunctionData({
+    const _fakeResult = encodeFunctionData({
       abi: [{ type: 'function', name: 'addr', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }] as const,
       functionName: 'addr',
       args: [node],
     }).slice(0, 10) // just the selector as placeholder
 
+    void _fakeResult // kept for documentation of the encoding under test
     const result = encodeAbiParameters([{ type: 'address' }], [signerAccount.address])
     const expires = BigInt(Math.floor(Date.now() / 1000) + 3600)
 

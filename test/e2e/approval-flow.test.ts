@@ -15,8 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { TestExecutionContext } from '../worker-types'
 import {
-  createPublicClient, createWalletClient, http, namehash, keccak256, toBytes,
-  type Hex, type Address,
+  createPublicClient, createWalletClient, http, namehash, type Hex, type Address,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'

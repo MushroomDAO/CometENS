@@ -31,6 +31,7 @@
 > | 变异测试规程 | 「变异全红」和「这套测试恒红」在读数上一模一样 |
 > | 判据先约束现在 | 写下一条判据,不等于已经有了这条判据 |
 > | 路标不是半条规则 | 索引「说少了」比「说错了」更难发现 |
+> | 起名字的时候问一句这个名字承诺了什么 | 名字是一份文档里唯一一个没人当成断言的断言 |
 > | 台账:PR 号在标 `PR_OPEN` 的那一刻就写上 | 一个状态漂不漂,看它的解除事件会不会把人带回这个文件 |
 >
 > 两条判据,缺一不可 —— 第一条管**行的内容**,第二条管**行的集合**:
@@ -392,7 +393,7 @@
 
 ---
 
-### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/ workers/  `READY`
+### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/  `IN_PROGRESS`
 - **优先级**:mid
 - **来源**:由 FU-5 提升(§2.5:"某条其实是真 feature/bug 规模的 → 提升为正常 task")。
   做 FU-5 时发现剩余工作量不是一次收尾能完成的,而且它**已经藏过一个生产 bug**
@@ -415,11 +416,67 @@
      把它加进 `types` 是**全局**生效,会覆盖 DOM/Node 的 `Response`/`fetch`,
      实测 72 → 93(凭空多出 30 条 `TS18046 unknown`)。要么给 `workers/` 单独 tsconfig,
      要么照 `test/worker-types.ts` 的做法在 worker 里声明局部类型。
-  2. **`TS2719` viem 类型冲突**(`server/gateway/index.ts:71`、`sdk/CometENS.ts:76`)——
-     `workers/gateway` 自带 node_modules 造成同版本 viem 两份物理安装。
+  2. **`TS2719` / `TS2345` / `TS2322` viem **链泛型**冲突**(`sdk/CometENS.ts:76`、
+     `server/gateway/index.ts:71`、两处 e2e 的 `deployContract`、`test/integration` 两处)。
+     **不是重复安装** —— 实测 `node_modules/.pnpm` 里 viem 恰好 1 份,`workers/gateway` 里 0 份。
+     真因是 `createPublicClient({ chain: optimism })` 产生**带链的**类型:
+     `getBlock()` 的 `transactions` 联合在带链客户端上有 11 个成员、在无链客户端上只有 3 个,
+     所以 `private l2Client: PublicClient` 这种裸标注**不是放宽,是另一个类型**。
+     ⚠️ 我两次断言过"根因是 viem 重复安装"(FU-5 一次、本 task 描述一次),**两次都没验过**。
+     试过 `ReturnType<typeof createPublicClient>`,错误从 13 挪到 14(换了位置没减少),
+     所以这一类需要逐处按实际链泛型标注,不是一行能扫掉的。
   3. `TS6133` 未使用变量、`TS7006` 隐式 any 等,逐个修即可。
 - **验收命令**:`pnpm typecheck`(把 tsconfig 的 include 扩到
   `["src","test","server","sdk"]` 之后仍 rc=0)
+- ⚠️ **标题里原本有 `workers/`,而验收命令没有** —— 两者范围不一致,pr-daemon 挡下了。
+  他实测:往 `workers/` 注入 `const zzBad: number = 'not a number'` → **门禁 exit 0、全量绿**,
+  也就是说按原验收命令,这条 task 做到 rc=0 那天 `workers/` 仍未被覆盖,
+  **而那正是藏过七端点 500 那个 bug 的目录**,同类 bug 可以原样再来而 task 会被标 DONE。
+  **这是取证规程作用在验收判据上:判据的作用域必须和问题的作用域一样大。**
+  `workers/` 拆为 **T1.7.2**(见下),因为它是**性质不同的子问题**:
+  需要单独 tsconfig 或把 Cloudflare 全局逐个做成局部垫片,不是再修几条错误。
+- **进度**:113 → **6**(2026-09-04)。**这个数已经钉住了**:`pnpm check:typecheck-scope`
+  跑 `tsconfig.wide.json`,超预算和低于预算**都失败** —— 低于预算时要求同一个 commit 里把
+  `BUDGET` 一起降下来,否则预算会悄悄把改进吸收掉、慢慢退回没有意义。
+  (预算是**上界**不是钉子,因为错误数在我们想要的方向上单调;对比 `check:skipped` 里
+  `EXPECTED_SKIPPED` 是钉子、`MIN_TOTAL` 是地板 —— 给哪一种取决于那个量单不单调。)
+  它还额外挡住「总数不变但换了文件」:修好一条、引入一条,只看总数会漏掉。
+  **于是「113 → 6」不再是一句进度汇报,而是一个会自己失效的断言。**
+- 剩下 6 条**全是同一个设计决定**:
+  带链 viem 客户端该怎么标注。`let x: ReturnType<typeof createPublicClient>` 是
+  **未参数化**的返回类型,而实际客户端带着链泛型,两者不兼容。
+  逐处 cast 能消掉错误但会抹掉一个真实区别,所以留作一次独立决定,不随手改。
+  受影响:`sdk/CometENS.ts:71`、`server/gateway/index.ts:60`、
+  `test/e2e/{register-multi-root,transfer-subnode}.test.ts`、`test/integration/deployed.test.ts`(×4)
+
+### T1.7.2 把 typecheck 覆盖到 gateway worker  `READY`
+- **优先级**:mid(**高于它看起来的样子** —— 七端点 500 那个生产 bug 就长在这个目录)
+- **来源**:由 T1.7.1 拆出(pr-daemon 在 #73 指出标题与验收命令范围不一致)。
+- ⚠️ **这条标题我改过一次**。原本叫「覆盖到 `workers/`」——**而实测下来 `workers/` 里
+  两个文件已经覆盖了一个**,标题声称的范围比 task 实际做的大。这正是 pr-daemon 在 #73
+  上挡下我的那个毛病,我在给它拆出的子 task 起名时又犯了一遍。
+  **同一个规程在同一小时内被违反第二次,说明它还没变成习惯,只是变成了一条我知道的规则。**
+- **范围比它看起来的窄得多**。仓库里只有两个 worker 源文件,逐个注入类型错误实测:
+
+  | 文件 | T1.7.1 的宽范围是否覆盖 |
+  |---|---|
+  | `workers/api/src/index.ts` | ✅ **已覆盖** |
+  | `workers/gateway/src/index.ts` | ❌ 未覆盖 ← **T1.7.2 就是这一个文件** |
+
+  API worker 并不在任何 `include` 里,是**单元测试 import 了它、tsc 顺着 import 走**才被编译的。
+  也就是说 T1.7.1 一落地,那个藏过七端点 500 的文件就顺带被覆盖了。
+  **但这份覆盖是别人的 import 语句撑着的** —— 删掉最后一个 import 它就无声消失,
+  而 `check:typecheck-scope` 仍会打印 OK:**没被编译的文件报零错误,和干净文件长得一模一样**。
+  所以 `MUST_BE_COMPILED` 直接断言它在编译集合里,不从 include 列表推定。
+  (对照:把已知未覆盖的 gateway 文件加进那张表,守卫如期报覆盖缺失。)
+- **为什么仍是独立子问题**:`workers/gateway/src/index.ts` 用 Cloudflare 运行时全局(`KVNamespace` 等)。
+  **不能靠 `@cloudflare/workers-types` 解决** —— 加进 `types` 是全局生效,
+  会覆盖 DOM/Node 的 `Response`/`fetch`,实测 72 → 93(凭空 30 条 `TS18046`)。
+  两条路:给 `workers/` 单独 tsconfig(带那个包),或照
+  `workers/api/src/index.ts` 已有的做法把全局逐个做成局部接口(#72 已做了三个)。
+- **验收命令**:`pnpm typecheck`(include 含 `workers` 后仍 rc=0)
+- **涉及文件**:`tsconfig.json` 或新增 `workers/tsconfig.json`、`workers/**`
+- **证据**:
 - **涉及文件**:`tsconfig.json`、`workers/api/src/index.ts`、`sdk/CometENS.ts`、
   `server/gateway/index.ts`、若干 `test/**`
 - **证据**:

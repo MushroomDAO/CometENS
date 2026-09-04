@@ -8,7 +8,7 @@
  * before any module-level code runs (using dynamic import inside each test).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { TestExecutionContext } from '../worker-types'
+import type { TestExecutionContext, TestKVNamespace } from '../worker-types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import { keccak256, toBytes, type Hex, type Address } from 'viem'
@@ -58,8 +58,8 @@ vi.mock('viem/accounts', async (importOriginal) => {
 
 function makeEnv(overrides: Partial<{
   WORKER_EOA_PRIVATE_KEY: string
-  NONCE_STORE: DurableObjectNamespace
-  RECORD_CACHE: KVNamespace
+  NONCE_STORE: unknown
+  RECORD_CACHE: TestKVNamespace
 }> = {}): any {
   return {
     NETWORK: 'op-sepolia',

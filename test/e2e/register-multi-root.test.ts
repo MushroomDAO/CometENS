@@ -25,7 +25,7 @@ import {
   namehash,
   type Hex,
   type Address,
-} from 'viem'
+  type Abi,} from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
@@ -151,7 +151,7 @@ describe('E2E: D6 multi-root domain registration on local Anvil', () => {
       readFileSync(join(CONTRACTS_DIR, 'out', 'L2RecordsV3.sol', 'L2RecordsV3.json'), 'utf8')
     )
     const txHash = await deployerWallet.deployContract({
-      abi: artifact.abi,
+      abi: artifact.abi as Abi,
       bytecode: artifact.bytecode.object as Hex,
       args: [deployer.address],
     })

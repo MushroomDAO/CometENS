@@ -69,6 +69,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The narrow gate above only covers src/. This one covers test/ server/ sdk/ — and,
+      # through test imports, workers/api/src/index.ts, the file that carried the seven-endpoint
+      # 500 (#72) for weeks because nothing typechecked it. It runs against a budget rather than
+      # zero, so widening coverage did not require fixing every error first; the budget is only
+      # allowed to go down. See T1.7.1.
+      - name: Typecheck scope budget
+        run: pnpm check:typecheck-scope
+
       - name: Build
         run: pnpm build
 

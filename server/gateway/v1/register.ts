@@ -65,7 +65,10 @@ export async function handleV1Register(
   payload: V1RegisterPayload,
   allowedSigners: string[],
   rootDomain: string,
-  writer: L2RecordsWriter | undefined,
+  // Structural, not nominal: this function calls exactly one method, and both
+  // L2RecordsWriter and L2RecordsWriterV2 have it. Naming one class made the worker (which
+  // uses V2) a type error while the code was perfectly correct.
+  writer: Pick<L2RecordsWriter, 'registerSubnode'> | undefined,
   readSubnodeOwner: SubnodeOwnerReader,
 ): Promise<V1RegisterResult> {
   const { signature, timestamp } = payload

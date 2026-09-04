@@ -64,7 +64,7 @@ describe('createSigner — derives the right account', () => {
     // Control: an implementation returning a plausible-looking object with the right address
     // would pass every assertion above.
     const account = createSigner('gateway', { GATEWAY_SIGNER_KEY: KEY_GATEWAY })
-    const sig = await account.signMessage({ message: 'hello' })
+    const sig = await account.signMessage!({ message: 'hello' })
     expect(sig).toMatch(/^0x[0-9a-fA-F]{130}$/)
   })
 })
