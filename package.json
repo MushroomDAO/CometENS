@@ -14,6 +14,7 @@
     "check:ensv2-citations": "node scripts/check-ensv2-citations.mjs",
     "probe:ensv2-eac": "node scripts/ensv2-eac-revocation-probe.mjs",
     "probe:ensv2-cost": "node scripts/ensv2-cost-probe.mjs",
+    "probe:ensv2-native": "node scripts/ensv2-native-subname-probe.mjs",
     "verify:b2": "node scripts/verify-b2-revocation.mjs",
     "check:ensv2": "node scripts/check-ensv2-resolution.mjs",
     "check:typecheck-scope": "node scripts/check-typecheck-scope.mjs",
