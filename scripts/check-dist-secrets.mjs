@@ -95,7 +95,11 @@ function main() {
 
   console.log(`scanned ${files.length} file(s) under ${DIST}/`)
   if (!hits.length) {
-    console.log('OK — no provider credential in the bundle.')
+    // Says what it looked for. The comment on PROVIDER_KEY_IN_URL explains the scope to whoever
+  // reads the code; this line is read by someone running `pnpm build && pnpm check:dist-secrets`
+  // right before shipping — the moment its accuracy matters most, and the one reader who will
+  // not go looking for that comment.
+  console.log('OK — no `…/v2/<key>` / `…/v3/<key>` provider credential in the bundle.')
     process.exit(0)
   }
   console.error(`\nFAIL: ${hits.length} credential(s) would be published:`)
