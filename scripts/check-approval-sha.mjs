@@ -155,6 +155,22 @@ function describeDelta(approved, head, base) {
 
 const indent = (t) => t.split('\n').map((l) => `  ${l}`).join('\n')
 
+/**
+ * The lines a SHA_MISMATCH prints, as data.
+ *
+ * Extracted because `main()` had never been executed by anything: the tests import only the
+ * pure functions, `node --check` validates syntax but not scope, and a crash exits 1 exactly
+ * like a normal refusal — so a `ReferenceError` on this very path survived review, CI, and a
+ * caller doing `check:approval-sha N && merge`. Three layers, all silent.
+ *
+ * Returning lines instead of printing them puts the branch inside the tests' reach.
+ */
+export function mismatchReport(v, base, cwd = process.cwd()) {
+  const lines = ['', 'Ask the reviewer to re-approve at the current head, or merge the approved commit.']
+  for (const sha of ownCommits(v.approved, v.head, base, cwd)?.shas ?? []) lines.push(`  ${sha}`)
+  return lines
+}
+
 function main() {
   const pr = process.argv[2]
   if (!pr) {
@@ -188,6 +204,8 @@ function main() {
   if (v.code === 'SHA_MISMATCH') {
     describeDelta(v.approved, v.head, baseRef)
     console.error('\nAsk the reviewer to re-approve at the current head, or merge the approved commit.')
+
+  for (const line of mismatchReport(v, baseRef)) console.error(line)
   }
   process.exit(1)
 }

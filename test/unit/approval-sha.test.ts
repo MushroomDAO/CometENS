@@ -95,7 +95,7 @@ import { tmpdir } from 'node:os'
 import { join as pjoin } from 'node:path'
 import { execFileSync } from 'node:child_process'
 // @ts-expect-error — plain .mjs script, no type declarations.
-import { ownCommits } from '../../scripts/check-approval-sha.mjs'
+import { ownCommits, mismatchReport } from '../../scripts/check-approval-sha.mjs'
 
 describe('ownCommits — nothing reachable from base counts as this branch', () => {
   let repo: string
@@ -177,5 +177,53 @@ describe('ownCommits — nothing reachable from base counts as this branch', () 
     const r = ownCommits(approved, head, 'no-such-branch', repo)
     expect(r.exact).toBe(false)
     expect(r.shas).toContain(baseTip) // over-reports, which is why exact:false must be surfaced
+  })
+
+  // THE ASSERTION THIS PR ACTUALLY NEEDS. The three around it all use synthetic shas against
+  // 'no-such-base', where `ownCommits` returns null and the loop yields nothing — so a correct
+  // implementation and one with the sha loop DELETED give the same answer. The reviewer
+  // measured it: removing the loop entirely left all of them green.
+  //
+  // Which is the rule I wrote in #84, applied to me: a control only has force in the direction
+  // you built it for. The earlier mutation (restore the bad binding) was real, and it covered
+  // exactly one direction — the ReferenceError.
+  //
+  // So this one drives the real git fixture the file already builds, where the range is
+  // genuinely non-empty.
+  it('lists the branch\'s own commits — the whole point of the change', () => {
+    const lines = mismatchReport({ approved, head }, 'main', repo)
+    expect(lines.some((l: string) => l.includes(head))).toBe(true)
+  })
+
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mismatchReport — the branch that had never been executed
+//
+// The SHA_MISMATCH path shipped with a `ReferenceError` in it and nothing caught it:
+//   - `node --check` validates syntax, not scope
+//   - the tests imported only pure functions, so `main()` was never driven (grep `main()` → 0)
+//   - a crash exits 1, and a normal refusal also exits 1, so `check:approval-sha N && merge`
+//     could not tell them apart
+// Three layers, all silent. These assertions exist so that path has at least one caller.
+// @ts-expect-error — plain .mjs script, no type declarations.
+import { mismatchReport } from '../../scripts/check-approval-sha.mjs'
+
+describe('mismatchReport — the path that used to throw', () => {
+  const v = { approved: 'a'.repeat(40), head: 'b'.repeat(40) }
+
+  it('runs at all without throwing', () => {
+    // The whole point. Before the fix this threw ReferenceError on `approved`.
+    expect(() => mismatchReport(v, 'no-such-base')).not.toThrow()
+  })
+
+  it('tells the reader what to do', () => {
+    expect(mismatchReport(v, 'no-such-base').join('\n')).toContain('re-approve')
+  })
+
+  it('returns lines rather than printing (control)', () => {
+    // If it printed instead, the assertions above would pass on an empty return value.
+    expect(Array.isArray(mismatchReport(v, 'no-such-base'))).toBe(true)
+    expect(mismatchReport(v, 'no-such-base').length).toBeGreaterThan(1)
   })
 })
