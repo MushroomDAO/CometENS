@@ -571,3 +571,96 @@ describe('preflight 3d — a self-hosted frontend must not silently point at us'
     }).level).toBe('WARN')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 3a — a provider key hidden inside a VITE_ URL.
+//
+// Check 3 only looks for PRIVATE-KEY shapes, so it says PASS on
+// `VITE_L2_RPC_URL=https://opt-sepolia.g.alchemy.com/v2/<key>` — and that URL is compiled into
+// the bundle and served to every visitor. Building this repo with a real `.env.local` and
+// grepping `dist/` found two Alchemy keys in the JS, minutes before a frontend deploy that
+// would have published them.
+//
+// It is a WARN, not a FAIL: a `VITE_` RPC URL is legitimate — the browser has to read the chain
+// from somewhere. What it must not carry is a credential.
+describe('preflight 3a — provider key inside a VITE_ URL', () => {
+  // Drives staticChecks() rather than re-typing the pattern.
+  //
+  // The first version of this block declared its own `const RE = /…/` and asserted against
+  // that. All four assertions were true, and all four were unrelated to whether check 3a still
+  // works: the reviewer mutated `(v2|v3)` to `(vZZ)` inside preflight.mjs — disabling 3a
+  // entirely — and the suite stayed at 69 passed.
+  //
+  // That is the very shape this PR is about. Check 3's PASS is true and gets read as "nothing
+  // is exposed"; a green `describe('preflight 3a …')` is true and gets read as "3a is covered".
+  // The block next door (check:dist-secrets) imports the exported constant and DID go red under
+  // the same mutation — the two look identical and differ only by an import.
+  const row = (env: Record<string, string>) =>
+    (staticChecks(env, 'testnet') as Array<{ title: string; level: string }>).find((r) =>
+      r.title.includes('provider key inside a VITE_ URL'),
+    )
+
+  it('WARNs on an Alchemy URL carrying a key', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn' })?.level).toBe('WARN')
+  })
+
+  it('WARNs on Infura too — a pattern fitted to one vendor is not a check', () => {
+    expect(row({ VITE_L1_SEPOLIA_RPC_URL: 'https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef' })?.level).toBe('WARN')
+  })
+
+  // THE CONTROLS. Without these, a check that WARNed unconditionally would satisfy both
+  // assertions above while firing on the very endpoints the fix recommends.
+  it('PASSes on the public endpoints the docs recommend', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://sepolia.optimism.io' })?.level).toBe('PASS')
+    expect(row({ VITE_L1_SEPOLIA_RPC_URL: 'https://ethereum-sepolia-rpc.publicnode.com' })?.level).toBe('PASS')
+  })
+
+  it('PASSes on a path segment too short to be a key', () => {
+    expect(row({ VITE_L2_RPC_URL: 'https://opt-sepolia.g.alchemy.com/v2/short' })?.level).toBe('PASS')
+  })
+
+  it('the check exists at all (control)', () => {
+    // Without this, every assertion above would pass vacuously on `undefined?.level`.
+    expect(row({})).toBeDefined()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// check:dist-secrets — the same question asked of the ARTIFACT, not the environment.
+//
+// preflight 3a looks at env vars; this looks at what actually gets uploaded. They come apart:
+// the env can be clean while a stale `dist/` still holds a key.
+//
+// The first version of the scanner ALSO looked for `\b0x[0-9a-fA-F]{64}\b`. On a clean build it
+// reported 7 hits — all 32-byte constants viem ships (namehashes, `0xffff…` masks). Same
+// pattern, decisive against an env file, useless against a JS bundle. It was removed rather
+// than tuned, because a check that fires on every clean build trains people to ignore it.
+// @ts-expect-error — plain .mjs script, no type declarations.
+import { PROVIDER_KEY_IN_URL } from '../../scripts/check-dist-secrets.mjs'
+
+describe('check:dist-secrets — provider key in a bundled URL', () => {
+  const hits = (s: string) => [...s.matchAll(PROVIDER_KEY_IN_URL)].length
+
+  it('finds a key inside a bundled URL', () => {
+    expect(hits('t.transport=http("https://opt-sepolia.g.alchemy.com/v2/dmg4RfAbCdEfGhIjKlMn")')).toBe(1)
+  })
+
+  it('does NOT fire on the public endpoints, even inside JS', () => {
+    expect(hits('http("https://sepolia.optimism.io"),http("https://ethereum-sepolia-rpc.publicnode.com")')).toBe(0)
+  })
+
+  // THE CONTROL that got the private-key pattern deleted: viem's own constants must not match.
+  it('does NOT fire on 32-byte constants a bundle legitimately contains', () => {
+    const viemish =
+      'const M=0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffn,' +
+      'N="0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae"'
+    expect(hits(viemish)).toBe(0)
+  })
+
+  it('the pattern is global, so several keys in one file are all reported', () => {
+    // A non-global regex would report the first and hide the rest — and this exact build had two.
+    const two = 'a="https://opt-sepolia.g.alchemy.com/v2/aaaaaaaaaaaaaaaaaaaa";' +
+                'b="https://eth-sepolia.g.alchemy.com/v2/bbbbbbbbbbbbbbbbbbbb"'
+    expect(hits(two)).toBe(2)
+  })
+})
