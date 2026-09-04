@@ -21,6 +21,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
 import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 import { buildDomain, ApplyTypes, ApproveApplicationTypes } from '../../server/gateway/manage/schemas'
 
@@ -143,9 +144,7 @@ beforeAll(async () => {
     }
   }
 
-  const artifact = JSON.parse(
-    readFileSync(join(CONTRACTS_DIR, 'out', 'L2RecordsV3.sol', 'L2RecordsV3.json'), 'utf8'),
-  )
+  const artifact = loadArtifact(CONTRACTS_DIR, 'L2RecordsV3')
   const wallet = createWalletClient({ account: owner, chain: anvilChain, transport: http(`http://127.0.0.1:${ANVIL_PORT}`) })
   const hash = await wallet.deployContract({ abi: artifact.abi, bytecode: artifact.bytecode.object, args: [owner.address] })
   const receipt = await pub.waitForTransactionReceipt({ hash })

@@ -25,6 +25,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
 import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -118,9 +119,7 @@ describe('E2E: transfer-subnode flow on local Anvil', () => {
     deployerWallet = createWalletClient({ account: deployer, chain: anvilChain, transport: http(`http://127.0.0.1:${ANVIL_PORT}`) })
 
     // Deploy L2RecordsV3
-    const artifact = JSON.parse(
-      readFileSync(join(CONTRACTS_DIR, 'out', 'L2RecordsV3.sol', 'L2RecordsV3.json'), 'utf8')
-    )
+    const artifact = loadArtifact(CONTRACTS_DIR, 'L2RecordsV3')
     const txHash = await deployerWallet.deployContract({
       abi: artifact.abi as Abi,
       bytecode: artifact.bytecode.object as Hex,
