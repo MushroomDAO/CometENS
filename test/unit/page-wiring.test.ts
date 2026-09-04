@@ -136,11 +136,32 @@ describe.each(PAGES)('%s ↔ %s wiring', (htmlPath, tsPath) => {
     expect(selfCreatedIds("n.id = 'realCreated'").has('realCreated')).toBe(true)
   })
 
-  it('the extractor actually finds ids (must-find control)', () => {
-    // Without this, an extractor that silently matches nothing would make the check above
-    // pass on any input — the vacuous-assertion trap.
-    expect(referencedIds(ts).size).toBeGreaterThan(0)
+  it('the page declares ids at all (must-find control)', () => {
+    // Without this, `missing` above is empty for the boring reason.
     expect(declaredIds(html).size).toBeGreaterThan(0)
+  })
+})
+
+describe('the id extractor is not silently broken', () => {
+  // This used to be asserted per page — `referencedIds(ts).size > 0` for EVERY entry — which
+  // conflated two different claims:
+  //   (a) the extractor works                     ← what the control is for
+  //   (b) this particular file looks up ids       ← not required, and now false
+  //
+  // `src/i18n.ts` is the first entry that legitimately references none: it swaps text by
+  // `data-i18n` attribute and never calls `byId`. Keeping the per-page form would have forced
+  // either a fake id lookup or an exemption, and both are worse than asking the question where
+  // it belongs — of the extractor, and of the corpus as a whole.
+
+  it('finds ids in a known input', () => {
+    expect(referencedIds("byId('realId')").has('realId')).toBe(true)
+  })
+
+  it('at least one page entry does look ids up', () => {
+    // The corpus-level version of the old assertion: if the extractor broke, EVERY pair would
+    // report zero and this goes red — while a single attribute-driven module does not.
+    const total = PAGES.reduce((n, [, tsPath]) => n + referencedIds(read(tsPath)).size, 0)
+    expect(total).toBeGreaterThan(0)
   })
 })
 
