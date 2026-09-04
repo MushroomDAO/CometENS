@@ -15,5 +15,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src"]
+  "include": ["src", "test", "server", "sdk"]
 }
