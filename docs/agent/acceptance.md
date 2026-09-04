@@ -38,6 +38,13 @@
 逐条验收:
 1. 委托生效:社区 `setResolver` 后,`viem.getEnsAddress('alice.<社区域名>')` 正常解析。
 2. **撤销可验证(真实机制)**:社区在 L1 把 resolver 改回自己 → 我们这套不再对该域名生效。
+   ✅ **已验(2026-09-04)**:`pnpm verify:b2 --root aastar.eth --label alice --execute`
+   —— 撤销后 `OffchainLookup` 不再触发(tx `0xf0d556f9…`),改回后恢复(tx `0x2bf77cd4…`)。
+   此前记作「需要域名持有者的 L1 私钥」而未决 —— **那把钥匙一直在 `.env.local` 里**,
+   `0xb5600060…` 就是 `aastar.eth` 的 registry owner。**它不是做不了,是没人把钥匙和判据对上。**
+   ⚠️ 撤销必须发生在**真正挂着我们 resolver 的那一层**:实跑时先撤 `forest.aastar.eth` 无效,
+   因为 ENS 通配解析往上走,落到仍指向我们的 `aastar.eth`。**社区若把名字挂在我们域名下,
+   清自己那一层撤不掉** —— 这条要写进 DELEGATED-HOSTING.md。
 3. **信任模型如实披露**:`docs/DELEGATED-HOSTING.md` 必须写明
    ——「已发出的子域,运营方(合约 owner)在技术上有能力覆写记录、转移 NFT;
    这不是 bug 而是运营逃生舱;若不接受,请走模式 A 自部署」。

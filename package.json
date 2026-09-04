@@ -19,6 +19,7 @@
     "dev": "vite",
     "docs:ens": "bash scripts/sync-ens-docs.sh",
     "preflight": "node scripts/preflight.mjs",
+    "verify:b2": "node scripts/verify-b2-revocation.mjs",
     "preview": "vite preview",
     "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
     "test": "vitest run",
