@@ -10,3 +10,8 @@ contracts/cache/
 contracts/broadcast/
 .claude/
 .registrations.json
+
+# ENS 官方文档的本地镜像 —— 由 `pnpm docs:ens` 维护,不提交
+# (整份副本一旦提交就会静默陈旧;我们依赖的事实摘在 docs/reference/ENSV2-UPSTREAM.md)
+vendor/ens-docs/
+vendor/.ens-docs-synced-sha
