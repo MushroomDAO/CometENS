@@ -145,16 +145,32 @@ async function probe(base, path) {
   // that can distinguish "POST-only endpoint, absent" from "POST-only endpoint, deployed"
   // (a GET returns 404 either way).
   //
-  // Why it cannot write, verified rather than assumed:
-  //   - all seven write paths (/register /apply /approve /set-addr /transfer-subnode
-  //     /set-text /set-contenthash) dispatch into ONE handler, `handleManage`
-  //   - its first statement reads `payload.from` and throws `Invalid from address` (400) when
-  //     it is absent or malformed
-  //   - `{}` has no `from`, so it is rejected there — BEFORE any signature check, and before
-  //     anything touches KV or sends a transaction
+  // The proof is not an argument here — it is test/unit/write-endpoint-401.test.ts, which
+  // derives the write-endpoint list from the router and asserts that each one answers 401 to an
+  // unsigned request. That is end-to-end: a body without a valid signature is rejected before
+  // anything is written, whatever the internal route.
   //
-  // So the probe reaches routing and stops. If a future endpoint bypasses `handleManage`, this
-  // reasoning expires with it — that is the thing to re-check, not the word "POST".
+  // Structurally, the endpoints THIS CHECK PROBES do share one entry: all nine of
+  //   /register /apply /approve /set-addr /set-text /set-contenthash /transfer-subnode
+  //   /add-registrar /remove-registrar
+  // dispatch into `handleManage`, whose first statement rejects a missing `from` — measured
+  // 9/9, not asserted.
+  //
+  // KNOWN EXCEPTION: `/v1/register` is a write endpoint that does NOT go through handleManage
+  // (it has its own handler). It is not in the probe set only because `requiredEndpoints`'
+  // `[a-z0-9-]+` does not match the `/` inside `v1/register`. **If that pattern is ever
+  // widened, this paragraph has to be redone for it** — the reasoning above would then be
+  // covering an endpoint it never examined.
+  //
+  // I first wrote all of this as a test, and it asserted SEVEN names. Two counts were wrong at
+  // once: the probe set is nine (I had dropped the two registrar endpoints, which happen to be
+  // safe — and "happen to be" is the exact thing this paragraph exists to rule out), and the
+  // set of write endpoints overall is ten. A true conclusion, argued over the wrong population,
+  // guarded by a hardcoded list that could not see either gap.
+  //
+  // So the assertion is gone and the reasoning stays here, where the person deciding whether to
+  // run this is looking. The guard that actually holds it up is the 401 file — deleting that is
+  // what would make this comment a lie.
   const postStatus = await one({
     method: 'POST',
     headers: { 'content-type': 'application/json' },
