@@ -108,6 +108,8 @@ pnpm dev            # 前端 dev server,端口 4173
 pnpm build          # 生产构建
 pnpm typecheck      # 类型检查(窄口径:只 src/)
 pnpm check:typecheck-scope   # 宽口径:test/ server/ sdk/ + 两个 worker,带错误预算
+
+cd contracts && forge build && cd ..   # ← 跑测试前必须先做,只需一次
 pnpm test           # 全部测试
 
 pnpm vitest run test/unit/        # 单元测试(快,无网络)
@@ -115,6 +117,17 @@ pnpm vitest run test/e2e/         # E2E(需 Anvil + pnpm dev)
 pnpm vitest run test/integration/ # 集成(需 .env.local 真实 RPC)
 
 cd contracts && forge test        # Solidity 测试
+```
+
+> ⚠️ **全新 clone 后不先 `forge build`,第一次 `pnpm test` 会红 6 个 e2e 文件**,
+> 报 `Contract artifacts have not been built.` —— `test/e2e/` 要把合约部署到 Anvil,
+> 而编译产物 `contracts/out/` 不在版本库里。
+>
+> **第二次跑就绿了**,所以这个坑只坑第一次的人,而且**在跑过一次的机器上永远复现不出来**
+> —— 这正是它一直没被发现的原因(实测:三棵全新 worktree 形态一致)。
+> 需要 [Foundry](https://getfoundry.sh)。
+
+```bash
 
 pnpm check:chain    # 链与合约连通性
 pnpm preflight      # 部署前配置校验
