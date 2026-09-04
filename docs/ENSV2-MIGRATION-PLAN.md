@@ -166,7 +166,7 @@ ENSv2 的核心分层是 **registry 管权限、registrar 管业务逻辑**
 **「注册在 L1」的真实依据是另外两条**：
 
 1. ENSv2 的 registry 是 L1 合约 —— 目前公开的部署**只有 Sepolia**
-   （`docs/reference/ensv2-deployments-sepolia.md`，33 个合约，chainId 11155111），
+   （`docs/reference/ensv2-deployments-sepolia.md`，34 个合约，chainId 11155111），
    没有任何 L2 部署。
 2. 上游文档通篇**没有 L2 registry** 这个东西（§7 未决 4）；对 L2 的说法只有
    "improved support for existing L2 solutions" —— 也就是**通过 CCIP-Read 委派，正是我们在做的事**。
@@ -314,7 +314,7 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
 1. ~~拿不到 Sepolia 部署地址表~~ → **已解决。** 那张表不在 docs 仓库里，它在 build 时从
    `ensdomains/contracts-v2` 的一个钉住的 commit 拉取。现在由 `pnpm docs:ens --addresses`
    生成到 [`docs/reference/ensv2-deployments-sepolia.md`](./reference/ensv2-deployments-sepolia.md)
-   （`contracts-v2@97a5729`，部署于 2026-07-30，33 个合约）。**T4.1.1 不再被阻塞。**
+   （`contracts-v2@97a5729`，部署于 2026-07-30，34 个合约）。**T4.1.1 不再被阻塞。**
 2. **接口未定稿。** `/ensv2/registry-hierarchy` 和 `/ensv2/registry-template` 都明写
    "not yet final and may change prior to mainnet deployment"。**据此写死的合约代码有返工风险。**
    这是 M4.2 排在 M4.1 之后的原因：M4.1 的四条都不依赖 V2 合约 ABI 定稿。

@@ -20,6 +20,13 @@ pnpm docs:ens --addresses     # 顺带刷新 Sepolia 部署地址表
 而它看起来和上游一模一样 —— 下一个人不会去核对日期。三个月后它开始撒谎,且没有任何机制会喊。
 所以整份走 gitignore 的克隆,**只有我们的方案实际依赖的事实**摘到本文件,带来源和抓取日期。
 
+**§3 那张表由 `pnpm check:ensv2-citations` 机械守住** —— 表里每一条双引号引文,
+都必须能在镜像里找得到,找不到就 exit 1。这条护栏是 PR#100 评审逼出来的:
+「可核对」在那之前只是一句承诺,没有任何东西检查它。**护栏上线当天就抓出两条**
+(F5、F10)—— 都不是编造,是**从渲染后的页面抄的引文丢了源码的强调标记**
+(上游写 `*you*`,抄下来是 `you`)。所以脚本比对前会去掉 `*` `_` 和反引号:
+去掉的是 markup 不是内容,改错一个词仍然会被抓到(反向对照验过)。
+
 `pnpm docs:ens` 会打印上游 HEAD 和自上次同步以来变更的页面。浅克隆丢了旧 commit 时它会
 **明说「无法 diff」并列出监视路径**,而不是打印「没变化」—— 静默的「没变化」比报错危险。
 
@@ -50,16 +57,17 @@ pnpm docs:ens --addresses     # 顺带刷新 Sepolia 部署地址表
 | # | 事实 | 出处 |
 |---|---|---|
 | F1 | CCIP-Read / ERC-3668 在 V2 里原封不动;文档让开发者拿 `test.offchaindemo.eth` 做回归 | `src/pages/web/ensv2-readiness.mdx` |
-| F2 | **"all resolution still starts on Ethereum Mainnet"** —— V2 是 L1,多链靠委派 | `src/pages/web/ensv2-readiness.mdx` |
+| F2 | **"all resolution still starts on Ethereum Mainnet"** —— V2 是 L1,多链靠委派 | `src/pages/web/ensv2-readiness.mdx:26` |
 | F3 | `IRegistry` 只有 `getSubregistry` / `getResolver` / `getParent`;解析走最长后缀匹配 | `src/pages/ensv2/registry-hierarchy.mdx` |
 | F4 | EAC:2^256 resource × 64 role(32 常规 + 32 admin)× 每 role 最多 15 个持有者;`revokeRoles` **可撤销** | `src/pages/ensv2/enhanced-access-control.mdx` |
-| F5 | **"the roles that remain on `ROOT_RESOURCE` define how much subname owners must trust _you_"** | `src/pages/ensv2/tutorial-contract-developers.mdx` |
+| F5 | **"the roles that remain on `ROOT_RESOURCE` define how much subname owners must trust _you_"** | `src/pages/ensv2/tutorial-contract-developers.mdx:462` |
 | F6 | 每账户一个 resolver 实例(VerifiableFactory + UUPS);权限可细到单条记录 | `src/pages/ensv2/permissioned-resolver.mdx` |
 | F7 | **"Token IDs are not stable identifiers."** role 变更/过期重注册会 `TokenRegenerated` | `src/pages/ensv2/mutable-token-ids.mdx` |
 | F8 | **"Do not hardcode a resolver address for write flows, not even one you deployed."** | `src/pages/ensv2/tutorial-app-developers.mdx` |
 | F9 | DNS 名字:`ENS1 dnsalias.ens.eth com base.eth` 一条 TXT 即可把 `sub.example.com` 映射到 `sub.example.base.eth` | `src/pages/ensv2/dns-resolvers.mdx` |
 | F10 | 合约与接口 **"not yet final and may change prior to mainnet deployment"** | `src/pages/ensv2/registry-hierarchy.mdx`、`registry-template.mdx` |
 | F11 | 常见错误:只匹配 `.eth` 会漏掉 DNS 名字 | `src/pages/web/ensv2-readiness.mdx` |
+| F12 | 上游对 L2 的全部说法只有 "improved support for existing L2 solutions" —— **没有 L2 registry 这个东西**,多链靠 CCIP-Read 委派 | `src/pages/web/multichain.mdx:7` |
 
 ---
 
