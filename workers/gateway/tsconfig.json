@@ -6,8 +6,21 @@
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"],
     "strict": true,
+    // Same knobs as the root tsconfig (#55). Without these the gateway gate would be weaker
+    // than every other scope, and "gateway is typechecked" would promise more than it does.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // Required, not cosmetic. `types: ["@cloudflare/workers-types"]` stops @types/node being
+    // AUTO-included, but ethers pulls it in anyway through a `/// <reference types="node" />`
+    // in undici-types, and the two global environments then collide: ~40 TS2300/TS2451 for
+    // Blob, File, console, crypto, performance. Every one of them is inside a .d.ts, which is
+    // exactly what skipLibCheck suppresses — checking of our own source is unaffected.
+    //
+    // This config predates the check that runs it and had never actually been executed, so
+    // nobody had seen it fail to compile at all.
+    "skipLibCheck": true
   },
   "include": ["src"]
 }
