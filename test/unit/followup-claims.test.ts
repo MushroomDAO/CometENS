@@ -33,9 +33,25 @@ import { join } from 'node:path'
  *
  * Checking the ARTIFACT instead of the PR sidesteps all of it: work and tick in the same PR ->
  * the file is on that branch -> green, no shuffle. Work and tick in different PRs -> red, which
- * is the case that actually went wrong. Same failure caught, no CI coupling, and no second
- * guard covering ground this one already covers — duplicated protection is a thing this repo
- * has been removing, not adding.
+ * is the case that actually went wrong.
+ *
+ * I first justified this as "both catch the same failure, and this one is cheaper". THAT IS
+ * FALSE, and the reviewer measured it: point a completed entry at a PR that never existed
+ * (`#9999`) and this file stays fully green, as does test/unit/task-ledger.test.ts. They are
+ * two different failures:
+ *
+ *   this guard   — the ledger says a file is there, and it is not   (happened twice in a day)
+ *   a PR guard   — the ledger cites #n, and #n does not exist       (has never happened)
+ *
+ * So a dangling PR citation is currently caught by nothing. The decision not to build that
+ * guard stands, but on the honest reason: it has zero instances, and this repo does not build
+ * protection for failures it has not had. Not "already covered". (The format of a citation IS
+ * guarded — task-ledger caught `PR#74` where `PR #74` was required. Its format has an owner;
+ * where it points does not.)
+ *
+ * If it ever does happen, it needs no CI coupling either: squash-merge subjects carry `(#n)`,
+ * so `git log --grep='(#n)'` answers it from the repository alone — the same read-only shape
+ * as this file. Recorded so that "wait for an instance" is a choice rather than a gap.
  */
 const ROOT = join(__dirname, '..', '..')
 const LEDGER = join(ROOT, 'docs', 'agent', 'followups.md')
