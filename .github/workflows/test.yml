@@ -1,0 +1,150 @@
+# The test suite as a merge gate.
+#
+# Why this exists rather than a local pre-merge script: GitHub checks out
+# `refs/pull/N/merge` for a `pull_request` event — the MERGE RESULT, not the branch head. That
+# is the only tree where cross-file properties actually hold or fail.
+#
+# We learned this the hard way. #50 added a guard forbidding a retracted sentence; #48's ledger
+# quoted that sentence while explaining why it was withdrawn. Both PRs were green on their own
+# branches and `preview` went red on the second merge. Neither reviewer could have seen it:
+# the offending text and the guard lived in different diffs, and the tree that fails never
+# existed on any branch. A local "check before merging" script cannot fix that either — its
+# answer expires the moment the next PR lands. Only the merge result, checked at merge time, is
+# the right measurement at the right moment.
+#
+# It also removes a conflict in the human half of the protocol: "rebase before merging" changes
+# the branch sha, which invalidates the review that was recorded against the old one. With this
+# workflow the merge result is tested without anyone having to touch the branch at all.
+#
+# See docs/agent/practices.md「合并前协议」for the reasoning; this file is what enforces it.
+name: Tests
+
+on:
+  pull_request:
+    branches: [preview, main]
+  push:
+    branches: [preview, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, because test/unit/task-ledger.test.ts reads merged PR numbers out of
+          # commit subjects (`… (#74)`). The default shallow checkout gives it ONE commit, the
+          # set comes back empty, and its main assertion — "no PR_OPEN entry cites a merged PR"
+          # — passes vacuously. It did exactly that on this PR's first CI run: green main
+          # assertion, and only the two controls red. That is the whole reason those controls
+          # exist, and the first time either has fired anywhere but a deliberate mutation.
+          fetch-depth: 0
+
+      # Two of contracts/lib/* ARE submodules and the contracts import them:
+      #
+      #   git ls-files -s contracts/lib  →  67×100644  1×100755  2×160000
+      #   the 160000 pair: openzeppelin-contracts, unruggable-gateways
+      #   HybridResolver.sol / OPResolver.sol import "@unruggable/…", remapped to lib/
+      #
+      # Fetched HERE rather than left to `forge build`, which silently runs
+      # `git submodule update --init` when they are missing ("Missing dependencies found.
+      # Installing now…", visible in this job's own earlier logs). That worked, but it made the
+      # gate depend on cloning two external repos at build time without saying so: if either
+      # remote is unreachable or rate-limited the gate goes red for a reason unrelated to the
+      # code under review. Doing it at checkout makes the dependency declared and fails in the
+      # step whose name explains it.
+      #
+      # NOT `submodules: recursive` — that would also pull vendor/ and eval/* (several large
+      # reference repos that nothing in test/, src/, server/, sdk/ or scripts/ imports).
+      #
+      # `--depth 1` works because GitHub serves fetch-by-SHA. If either submodule is ever
+      # bumped to a commit that a shallow fetch cannot reach, this step fails with
+      # `fatal: remote error: upload-pack: not our ref …` — which READS LIKE A NETWORK
+      # PROBLEM and is not. Drop `--depth 1` if that happens; do not go looking at the runner.
+      - name: Fetch the two submodules the contracts import
+        run: git submodule update --init --depth 1 contracts/lib/openzeppelin-contracts contracts/lib/unruggable-gateways
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The narrow gate above only covers src/. This one covers test/ server/ sdk/ — and,
+      # through test imports, workers/api/src/index.ts, the file that carried the seven-endpoint
+      # 500 (#72) for weeks because nothing typechecked it. It runs against a budget rather than
+      # zero, so widening coverage did not require fixing every error first; the budget is only
+      # allowed to go down. See T1.7.1.
+      # The gateway worker is a separate pnpm project with its own lockfile (it needs
+      # @cloudflare/workers-types, which cannot go in a shared `types` array without
+      # overriding the DOM/Node globals the rest of the repo uses). Its deps are not
+      # installed by the root install, so check:typecheck-scope would fail here as
+      # "cannot find module ethers" — a missing install reported as a type error.
+      - name: Install gateway worker deps
+        run: pnpm install --frozen-lockfile
+        working-directory: workers/gateway
+
+      - name: Typecheck scope budget
+        run: pnpm check:typecheck-scope
+
+      - name: Build
+        run: pnpm build
+
+      # Installed before the suite because test/e2e spawns `anvil`. Without it those files fail
+      # rather than skip, and e2e is where the contract-invariant assertions live (#45).
+      #
+      # ⚠️ THIS STEP DOWNLOADS FROM github.com ON EVERY RUN (foundryup, then the toolchain).
+      # It has already reddened the gate once with
+      #   foundryup-init: curl: (35) Recv failure: Connection reset by peer
+      # and nothing else ran, so the failure had nothing to do with the code under review.
+      #
+      # **If this step fails with a curl / connection error, suspect the download, not the
+      # code** — attribute first, then re-run. Blind re-running is what turns a flaky gate into
+      # a habit of ignoring real failures; re-running a failure already pinned to this line is
+      # not the same act.
+      #
+      # I tried replacing this with a hand-rolled `curl | bash` + retry loop so the transient
+      # case would self-heal. It failed three attempts in a row on
+      # `~/.foundry/bin/foundryup: No such file or directory`.
+      #
+      # Root cause, for anyone tempted to try again: the installer honours XDG, and GitHub
+      # runners SET `XDG_CONFIG_HOME`, so foundryup lands in `$XDG_CONFIG_HOME/.foundry`, not
+      # `$HOME/.foundry`. It was not misplacing anything — my hardcoded path was wrong, and
+      # `export FOUNDRY_DIR="$HOME/.foundry"` would have fixed it in one line. The three
+      # attempts each failed in under a second; it was never the network.
+      #
+      # So the reason to keep this action is NOT "hand-rolling hits unknown path problems" —
+      # that problem was known and one line wide. The reason is that the action also brings
+      # VERSION MANAGEMENT and a CACHE, and the hand-rolled version silently dropped the cache
+      # — making it worse at the very thing it was meant to improve. Reimplement those two and
+      # you have rewritten the action; wrap it instead.
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Contracts must compile before the e2e suite deploys them
+        run: forge build
+        working-directory: contracts
+
+      # `pnpm test` = `vitest run` — unit + e2e + integration. Integration skips itself when the
+      # RPC/key env vars are absent (describe.skipIf), which is the case here; that is
+      # deliberate, not a silent gap: those tests talk to a live deployment.
+      - name: Test suite
+        run: pnpm vitest run --reporter=default --reporter=json --outputFile.json=vitest-report.json
+
+      # Second instrument for "did anything stop running", reading the RUN rather than the
+      # source. test/unit/test-focus.test.ts greps for `.only`/`.skip` and so only recognises
+      # spellings someone thought of — `it.concurrent.only` slipped past its first version,
+      # leaving one file at 1 passed | 35 skipped with this gate green. The skipped TOTAL went
+      # 9 → 44 in that same run. The mark was always there; nobody was reading the number.
+      - name: Nothing silently stopped running
+        run: pnpm check:skipped vitest-report.json
+
+      - name: Solidity tests
+        run: forge test
+        working-directory: contracts

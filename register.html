@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Register Subdomain — CometENS</title>
+  <title>申请子域名 — CometENS</title>
   <style>
     body { font-family: monospace; padding: 40px; max-width: 640px; margin: 0 auto; }
     h2 { margin-bottom: 4px; }
@@ -82,11 +82,11 @@
 
   <a class="back" href="/">← Back to console</a>
 
-  <h2>Register your subdomain</h2>
+  <h2>申请一个属于你的子域名</h2>
   <p class="muted">under <strong><span id="rootDomain">...</span></strong></p>
 
   <div class="card">
-    <div class="step-label">STEP 1 — Choose a label</div>
+    <div class="step-label">STEP 1 — 选一个名字</div>
     <label for="labelInput">Subdomain label</label>
     <input id="labelInput" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
     <label for="parentSelect" style="margin-top:4px;">Parent domain</label>
@@ -97,7 +97,7 @@
   </div>
 
   <div class="card">
-    <div class="step-label">STEP 2 — Connect wallet</div>
+    <div class="step-label">STEP 2 — 连接钱包(用来确定名字归谁,不是登录)</div>
     <div class="chain-status" id="chainStatus">
       <span id="chainName" class="chain-name">—</span>
       <span id="chainId" class="chain-id"></span>
@@ -108,8 +108,9 @@
   </div>
 
   <div class="card">
-    <div class="step-label">STEP 3 — Register</div>
-    <button class="btn-primary" id="registerBtn" disabled>Register Subdomain</button>
+    <div class="step-label">STEP 3 — 提交申请</div>
+    <p class="muted" id="modeNotice">正在读取这个社区的审批设置…</p>
+    <button class="btn-primary" id="registerBtn" disabled>提交申请</button>
     <div class="result hidden" id="result"></div>
   </div>
 

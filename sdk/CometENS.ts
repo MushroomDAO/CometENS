@@ -174,6 +174,7 @@ export class CometENS implements ICometENS {
         message: { node, coinType: coinType.toString(), addr: req.addr, nonce: Date.now(), deadline: req.deadline },
       }),
     })
+    void addrBytes // kept for documentation of the encoding under test
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }))
       throw new Error((err as any).error ?? 'SetAddr failed')
@@ -181,7 +182,7 @@ export class CometENS implements ICometENS {
     return resp.json() as Promise<{ txHash: Hex }>
   }
 
-  async setText(req: SetTextRequest): Promise<{ txHash: Hex }> {
+  async setText(_req: SetTextRequest): Promise<{ txHash: Hex }> {
     // Text record updates go through a future /api/manage/set-text endpoint
     throw new Error('setText via gateway not yet implemented — use admin direct write')
   }

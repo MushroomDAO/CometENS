@@ -1,15 +1,37 @@
 # CometENS 开发路线图
 
-## 当前状态（2026-04-04 / v0.6.0）
+## 当前状态（2026-09-04 / v0.7.0）
+
+> ⚠️ **当前仅测试网**（OP Sepolia + Ethereum Sepolia）。主网未上线，且**本轮不做** ——
+> 用户 2026-09 明确当前阶段只提供测试网部署与测试地址。
 
 | 里程碑 | 名称 | 状态 | Tag |
 |--------|------|------|-----|
 | **A** | 可信签名 MVP | ✅ **已完成** | v0.3.0 |
 | **A+** | Production API Server + Security Hardening | ✅ **已完成** | v0.4.0 |
 | **B** | Name Wrapper + NFT 子域（B1/B4） | ✅ **已完成** | v0.5.0 |
-| **C** | 状态证明（ENS V2 标准） | ✅ **C3/C4 完成（37 tests）** | v0.6.0 |
-| **D** | 生产强化 | 🟡 **进行中（D3 ✅，D4 待做）** | v0.5.0 |
+| **C** | 状态证明（ENS V2 标准） | ✅ **C3/C4 完成** | v0.6.0 |
+| **F** | HybridResolver：按记录年龄自动组合签名 / 终局证明 | ✅ **已完成，测试网 E2E 通过** | v0.7.0 |
+| **D** | 生产强化 | 🟡 **D3 ✅；D4 主网部署推迟到 M2** | v0.5.0 |
+| **M1** | 产品化（自部署 / 委托托管 / UI / 申请审批） | 🚧 **进行中，见 `docs/agent/roadmap.md`** | — |
 | E | .box 写路径 | ⏳ 待官方开放 | — |
+
+**这份文件与 `docs/agent/roadmap.md` 的分工**：这份记录「技术做到哪」（里程碑 A–F 的历史），
+那份记录「产品要去哪」（M1 产品化）。两者不冲突，但**当前全部精力在 M1**。
+
+**测试基线（2026-09-04 实跑）**：Foundry 203 · TS unit 423（19 个文件）。
+表尾那张覆盖矩阵是各里程碑**当时**的数字，不是现值。
+
+**里程碑 F — HybridResolver（v0.7.0，本文件此前完全没有记录）**：
+L1 解析按记录年龄自动路由 —— 新记录（< ~7 天）走签名模式（即时），
+老记录（≥ ~7 天）走终局存储证明（`MIN_AGE_SEC=0`，去信任）。
+刻意避开乐观证明路径（`MIN_AGE_SEC > 0`）——它是唯一同时有冷启动开销**和**更弱信任假设的那条。
+合约 `contracts/src/HybridResolver.sol`；部署在 Ethereum Sepolia。
+
+**⚠️ 下文各里程碑段落里的合约地址是当时的部署，不是现值。**
+现值的唯一事实来源是 `workers/*/wrangler.toml`（`pnpm check:chain` 会读它并核对链上状态）。
+例如里程碑 A 的 `0x9Ed5d101…` 早已不是在用的 L2Records —— 那个地址上仍有代码，
+所以照着它集成的人不会报错，只会**什么都查不到**。
 
 **ENS V2 影响评估（2026-04）**：ENS V2 = 纯 L1 registry 重写（Namechain 已取消）。CCIP-Read/ERC-3668/IExtendedResolver 接口**完全不变**。CometENS 的 OPResolver + Gateway 零修改可运行，上线后再跟进 V2 subregistry 迁移（可选、一笔交易）。详见 [docs/ensv2-impact-analysis.md](ensv2-impact-analysis.md)。
 
@@ -20,6 +42,8 @@
 ## 里程碑 A：可信签名 MVP ✅
 
 **目标**：打通"L2 存储 → Gateway 读取 → L1 CCIP-Read 解析"完整闭环。
+
+> 下表的地址是**里程碑 A 当时**的部署，**不是现值**，早已被取代。照着集成会静默拿到空结果。
 
 | 任务 | 内容 | 状态 |
 |------|------|------|
@@ -40,6 +64,8 @@
 **目标**：API 服务生产化，安全审计通过，CF Workers 上线。
 
 **已部署合约（OP Sepolia 测试网）**
+
+> 下表是**里程碑 A+ 当时**的部署，**不是现值**。现值见 `workers/*/wrangler.toml`。
 
 | 合约 | 地址 |
 |---|---|
@@ -103,6 +129,9 @@
 
 **已部署合约（Ethereum Sepolia，2026-04-04 C3' redeploy）**：
 
+> ⚠️ 下表是**里程碑 C 当时**的部署，**不是现值**。限定写在表前而不是表后——
+> 读者读完一张表之后才看到"其实这些都过期了"，那句限定已经太晚。
+
 | 合约 | 地址 |
 |---|---|
 | EthVerifierHooks | `0x68E526600e89aDD227B0912b075E02B394a23DCf` |
@@ -110,7 +139,16 @@
 | OPFaultVerifier | `0x0954FD2908c06182127b6bed0A964e9eEA41a7EA` |
 | OPResolver | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
 
-`aastar.eth` 和 `forest.aastar.eth` resolver 均已指向 OPResolver。
+**~~`aastar.eth` 和 `forest.aastar.eth` resolver 均已指向 OPResolver。~~ 这句话现在是错的。**
+2026-09-04 链上实测（Sepolia ENS Registry `resolver()`）：
+
+```
+aastar.eth         resolver = 0xA54D63a6223B66EDED35286522336e45F21BE512
+forest.aastar.eth  resolver = 0xA54D63a6223B66EDED35286522336e45F21BE512
+```
+
+两者都指向**里程碑 F 的 HybridResolver**，不是 OPResolver。
+这与 `workers/gateway/wrangler.toml` 的 `ALLOWED_SENDERS` 一致。
 
 **⚠️ 经验教训 — AnchorStateRegistry 地址必须从库里读**：
 ```bash
@@ -150,8 +188,8 @@ DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/
 | 任务 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
 | D3 | 监控告警（CF Analytics Engine 可选 stub + `/health` timestamp）| 🟡 P1 | ✅ 完成 |
-| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| 🔴 P0 | 📋 待实现 |
-| D5 | Worker EOA 密钥轮换方案 | 🟢 P2 | 📋 待实现（上线前不急） |
+| D4 | 主网部署（OP Mainnet + 主网 ENS aastar.eth resolver 更新）| ⏸ **推迟到 M2** | 本轮不做（用户 2026-09 决定） |
+| D5 | Worker EOA 密钥轮换方案 | 🟢 P2 | ✅ **已完成**（`scripts/rotate-gateway-signer.mjs` + `docs/KEY-ROTATION.md`，T1.5.0） |
 | D6 | 多根域名支持（forest.aastar.eth、game.aastar.eth 等） | 🟡 P1 | 📋 待实现 |
 | D7 | Rate Limiting（CF 原生或 DO per-key，多 PoP 正确性）| 🟢 P2 | 📋 待实现（实际滥用出现后再做） |
 
@@ -173,17 +211,23 @@ DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/
 ## 当前 TODO（优先级排序）
 
 ```
-🔴 P0 — 主网上线阻塞
-  D4  主网部署（OP Mainnet L2RecordsV3 + OPResolver + ENS resolver 更新）
-  C3' 测试网部署验证 OPResolver（DeployOPResolver.s.sol + ETH_RPC_URL secret）
+🎯 当前全部精力 — M1 产品化（测试网验收）
+  见 docs/agent/tasks.md，逐 task 有验收命令与证据
+
+⏸ 推迟到 M2 — 主网
+  D4  主网部署（OP Mainnet L2RecordsV3 + HybridResolver + ENS resolver 更新）
+      前置：M1 全部验收通过 + 主网参数评审
 
 🟡 P1 — 近期
-  D6  多根域名支持（forest.aastar.eth 等，API primaryNode 限制解除）
+  D6  多根域名支持（ROOT_DOMAINS 配置已具备，端到端流程与文档缺失）
 
 🟢 P2 — 有时间再做
-  D5  Worker EOA 密钥轮换
   D7  Rate Limiting 升级（有实际滥用问题再做）
   NFT marketplace 集成（OpenSea metadata）
+
+✅ 本轮已完成而此前列在待办里的
+  D5  Worker EOA 密钥轮换 → T1.5.0
+  C3' OPResolver 测试网验证 → 已被里程碑 F 的 HybridResolver E2E 覆盖
 ```
 
 ---
@@ -191,14 +235,18 @@ DEPLOYER_ADDRESS=... GATEWAY_URL=https://cometens-gateway.jhfnetboy.workers.dev/
 ## 主网最短路径
 
 ```
-v0.6.0（当前：C3/C4 实现 + 37 tests 通过）
+v0.7.0（当前：HybridResolver 测试网 E2E 通过）
    │
-   ├── C3': 测试网部署验证 OPResolver（ETH_RPC_URL + 链上测试）
-   │
-   └── D4: 主网部署 ──→ 上线
+   └── M1: 产品化 ──→ 任何社区能自部署 / 能委托托管（全部测试网验收）
          │
-         └── D6: 多根域名（上线后迭代）
+         └── M2: D4 主网部署 ──→ 上线
+               │
+               └── D6: 多根域名（上线后迭代）
 ```
+
+**主网不是下一步，M1 才是。** 把 D4 排在 M1 之前会得到一个上了主网、
+但没人能自部署也没人能托管的服务 —— 那正是 2026-09 判断"技术内核接近就绪、
+产品化没到"时要避免的。
 
 ---
 
@@ -223,3 +271,5 @@ ERC-721 子域 (里程碑B) ───▶  Per-name Registry
 | B (B1/B4) | ✅ 40 | ✅ 16 | ✅ 4 | — | ✅ Codex |
 | C (C3/C4) | ✅ 37 | — | — | — | ✅ 2轮 Codex |
 | D (D3) | — | — | — | — | — |
+| F (Hybrid) | ✅ 含在总数内 | — | ✅ 测试网 E2E | — | ✅ Codex |
+| **现值（2026-09-04 实跑）** | **203** | **423** | 需 Anvil | 需 .env.local | 逐 PR 对抗 review |

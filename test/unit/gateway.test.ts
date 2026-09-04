@@ -5,7 +5,6 @@ import {
   keccak256,
   toBytes,
   toHex,
-  zeroAddress,
   type Hex,
 } from 'viem'
 

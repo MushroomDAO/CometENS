@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>查询域名 · CometENS</title>
+  <link rel="stylesheet" href="/src/styles/design-system.css">
+  <style>
+    /* Layout glue only — every value comes from a design-system token. */
+    .page-head { padding: var(--sp-7) 0 var(--sp-5); text-align: center; }
+    .search { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+    .search .input { flex: 1 1 260px; }
+    .examples { margin-top: var(--sp-3); font-size: var(--fs-xs); }
+    .examples button {
+      background: none; border: none; padding: 0; margin-right: var(--sp-3);
+      color: var(--c-accent); cursor: pointer; font: inherit; font-size: var(--fs-xs);
+      text-decoration: underline; text-underline-offset: 2px;
+    }
+    .examples button:hover { color: var(--c-accent-hover); }
+  </style>
+</head>
+<body>
+
+<div class="container" style="max-width: 640px">
+
+  <header class="page-head">
+    <h1 class="card-title" style="font-size: var(--fs-2xl)">查询一个域名</h1>
+    <p class="card-sub">
+      输入域名看它归谁、能不能被全网解析;输入地址看它名下有哪些名字。
+      <br>不需要钱包,不需要登录。
+      <span class="badge">仅测试网</span>
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="search">
+      <label class="visually-hidden" for="lookupInput">域名或地址</label>
+      <input
+        class="input" id="lookupInput" type="text"
+        placeholder="alice.community.eth 或 0x…"
+        autocomplete="off" spellcheck="false" autocapitalize="off" />
+      <button class="btn btn-primary" id="lookupBtn" type="button">查询</button>
+    </div>
+
+    <div class="examples muted">
+      试试:
+      <button type="button" data-example="alice.aastar.eth">alice.aastar.eth</button>
+      <button type="button" data-example="0xb5600060e6de5E11D3636731964218E53caadf0E">一个地址</button>
+    </div>
+
+    <div id="lookupResult" hidden style="margin-top: var(--sp-4)"></div>
+
+    <p class="hint" id="rootDomainsHint"></p>
+  </div>
+
+  <div class="card">
+    <h3 class="card-title" style="font-size: var(--fs-md)">读到的是什么</h3>
+    <p class="card-sub" style="margin-bottom: 0">
+      查询直接读 L2 上的记录,不经过任何账号系统。
+      <strong>「已注册」</strong>表示这个名字在 L2 上有主;
+      <strong>「全网解析」</strong>表示第三方钱包和工具是否已经能解析它 ——
+      新记录需要等一段挑战期才会具备去信任的解析路径,在那之前这两者会不一致。
+    </p>
+  </div>
+
+</div>
+
+<script type="module" src="/src/lookup.ts"></script>
+<script type="module">
+  // Example chips: fill the box and run, so the first interaction needs no typing.
+  document.addEventListener('DOMContentLoaded', () => {
+    for (const b of document.querySelectorAll('[data-example]')) {
+      b.addEventListener('click', () => {
+        const input = document.getElementById('lookupInput')
+        input.value = b.dataset.example
+        document.getElementById('lookupBtn').click()
+      })
+    }
+  })
+</script>
+</body>
+</html>

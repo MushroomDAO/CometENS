@@ -6,8 +6,12 @@ Created: 2026-04-04 23:30 CST
 
 | Item | Value |
 |------|-------|
-| L2RecordsV3 (OP Sepolia) | `0x8836E89D654141a858f680e995CA86f6644A29a5` |
-| OPResolver (ETH Sepolia) | `0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083` |
+> ⚠️ **地址已于 2026-09-04 校正。**下表原本列的是 `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc`(L2RecordsV3)
+> 与 `0xA54D63a6223B66EDED35286522336e45F21BE512`(OPResolver),那是**已被取代的旧部署** —— 旧的 L2Records 在 OP Sepolia 上
+> 仍有代码,所以照着它集成不会报错,只会**什么都查不到**。
+> 现值的唯一事实来源是 `workers/*/wrangler.toml`,`pnpm check:chain` 会读它并核对链上状态。
+| L2RecordsV3 (OP Sepolia) | `0xbA692CdfDA33916BbE8d2a1f23E80218db8ebFDc` |
+| OPResolver (ETH Sepolia) | `0xA54D63a6223B66EDED35286522336e45F21BE512` |
 | OffchainResolver (ETH Sepolia) | `0xe138Ec90E6a793F69455a45cF78494c7baFd1A1b` |
 | Gateway Worker | `https://cometens-gateway.jhfnetboy.workers.dev` |
 | Deployer/Signer | `0xb5600060e6de5E11D3636731964218E53caadf0E` |
@@ -58,7 +62,7 @@ Created: 2026-04-04 23:30 CST
 cast call 0xa1Cec548926eb5d69aa3B7B57d371EdBdD03e64b "anchors(uint32)(bytes32,uint256)" 1 --rpc-url $SEPOLIA_RPC_URL
 
 # 2. Check gateway returns proof (not 503)
-curl -s "https://cometens-gateway.jhfnetboy.workers.dev/0x9070d42C9C12333053565e7ee8c4BdDE9Ca73083/$(cast calldata 'addr(bytes32)' $(cast namehash 'proof1.forest.aastar.eth'))"
+curl -s "https://cometens-gateway.jhfnetboy.workers.dev/0xA54D63a6223B66EDED35286522336e45F21BE512/$(cast calldata 'addr(bytes32)' $(cast namehash 'proof1.forest.aastar.eth'))"
 
 # 3. Check ENS App
 open https://sepolia.app.ens.domains/proof1.forest.aastar.eth

@@ -18,7 +18,6 @@ import {
   encodePacked,
   encodeFunctionData,
   decodeFunctionResult,
-  decodeErrorResult,
   encodeAbiParameters,
   toHex,
   type Hex,
@@ -27,7 +26,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
-import { readFileSync } from 'fs'
+import { loadArtifact } from './artifacts'
 import { join } from 'path'
 import { createServer, type Server } from 'http'
 import { L2RecordsReader } from '../../server/gateway/readers/L2RecordsReader'
@@ -99,9 +98,7 @@ async function deployContract(
   rpcPort: number,
   chain: typeof l1Chain,
 ): Promise<Address> {
-  const artifact = JSON.parse(
-    readFileSync(join(CONTRACTS_DIR, 'out', `${artifactName}.sol`, `${artifactName}.json`), 'utf8')
-  )
+  const artifact = loadArtifact(CONTRACTS_DIR, artifactName)
   const wallet = createWalletClient({ account: deployer, chain, transport: http(`http://127.0.0.1:${rpcPort}`) })
   const pub = createPublicClient({ chain, transport: http(`http://127.0.0.1:${rpcPort}`) })
   const txHash = await wallet.deployContract({ abi: artifact.abi, bytecode: artifact.bytecode.object, args })
@@ -112,7 +109,9 @@ async function deployContract(
 
 // ─── Gateway server ───────────────────────────────────────────────────────────
 
-function buildSignedResponse(result: Hex, expires: bigint, resolverAddr: Address): Hex {
+// Kept: it documents how a signed gateway response is assembled, which the assertions below
+// rely on being true. `void` marks it deliberately unused rather than forgotten.
+function _buildSignedResponse(result: Hex, expires: bigint, resolverAddr: Address): Hex {
   const messageHash = keccak256(
     encodePacked(
       ['bytes2', 'address', 'uint64', 'bytes32'],
@@ -211,8 +210,9 @@ describe('E2E: CCIP-Read resolution flow', () => {
     const l2Pub = createPublicClient({ chain: l2Chain, transport: http(`http://127.0.0.1:${L2_PORT}`) })
 
     const labelhash = keccak256(toBytes('alice')) as Hex
-    const root = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+    const _root = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
 
+    void _root // kept for documentation of the encoding under test
     // Note: for testing we use raw namehash parts; in production this matches ENS namehash
     const parentOfAliceTest = namehash('test.eth')
     let tx = await l2Wallet.writeContract({
@@ -325,3 +325,5 @@ describe('E2E: CCIP-Read resolution flow', () => {
     expect(res.status).toBe(400)
   })
 })
+
+void _buildSignedResponse

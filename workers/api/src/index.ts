@@ -18,7 +18,6 @@ import {
   createPublicClient,
   http,
   verifyTypedData,
-  recoverMessageAddress,
   isAddress,
   isHex,
   namehash,
@@ -28,13 +27,15 @@ import {
   type Hex,
   type Address,
 } from 'viem'
-import { optimismSepolia, optimism } from 'viem/chains'
-import { privateKeyToAccount } from 'viem/accounts'
+import { optimismSepolia, optimism, foundry } from 'viem/chains'
+
 import { L2RecordsWriterV2 } from '../../../server/gateway/writer/L2RecordsWriterV2'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 import {
   buildDomain,
   RegisterTypes,
+  ApproveApplicationTypes,
+  ApplyTypes,
   SetAddrTypes,
   SetTextTypes,
   SetContenthashTypes,
@@ -43,6 +44,12 @@ import {
   TransferSubnodeTypes,
 } from '../../../server/gateway/manage/schemas'
 import { handleV1Register } from '../../../server/gateway/v1/register'
+import {
+  resolveMode, buildApplication, decideOnSubmit, checkResubmission, applyDecision, mayRegisterDirectly,
+  applicationKey, publicView, isAuthorisedApprover, APPLICATION_PREFIX,
+  ApprovalError, type Application,
+} from '../../../server/gateway/approval'
+import { tryCreateSigner } from '../../../server/gateway/signer'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
@@ -60,6 +67,35 @@ const CHALLENGE_PERIOD: Record<string, number> = {
   'op-sepolia': 302_400,   // same parameter on testnet
 }
 
+/**
+ * The Cloudflare runtime shapes this worker actually uses, declared locally.
+ *
+ * NOT `@cloudflare/workers-types`: adding that package to tsconfig's `types` makes its
+ * definitions GLOBAL, overriding the DOM/Node `Response`, `fetch` and friends for every file
+ * in the project. Measured while extending typecheck coverage (T1.7.1): 72 errors → 93, with
+ * 30 new `TS18046 … is of type 'unknown'` that exist only because of that override.
+ *
+ * Only the members this file touches are declared. A narrower shape is not a limitation here —
+ * it is what lets the same source typecheck under the root project AND under wrangler, which
+ * supplies the real globals.
+ */
+export interface KVNamespace {
+  get(key: string): Promise<string | null>
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
+  delete(key: string): Promise<void>
+  list(options?: { prefix?: string }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean }>
+}
+
+export interface AnalyticsEngineDataset {
+  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
+}
+
+/** The third argument to `fetch`; this worker never calls into it. */
+export interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void
+  passThroughOnException(): void
+}
+
 export interface Env {
   /** 'op-sepolia' | 'op-mainnet' */
   NETWORK: string
@@ -69,10 +105,17 @@ export interface Env {
   ROOT_DOMAIN: string
   /** Comma-separated list of all supported root domains, e.g. 'forest.aastar.eth,game.aastar.eth' */
   ROOT_DOMAINS?: string
+  /** "auto" (default, matches pre-existing behaviour) | "manual" */
+  APPROVAL_MODE?: string
   /** Optimism RPC URL */
   OP_RPC_URL: string
-  /** EOA private key that submits L2 transactions (wrangler secret) */
+  /**
+   * EOA private key that submits L2 transactions (wrangler secret).
+   * Prefer WRITER_KEY; this name is kept working so an upgrade cannot take a deployment down.
+   */
   WORKER_EOA_PRIVATE_KEY?: string
+  /** Role-specific name for the writer key — preferred over WORKER_EOA_PRIVATE_KEY. */
+  WRITER_KEY?: string
   /** Comma-separated addresses allowed to call /v1/register */
   UPSTREAM_ALLOWED_SIGNERS?: string
   /** Gateway Worker URL (used by /resolve-status to query proof status) */
@@ -107,7 +150,10 @@ function trackEvent(analytics: AnalyticsEngineDataset | undefined, event: string
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  // `ctx` is declared even though nothing uses it: the runtime passes three arguments, and a
+  // two-parameter signature makes every caller that passes the real third one a type error —
+  // which is exactly what the tests were doing.
+  async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname
 
@@ -139,11 +185,16 @@ export default {
         if (path === '/lookup')         { response = await handleLookup(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/resolve-status') { response = await handleResolveStatus(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/root-domains')   { response = json({ domains: getRootDomains(env) }); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/application')    { response = await handleGetApplication(url, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/applications')   { response = await handleListApplications(env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/approval-mode')  { response = json({ mode: resolveMode(env.APPROVAL_MODE) }); trackEvent(env.ANALYTICS, path, response.status); return response }
       }
 
       // ── POST endpoints ────────────────────────────────────────────────────
       if (request.method === 'POST') {
         if (path === '/v1/register')     { response = await handleV1RegisterEndpoint(request, env); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/apply')           { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
+        if (path === '/approve')         { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/register')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/set-addr')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
         if (path === '/set-text')        { response = await handleManage(request, env, path); trackEvent(env.ANALYTICS, path, response.status); return response }
@@ -159,12 +210,12 @@ export default {
       const status = e?.status ?? 500
       trackEvent(env.ANALYTICS, path, status)
       if (status === 429) {
-        return new Response(JSON.stringify({ error: e.message }), {
+        return new Response(JSON.stringify({ error: sanitiseErrorMessage(String(e?.message ?? e)) }), {
           status: 429,
           headers: { 'content-type': 'application/json', 'Retry-After': '60', ...corsHeaders() },
         })
       }
-      return jsonError(e?.message ?? String(e), status)
+      return jsonError(sanitiseErrorMessage(String(e?.message ?? e)), status)
     }
   },
 }
@@ -434,17 +485,22 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
   const payload = await parseJson(request)
   const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
 
-  // Recover the signer early so we can rate-limit before doing any writes.
-  // handleV1Register() will re-verify and check the allowedSigners list.
-  if (payload.signature && payload.label && payload.owner && payload.timestamp) {
-    const message = `CometENS:register:${String(payload.label).trim().toLowerCase()}:${payload.owner}:${payload.timestamp}`
-    const signerAddress = await recoverMessageAddress({ message, signature: payload.signature as Hex })
-      // await checkRateLimit(env.RECORD_CACHE, `rl:v1:${signerAddress.toLowerCase()}`, 60, 60)  // D7: disabled — auth chain provides sufficient protection
-  }
+  // The signer used to be recovered here so a rate limiter could key on it before any write.
+  // That rate-limit call is D7 and was commented out, so the block recovered an address and
+  // threw it away — handleV1Register recovers it again and owns the verdict.
+  //
+  // In #49 I wrapped it in try/catch to stop a malformed signature escaping as 500. That made
+  // dead code safe rather than removing it: the right fix for a block whose only remaining
+  // effect is a possible exception is deletion. When D7 lands, the recovery comes back next to
+  // the limiter that needs it.
 
   const writer = buildWriter(env)
 
-  const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer)
+  const pub = makePublicClient(env)
+  const l2Addr = env.L2_RECORDS_ADDRESS as Address
+  const result = await handleV1Register(payload, allowedSigners, env.ROOT_DOMAIN, writer, async (node) =>
+    (await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [node] })) as string,
+  )
 
   // Persist full qualified name to KV registry on success
   if (result.ok && result.name && env.REGISTRY) {
@@ -461,6 +517,69 @@ async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Res
 
 // ─── POST /register, /set-addr, /set-text, /set-contenthash,
 //         /add-registrar, /remove-registrar — EIP-712 signed ─────────────────
+
+// ─── Applications (T1.6.1) ────────────────────────────────────────────────────
+
+function applicationStore(env: Env): KVNamespace {
+  const kv = env.REGISTRY ?? env.RECORD_CACHE
+  if (!kv) throw Object.assign(new Error('No KV namespace bound — applications cannot be stored'), { status: 503 })
+  return kv
+}
+
+async function readApplication(env: Env, id: string): Promise<Application | null> {
+  const raw = await applicationStore(env).get(applicationKey(id))
+  return raw ? (JSON.parse(raw) as Application) : null
+}
+
+/** Perform the on-chain grant for an approved application. */
+async function grantApplication(env: Env, app: Application): Promise<Application> {
+  const writer = requireWriter(env)
+  const parentNode = namehash(app.parent) as Hex
+  const lh = labelhash(app.label) as Hex
+  const txHash = await writer.registerSubnode(parentNode, lh, app.owner as Address, app.label, app.owner as Hex)
+  if (env.REGISTRY) await registryAppendName(env.REGISTRY, app.owner.toLowerCase(), app.name)
+  return { ...app, txHash }
+}
+
+async function handleGetApplication(url: URL, env: Env): Promise<Response> {
+  const id = url.searchParams.get('id')?.trim()
+  if (!id) return jsonError('Missing id param', 400)
+  const app = await readApplication(env, id)
+  if (!app) return json({ found: false })
+  return json({ found: true, ...publicView(app) })
+}
+
+async function handleListApplications(env: Env): Promise<Response> {
+  const list = await applicationStore(env).list({ prefix: APPLICATION_PREFIX })
+  const apps: unknown[] = []
+  for (const k of list.keys) {
+    const raw = await applicationStore(env).get(k.name)
+    if (raw) apps.push(publicView(JSON.parse(raw) as Application))
+  }
+  return json({ applications: apps })
+}
+
+/**
+ * Verify an EIP-712 signature, or refuse with 401.
+ *
+ * A MALFORMED signature makes viem THROW rather than return false, so the bare
+ * `const ok = await verifyTypedData(...); if (!ok) throw 401` pattern let the throw escape and
+ * surface as 500 — telling the caller "our fault" when the truth is "your signature is
+ * unusable". Every write endpoint shared that shape.
+ *
+ * A single helper rather than nine try/catch blocks, because the property to establish is
+ * COVERAGE: adding try/catch nine times proves only that nine places were edited, while one
+ * chokepoint plus a test that walks every endpoint proves none was missed.
+ */
+async function requireValidSignature(params: Parameters<typeof verifyTypedData>[0]): Promise<void> {
+  let ok = false
+  try {
+    ok = await verifyTypedData(params)
+  } catch {
+    ok = false
+  }
+  if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+}
 
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
   const payload = await parseJson(request)
@@ -497,8 +616,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetAddr', types: SetAddrTypes as any, message: message as any, signature })
 
     // Authorization: recovered signer must be subdomain owner (check BEFORE consuming nonce)
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -520,7 +638,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-addr', txHash })
+    return json({ ok: true, action: 'set-addr', txHash })
   }
 
   // ── /register ─────────────────────────────────────────────────────────────
@@ -563,10 +681,29 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'Register', types: RegisterTypes as any, message: message as any, signature })
 
-    // Self-service model: any wallet can register their own subdomain.
+    // APPROVAL_MODE governs this endpoint too, not just /apply.
+    //
+    // Until now `manual` was a promise the code did not keep: an operator who turned it on
+    // believed nothing was issued without their decision, while anyone with a wallet could
+    // still POST here and mint a name. The mode is checked AFTER the signature so an
+    // unauthenticated caller still gets 401 rather than learning the deployment's mode.
+    //
+    // Owner-only rather than closed: the admin console's grant button posts here, and that
+    // grant IS the operator's decision. /v1/register is untouched — it has its own allowlist.
+    {
+      const mode = resolveMode(env.APPROVAL_MODE)
+      let contractOwner: string | undefined
+      try {
+        contractOwner = (await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })) as string
+      } catch {
+        contractOwner = undefined // fails closed in manual mode, by design
+      }
+      const gate = mayRegisterDirectly(mode, from, contractOwner)
+      if (!gate.ok) return jsonError(`${gate.message} — ${gate.hint}`, gate.status, gate.code)
+    }
+
     // The Worker EOA (WORKER_EOA_PRIVATE_KEY) is the on-chain registrar and
     // submits the L2 tx — the signer just proves intent via EIP-712.
     const parentNode = namehash(message.parent) as Hex
@@ -600,7 +737,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     // Include estimated L1 resolve time so frontend can show countdown
     const resolveEstimate = await buildResolveEstimate(env)
-    return json({ ok, action: 'register', txHash, ...resolveEstimate })
+    return json({ ok: true, action: 'register', txHash, ...resolveEstimate })
   }
 
   // ── /set-text ─────────────────────────────────────────────────────────────
@@ -619,8 +756,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetText', types: SetTextTypes as any, message: message as any, signature })
 
     // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -642,7 +778,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-text', txHash })
+    return json({ ok: true, action: 'set-text', txHash })
   }
 
   // ── /set-contenthash ──────────────────────────────────────────────────────
@@ -659,8 +795,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'SetContenthash', types: SetContenthashTypes as any, message: message as any, signature })
 
     // Authorization: check BEFORE consuming nonce
     const subnodeOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'subnodeOwner', args: [message.node] })
@@ -682,10 +817,94 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       }
     }
 
-    return json({ ok, action: 'set-contenthash', txHash })
+    return json({ ok: true, action: 'set-contenthash', txHash })
   }
 
   // ── /add-registrar ────────────────────────────────────────────────────────
+  // ── /apply ────────────────────────────────────────────────────────────────
+  //
+  // Authenticated exactly like /register. APPROVAL_MODE decides WHEN a verified request is
+  // granted (now, or after review) — it must never decide WHETHER the request is verified.
+  // The first version skipped auth entirely in `auto` mode, which meant anyone could make
+  // the operator pay gas to mint any name to any address, anonymously and unthrottled.
+  if (path === '/apply') {
+    const msg = payload.message ?? {}
+    const message = {
+      parent: String(msg.parent ?? '').trim().toLowerCase(),
+      label: String(msg.label ?? '').trim().toLowerCase(),
+      owner: msg.owner as Address,
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
+    }
+    if (!isAddress(message.owner)) throw badReq('Invalid owner address')
+    checkDeadline(message.deadline)
+
+    // A distinct primaryType, so an Apply signature cannot be replayed as a Register.
+    await requireValidSignature({ address: from, domain, primaryType: 'Apply', types: ApplyTypes as any, message: message as any, signature })
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
+
+    try {
+      const mode = resolveMode(env.APPROVAL_MODE)
+      const app = buildApplication(message, getRootDomains(env), Math.floor(Date.now() / 1000))
+
+      const existing = await readApplication(env, app.id)
+      const resub = checkResubmission(existing)
+      if (!resub.ok) throw resub.error
+
+      if (decideOnSubmit(mode) === 'queue') {
+        await applicationStore(env).put(applicationKey(app.id), JSON.stringify(app))
+        return json({ ...publicView(app), mode })
+      }
+      const approved = applyDecision(app, 'approve', from, Math.floor(Date.now() / 1000))
+      const granted = await grantApplication(env, approved)
+      await applicationStore(env).put(applicationKey(granted.id), JSON.stringify(granted))
+      return json({ ...publicView(granted), mode })
+    } catch (e: any) {
+      if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
+      throw e
+    }
+  }
+
+  // ── /approve ──────────────────────────────────────────────────────────────
+  if (path === '/approve') {
+    const msg = payload.message ?? {}
+    const id = String(msg.id ?? '').trim()
+    const decision = String(msg.decision ?? '')
+    if (!id) throw badReq('Missing application id')
+    if (decision !== 'approve' && decision !== 'reject') throw badReq('decision must be "approve" or "reject"')
+
+    const message = {
+      id,
+      decision,
+      reason: String(msg.reason ?? ''),
+      nonce: asBigInt(msg.nonce, 'nonce'),
+      deadline: asBigInt(msg.deadline, 'deadline'),
+    }
+    checkDeadline(message.deadline)
+
+    await requireValidSignature({ address: from, domain, primaryType: 'ApproveApplication', types: ApproveApplicationTypes as any, message: message as any, signature })
+
+    // Only the contract owner decides. Read the owner rather than trusting anything supplied.
+    const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
+    if (!isAuthorisedApprover(from, contractOwner as string)) {
+      throw Object.assign(new Error('Only the contract owner can decide on applications'), { status: 403 })
+    }
+    await consumeNonce(env.REGISTRY ?? env.RECORD_CACHE, getChainId(env), from, message.nonce, message.deadline)
+
+    const existing = await readApplication(env, id)
+    if (!existing) throw Object.assign(new Error(`No application with id "${id}"`), { status: 404 })
+
+    try {
+      let decided = applyDecision(existing, decision, from, Math.floor(Date.now() / 1000), message.reason || undefined)
+      if (decision === 'approve') decided = await grantApplication(env, decided)
+      await applicationStore(env).put(applicationKey(decided.id), JSON.stringify(decided))
+      return json(publicView(decided))
+    } catch (e: any) {
+      if (e instanceof ApprovalError) return jsonError(e.hint ? `${e.message} — ${e.hint}` : e.message, e.status)
+      throw e
+    }
+  }
+
   if (path === '/add-registrar') {
     const msg = payload.message ?? {}
     if (!isHex(msg.parentNode)) throw badReq('Invalid parentNode')
@@ -701,8 +920,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'AddRegistrar', types: AddRegistrarTypes as any, message: message as any, signature })
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -712,7 +930,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.addRegistrar(message.parentNode, message.registrar, message.quota, message.expiry)
-    return json({ ok, action: 'add-registrar', txHash })
+    return json({ ok: true, action: 'add-registrar', txHash })
   }
 
   // ── /remove-registrar ─────────────────────────────────────────────────────
@@ -729,8 +947,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     checkDeadline(message.deadline)
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'RemoveRegistrar', types: RemoveRegistrarTypes as any, message: message as any, signature })
 
     const contractOwner = await pub.readContract({ address: l2Addr, abi: L2RecordsV2ABI, functionName: 'owner' })
     if ((contractOwner as string).toLowerCase() !== from.toLowerCase()) {
@@ -740,7 +957,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const writer = requireWriter(env)
     const txHash = await writer.removeRegistrar(message.parentNode, message.registrar)
-    return json({ ok, action: 'remove-registrar', txHash })
+    return json({ ok: true, action: 'remove-registrar', txHash })
   }
 
   // ── /transfer-subnode ─────────────────────────────────────────────────────
@@ -765,8 +982,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       throw badReq('Cannot transfer to self')
     }
 
-    const ok = await verifyTypedData({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
-    if (!ok) throw Object.assign(new Error('Invalid signature'), { status: 401 })
+    await requireValidSignature({ address: from, domain, primaryType: 'TransferSubnode', types: TransferSubnodeTypes as any, message: message as any, signature })
 
     // Authorization: verify on-chain ownership BEFORE consuming nonce.
     // Uses subnodeOwner() which in V3 maps directly to ownerOf(uint256(node)).
@@ -790,7 +1006,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       await env.RECORD_CACHE.delete(`addr60:${message.node}`)
     }
 
-    return json({ ok, action: 'transfer-subnode', txHash })
+    return json({ ok: true, action: 'transfer-subnode', txHash })
   }
 
   return jsonError('Unknown endpoint', 404)
@@ -839,8 +1055,28 @@ function getRootDomains(env: Env): string[] {
   return env.ROOT_DOMAIN ? [env.ROOT_DOMAIN] : []
 }
 
-function getChain(env: Env) {
-  return env.NETWORK === 'op-mainnet' ? optimism : optimismSepolia
+/**
+ * Which chain this deployment writes to.
+ *
+ * `local` is opt-in by exact string and never a fallback: an unrecognised NETWORK still lands
+ * on OP Sepolia, as before. Making it a fallback would mean a typo in NETWORK silently pointed
+ * a real deployment at a devnet chain id, and every signature would then verify against the
+ * wrong EIP-712 domain.
+ *
+ * It exists because the chain id is baked into the EIP-712 domain, so nothing that signs can
+ * be exercised end-to-end against a local node without it — the approval flow included.
+ *
+ * Not a test hook, by this test: does the branch change WHAT THE CODE DOES for a given
+ * (chain, signature), or only WHICH CHAIN was selected? Only the latter — `getChain` was
+ * already a deployment axis switching on NETWORK and this adds a third value to it. A test
+ * hook is dangerous because it makes the thing under test differ from the thing that ships;
+ * a configuration axis does not create that fork, so "is there a second user" need not be
+ * answered.
+ */
+export function getChain(env: Env) {
+  if (env.NETWORK === 'op-mainnet') return optimism
+  if (env.NETWORK === 'local') return foundry
+  return optimismSepolia
 }
 
 function getChainId(env: Env): number {
@@ -852,9 +1088,10 @@ function makePublicClient(env: Env) {
 }
 
 function buildWriter(env: Env): L2RecordsWriterV2 | undefined {
-  const pk = env.WORKER_EOA_PRIVATE_KEY as Hex | undefined
-  if (!pk) return undefined
-  const account = privateKeyToAccount(pk)
+  // Which key the writer role uses, and how it signs, now live behind one seam
+  // (server/gateway/signer.ts) so a KMS backend can replace it without touching this file.
+  const account = tryCreateSigner('writer', env as unknown as Record<string, string | undefined>)
+  if (!account) return undefined
   return new L2RecordsWriterV2(account, getChain(env), env.OP_RPC_URL, env.L2_RECORDS_ADDRESS as Hex)
 }
 
@@ -947,4 +1184,41 @@ function json(data: unknown, status = 200): Response {
 
 function jsonError(message: string, status: number, code?: string): Response {
   return json(code ? { error: message, code } : { error: message }, status)
+}
+
+/**
+ * Sanitise an exception before its text is returned to a caller.
+ *
+ * viem embeds the full RPC URL in `error.message`, and provider keys live in that URL's path
+ * (`/v2/<key>`). The worker used to hand `e.message` straight back, so an anonymous GET to
+ * /check-label returned the Alchemy API key to whoever asked — verified against the deployed
+ * testnet worker, not inferred.
+ *
+ * Also strips the echoed request body: it adds nothing an API consumer can act on and is a
+ * second place for internals to escape.
+ */
+export function sanitiseErrorMessage(raw: string): string {
+  return raw
+    // Any URL, not just known providers: a self-hoster's endpoint may embed credentials too.
+    // wss:// is covered because providers issue a websocket endpoint alongside the HTTP one
+    // carrying the same key — matching only https? left that shape fully exposed.
+    .replace(/(?:https?|wss?):\/\/[^\s"']+/g, (u) => {
+      try {
+        const parsed = new URL(u)
+        const hasPathOrQuery = parsed.pathname.replace(/^\/+|\/+$/g, '').length > 0 || parsed.search.length > 0
+        return hasPathOrQuery ? `${parsed.protocol}//${parsed.host}/…(redacted)` : `${parsed.protocol}//${parsed.host}`
+      } catch {
+        return '(redacted URL)'
+      }
+    })
+    // Private keys should never reach an error string, but if one ever does, do not print it.
+    .replace(/0x[0-9a-fA-F]{64}/g, '0x…(redacted)')
+    // viem appends "Request body: {...}" and "Raw Call Arguments:" blocks — internals with
+    // no value to an API consumer. Stop at the next section rather than running to the end of
+    // the string: viem puts "Details:" AFTER "Raw Call Arguments:", and that Details line is
+    // usually the only sentence saying what actually went wrong. Stripping to the end took it
+    // with them, which made the "reason is preserved" claim untrue.
+    .replace(/\n*Request body:[\s\S]*?(?=\nDocs:|\nDetails:|\nVersion:|$)/i, '')
+    .replace(/\n*Raw Call Arguments:[\s\S]*?(?=\nDocs:|\nDetails:|\nVersion:|$)/i, '')
+    .trim()
 }

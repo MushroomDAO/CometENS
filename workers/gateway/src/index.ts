@@ -38,7 +38,7 @@ import {
   type Hex,
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
-import { privateKeyToAccount } from 'viem/accounts'
+import { createSigner } from '../../../server/gateway/signer'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -363,7 +363,9 @@ async function handleResolveSigned(
   const result = await handleResolve(calldata, env)
   const expires = BigInt(Math.floor(Date.now() / 1000) + 3600)
 
-  const signer = privateKeyToAccount(env.PRIVATE_KEY_SUPPLIER as Hex)
+  // Same seam as the API worker: role → account, so the gateway signing key can move to a
+  // KMS backend (TB.3) without changing the EIP-3668 logic below.
+  const signer = createSigner('gateway', env as unknown as Record<string, string | undefined>)
 
   const messageHash = keccak256(
     encodePacked(
@@ -581,7 +583,17 @@ export default {
         try {
           return await handleProofMode(calldata as Hex, sender as Hex, env)
         } catch (e) {
+          // Logged, not returned. The reason was already being computed here and then dropped
+          // on the floor, so a proof-mode failure was undiagnosable: the caller got
+          // "Proof generation failed" and the operator got nothing at all — this worker had no
+          // console output anywhere.
+          //
+          // It stays out of the response body deliberately. #30 shipped a credential leak
+          // through exactly that path: an upstream error string carrying the RPC provider key,
+          // returned to anonymous callers. Worker logs are the operator's own; a response body
+          // is the whole internet's.
           const message = e instanceof Error ? e.message : String(e)
+          console.error('[proof-mode] proof generation failed:', message)
           return new Response(JSON.stringify({ error: 'Proof generation failed' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },

@@ -1,0 +1,14 @@
+{
+  // The scope typecheck is MOVING TOWARD, kept as a real committed artifact rather than a
+  // sentence in a task file. `pnpm typecheck` still runs the narrow tsconfig and stays at
+  // rc=0; this one is allowed a budget of errors and `pnpm check:typecheck-scope` enforces
+  // that the budget only ever goes DOWN.
+  //
+  // Why not just widen tsconfig.json: that would put the main gate at rc=2, and a red gate
+  // stops being read. I did exactly that once on this branch and had to revert it.
+  //
+  // `workers` is deliberately absent — see T1.7.2. It needs Cloudflare runtime globals and is
+  // a different kind of problem, not more of the same errors.
+  "extends": "./tsconfig.json",
+  "include": ["src", "test", "server", "sdk"]
+}

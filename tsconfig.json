@@ -7,8 +7,13 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "strict": true,
+    // Unused imports are invisible to every other check here: tsc without this flag only asks
+    // "is anything missing", never "is anything left over", and CI runs no linter. A dead
+    // import survived the deletion it belonged to (#53) with nothing to notice.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"]
   },
   "include": ["src"]
 }

@@ -4,19 +4,29 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "abi:sync": "node scripts/sync-abi.mjs",
+    "bootstrap:community": "node scripts/bootstrap-community.mjs",
     "build": "vite build",
+    "check:chain": "node scripts/check-chain.mjs",
+    "check:approval-sha": "node scripts/check-approval-sha.mjs",
+    "check:deploy-order": "node scripts/check-deploy-order.mjs",
+    "check:typecheck-scope": "node scripts/check-typecheck-scope.mjs",
+    "check:skipped": "node scripts/check-skipped.mjs",
+    "delegate": "node scripts/delegate.mjs",
+    "dev": "vite",
+    "preflight": "node scripts/preflight.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
     "test": "vitest run",
-    "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "abi:sync": "node scripts/sync-abi.mjs"
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "viem": "^2.37.13"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^4.1.2",
     "typescript": "^5.7.3",
     "undici": "^7.24.6",
