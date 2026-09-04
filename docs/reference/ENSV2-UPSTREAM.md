@@ -56,7 +56,7 @@ pnpm docs:ens --addresses     # 顺带刷新 Sepolia 部署地址表
 
 | # | 事实 | 出处 |
 |---|---|---|
-| F1 | CCIP-Read / ERC-3668 在 V2 里原封不动;文档让开发者拿 `test.offchaindemo.eth` 做回归 | `src/pages/web/ensv2-readiness.mdx` |
+| F1 | CCIP-Read / ERC-3668 在 V2 里原封不动;文档让开发者拿 `test.offchaindemo.eth` 做回归 | `src/pages/web/ensv2-readiness.mdx` **+ 已实测,见下** |
 | F2 | **"all resolution still starts on Ethereum Mainnet"** —— V2 是 L1,多链靠委派 | `src/pages/web/ensv2-readiness.mdx:26` |
 | F3 | `IRegistry` 只有 `getSubregistry` / `getResolver` / `getParent`;解析走最长后缀匹配 | `src/pages/ensv2/registry-hierarchy.mdx` |
 | F4 | EAC:2^256 resource × 64 role(32 常规 + 32 admin)× 每 role 最多 15 个持有者;`revokeRoles` **可撤销** | `src/pages/ensv2/enhanced-access-control.mdx` |
@@ -68,6 +68,21 @@ pnpm docs:ens --addresses     # 顺带刷新 Sepolia 部署地址表
 | F10 | 合约与接口 **"not yet final and may change prior to mainnet deployment"** | `src/pages/ensv2/registry-hierarchy.mdx`、`registry-template.mdx` |
 | F11 | 常见错误:只匹配 `.eth` 会漏掉 DNS 名字 | `src/pages/web/ensv2-readiness.mdx` |
 | F12 | 上游对 L2 的全部说法只有 "improved support for existing L2 solutions" —— **没有 L2 registry 这个东西**,多链靠 CCIP-Read 委派 | `src/pages/web/multichain.mdx:7` |
+
+> **F1 不再只是引文 —— 它现在有实测。** `pnpm check:ensv2` 拿 ENSv2 在 Sepolia 真实部署的
+> `UniversalResolverV2`(`0x4a1817d1…`)解析 `forest.aastar.eth`,2026-09-04 实跑结果:
+>
+> ```
+> OffchainLookup raised   yes     ← revert selector 0x556f1830
+> CCIP-Read followed      yes
+> resolver reported       0xae66c62A…  (ENSV1Resolver 镜像 —— 根域名还在 v1,符合预期)
+> ```
+>
+> 反向对照:`pnpm check:ensv2 --name vitalik.eth`(v1 上有真实地址的名字)走同一个 URv2
+> **不触发 OffchainLookup,检查 FAIL** —— 所以这条判据不是恒绿的。
+>
+> 这条之所以要实测而不是引用:整个迁移方案的可行性都压在它上面,
+> **而上游同一批文档还写着接口 not yet final**。一句散文撑不起「一行不用改」这种结论。
 
 ---
 
