@@ -225,7 +225,12 @@ cd <worktree> && pnpm install
 release:<https://github.com/MushroomDAO/CometENS/releases/tag/v0.8.0>
 
 `v0.7.0`(2026-06-14)以来 **74 个 PR**。分组是从 squash 标题推导的,不是凭印象:
-`docs 32 · fix 19 · feat 17 · chore 4 · test 3 · ci 2`。
+`docs 27 · fix 19 · feat 17 · chore 4 · test 2 · ci 2 · docs+test 2 · test+docs 1`,合计 74。
+
+原先这一行写的是 `docs 32 · … · test 3`,合计 77 —— 多出来的 3 是 **#71 / #77 / #90 这三个复合前缀
+(`docs+test:` / `test+docs:`)被同时算进了两个桶**。总数 74 一直是对的,错的是分组。
+**复合前缀单列成桶,而不是并进主桶** —— 并进去就等于宣称那三个 PR 只做了一件事,
+下一个按标题核对的人会重新撞上同一个歧义。(PR#97 评审指出,FU-12)
 
 ### 发布时的实际状态,连同不好看的部分
 
