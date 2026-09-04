@@ -70,3 +70,10 @@ describe('approvalVerdict — a rewritten head is still a mismatch', () => {
     expect(approvalVerdict(A, [approve('')])).toMatchObject({ code: 'SHA_MISMATCH' })
   })
 })
+
+// describeDelta is not unit-tested here: it shells out to git and its whole job is the shape
+// of what it PRINTS. It was verified by running it on this PR, both ways round —
+//   with `^base`    → 1 commit  (this branch's own)
+//   without `^base` → 2 commits (plus #74's squash commit, merged in)
+// The second is what the first version printed, labelled "New commits on this branch", which
+// is how the label came to promise something the command did not do.
