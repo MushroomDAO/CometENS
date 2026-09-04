@@ -8,6 +8,7 @@
  * before any module-level code runs (using dynamic import inside each test).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TestExecutionContext } from '../worker-types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { optimismSepolia } from 'viem/chains'
 import { keccak256, toBytes, type Hex, type Address } from 'viem'
@@ -147,7 +148,7 @@ describe('/transfer-subnode validation', () => {
   it('zero address `to` → 400', async () => {
     const req = await buildTransferRequest(owner, { to: ZERO_ADDRESS })
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     expect(res.status).toBe(400)
     const json = await res.json() as any
     expect(json.error).toMatch(/zero address/i)
@@ -156,7 +157,7 @@ describe('/transfer-subnode validation', () => {
   it('self-transfer (to == from) → 400', async () => {
     const req = await buildTransferRequest(owner, { to: owner.address })
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     expect(res.status).toBe(400)
     const json = await res.json() as any
     expect(json.error).toMatch(/self/i)
@@ -166,7 +167,7 @@ describe('/transfer-subnode validation', () => {
     // skipSign=true so we sign with a valid node but send the invalid one in the body
     const req = await buildTransferRequest(owner, { node: '0xdeadbeef', skipSign: true })
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     expect(res.status).toBe(400)
     const json = await res.json() as any
     expect(json.error).toMatch(/node/i)
@@ -176,7 +177,7 @@ describe('/transfer-subnode validation', () => {
     const pastDeadline = BigInt(Math.floor(Date.now() / 1000) - 10)
     const req = await buildTransferRequest(owner, { deadline: pastDeadline })
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     expect(res.status).toBe(400)
     const json = await res.json() as any
     expect(json.error).toMatch(/deadline/i)
@@ -191,7 +192,7 @@ describe('/transfer-subnode validation', () => {
     // (this test focuses on the EIP-712 sig check, not the on-chain ownership check)
     mockReadContract.mockResolvedValue(owner.address)
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     // from=owner but signed by other → verifyTypedData returns false → 401
     expect(res.status).toBe(401)
     const json = await res.json() as any
@@ -203,7 +204,7 @@ describe('/transfer-subnode validation', () => {
     // readContract already defaults to owner.address — other is not the owner
     const req = await buildTransferRequest(other, { from: other.address })
     const worker = (await import('../../workers/api/src/index')).default
-    const res = await worker.fetch(req, makeEnv(), {} as ExecutionContext)
+    const res = await worker.fetch(req, makeEnv(), {} as unknown as TestExecutionContext)
     expect(res.status).toBe(403)
     const json = await res.json() as any
     expect(json.error).toMatch(/owner/i)
