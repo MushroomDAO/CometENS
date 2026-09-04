@@ -130,21 +130,69 @@ ENS1 dnsalias.ens.eth com base.eth                          # sub.example.com �
 
 ---
 
-## 3. 一条不能照搬的：免费子域的经济学
+## 3. 一条不能照搬的：为什么是按层拆，不是整体迁移
 
 **用户的原话是「把整个东西都迁到 V2 上」。这里必须先说一句不同意见，然后我按完整方案继续。**
 
-ENSv2 是**纯 L1**。文档写得很直白：
+> **本节结构在 PR#99 评审后重排过。** 初稿把 gas 账当主论据、架构理由当补充，
+> 而那笔账缺一个决定性变量（见 §3.2）。**现在主论据是架构，gas 是佐证** ——
+> 这样即使 L1 变便宜、或用户规模远低于预期，结论仍然成立。
+> 一个靠估算撑着的结论，会随估算一起晃。
 
-> "Even though ENSv2 is designed for multi-chain, **all resolution still starts on Ethereum Mainnet**."
+### 3.1 主论据：按层拆本来就是 ENSv2 自己指的形态（不依赖任何估算）
 
-CometENS 当初上 OP 的理由没有被 V2 消除：**我们发的是免费子域名**。把子域名注册搬到 L1 registry
-意味着**每注册一个子名一笔 L1 交易**。谁付？
+ENSv2 的核心分层是 **registry 管权限、registrar 管业务逻辑**
+（`tutorial-contract-developers.mdx`）：registrar 在 registry 的 `ROOT_RESOURCE` 上拿到
+`ROLE_REGISTRAR` + `ROLE_RENEW`，就能发子名；定价、可用性、限额全在 registrar 这一侧。
+
+**CometENS 的 L2 就是那个 registrar**，只不过跑在另一条链上，中间用 CCIP-Read 连。
+这不是我们绕过 V2 的一种妥协形态，**这是 V2 给 registrar 留的位置**。
+
+配合 1.5 引的那句：
+
+> "the roles that remain on `ROOT_RESOURCE` define how much subname owners must trust _you_."
+
+在按层拆的形态下，这句话**恰好可以当作我们对社区的公开承诺** ——
+社区看得见我们手上只有 `ROLE_REGISTRAR`，而 `ROLE_SET_RESOLVER` 在他们自己手里。
+整体迁到 L1 反而没有这个结构可讲。
+
+### 3.2 佐证：gas 账 —— 以及它缺的那个数
+
+**先说清楚这一步的依据，因为初稿在这里引错了。** F2 那句
+"all resolution still starts on Ethereum Mainnet" 讲的是 **resolution**，
+**它不蕴含「注册必须在 L1」** —— CCIP-Read 的全部意义正是解析入口在 L1、数据在别处，
+而我们的结论恰恰依赖那一点成立。初稿把注册成本挂在这句引文下面，读起来像已被证明，实际没有。
+
+**「注册在 L1」的真实依据是另外两条**：
+
+1. ENSv2 的 registry 是 L1 合约 —— 目前公开的部署**只有 Sepolia**
+   （`docs/reference/ensv2-deployments-sepolia.md`，33 个合约，chainId 11155111），
+   没有任何 L2 部署。
+2. 上游文档通篇**没有 L2 registry** 这个东西（§7 未决 4）；对 L2 的说法只有
+   "improved support for existing L2 solutions" —— 也就是**通过 CCIP-Read 委派，正是我们在做的事**。
+
+在此基础上：把子名注册搬到 V2 registry = **每注册一个子名一笔 L1 交易**。谁付？
 
 - 用户付 → 不再免费，产品定位没了
-- 我们付 → 每个用户一笔 L1 gas，`launch.mushroom.cv` 的整个冷启动预算是 $135,800，扛不住
+- 我们付 → 成本是子名数量 N 的函数
 
-所以正确的形态**不是**「整体迁到 V2」，而是**按层拆**：
+**而这份文档给不出 N。** 我全文找过：预期子名规模没有记录，每名 L1 gas 也没有实测。
+所以下表是**敏感度，不是结论**（假设：register ≈ 50k gas、10 gwei、ETH $3,000 ⇒ ≈ $1.5/名；
+三个数都会变，V2 的 `register()` 实际 gas 我们没测过）：
+
+| 子名数 N | ≈ L1 成本 | 占冷启动预算 $135,800 |
+|---|---|---|
+| 10,000 | $15,000 | 11% —— 扛得住 |
+| 50,000 | $75,000 | 55% —— 很痛，但不致命 |
+| 100,000 | $150,000 | **110% —— 超过全部预算** |
+
+**如实标注：我不知道 `launch.mushroom.cv` 的预期规模，所以我无法判断「扛不住」是真是假。**
+我能确立的只有一件事：**这一段在拿到 N 之前不能证明它自己的结论**。那个数只有维护者有。
+
+**这不影响 §3.1。** 架构论据不依赖 N —— 即使 N 小到 gas 完全无所谓，
+registry/registrar 分层仍然是 V2 给我们留的位置。gas 只决定这件事有多急，不决定方向。
+
+### 3.3 结论形态
 
 ```
 L1 (Ethereum) —— ENSv2 registry + EAC
@@ -157,11 +205,6 @@ L2 (Optimism) —— L2Records + Gateway
     数据层：子域名记录、免费注册
     数量级：每个用户若干笔，持续
 ```
-
-**这个拆法不是妥协，它正好是 ENSv2 文档自己指的方向** —— registry/registrar 分层那一节说的就是
-「registry 管权限，registrar 管业务逻辑」；我们的 L2 就是那个 registrar，只不过跑在另一条链上，
-中间用 CCIP-Read 连。第 1 节 1.5 引的那句「ROOT_RESOURCE 上剩下的 role 决定子名持有者要多信任你」
-在这个形态下**恰好可以当作我们对社区的公开承诺**。
 
 ---
 
@@ -261,7 +304,8 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
 |---|---|---|
 | P1 | **子域名 NFT 换到 ERC1155Singleton 吗？** 换 = 跟 V2 一致 + 抢跑保护；不换 = tokenId 稳定，已发出去的 NFT 不失效 | 这是对已有持有者的兼容性承诺，是产品决策 |
 | P2 | **v0.9.0 是否等 ENSv2 主网？** 文档明写接口未定稿、无上线日期 | 押上线时间是商业判断 |
-| P3 | **§3 的「按层拆」你接受吗？** 你说的是「整体迁到 V2」，我给的是「治理上 L1、数据留 L2」 | 我给了理由（免费子域的 gas 经济学），但推翻它是你的权力 |
+| P3 | **§3 的「按层拆」你接受吗？** 你说的是「整体迁到 V2」，我给的是「治理上 L1、数据留 L2」 | 主论据是架构（§3.1，不依赖估算）；gas 只是佐证 |
+| P4 | **`launch.mushroom.cv` 的预期子名规模 N 是多少？** | §3.2 的敏感度表在 N=10k 和 N=100k 之间从「11% 预算」翻到「超预算」。**这个数只有你有**，没有它那一段证明不了自己的结论 |
 
 ---
 
@@ -293,4 +337,8 @@ CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS reso
 **不用迁也能活（CCIP-Read 不变），但迁了能少维护六件事，其中一件是 M1 至今验收不掉的 B2。**
 
 迁移的正确形态是**按层拆**：L1 用 ENSv2 的 EAC 管治理与委托，L2 保留免费子域记录，
-中间的 CCIP-Read 一行不改。整体搬到 L1 会让「免费子域名」这个产品定位不成立。
+中间的 CCIP-Read 一行不改。
+
+**这个判断的依据是架构，不是成本**：registry 管权限、registrar 管业务逻辑是 V2 自己的分层，
+我们的 L2 就是那个 registrar（§3.1）。gas 账（§3.2）只说明这件事有多急，
+而且**它在拿到预期规模 N 之前证明不了自己**——那个数在 §6 列为 P4，等你给。
