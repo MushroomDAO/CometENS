@@ -28,7 +28,7 @@
 - [x] FU-6 · B · src=T1.6.1 · 2026-09-04 · 所有写端点(/register /set-addr /set-text /set-contenthash /add-registrar /remove-registrar /transfer-subnode)都用裸 verifyTypedData + if(!ok) throw 401 的模式,而畸形签名会让 viem 抛异常、绕过那行 → 返回 500 而不是 401。把签名判断说成服务端故障。**已完成(2026-09-04)**:九处全部收编到 requireValidSignature 单一入口,端点清单从源码推导。**判据(pr-daemon 给的,比「逐个加 try/catch」强)**:给每个写端点各喂一个畸形签名,断言拿到 401 而不是 5xx —— 前者能证明覆盖完整,后者只能证明改过
 - [x] FU-7 · C · src=T1.6.2 · 2026-09-04 · /apply 与 /approval-mode 在线上 testnet API worker 上是 404(实测),即前端可以先于 worker 上线。已在前端 fail-closed(canSubmit),但**部署顺序本身没有任何机械约束** —— **已完成(2026-09-04)**:新增 pnpm check:deploy-order —— 从前端源码推导所需端点、逐个探活,三态(存在/缺失/查不了)且带必然不存在路径的自检对照。实跑当场抓出线上缺的那 4 个
 - [x] FU-8 · B · src=T1.6.3-nit · 2026-09-04 · **仓库没有 DOM 测试环境**(`vitest.config.ts` 是 `environment: 'node'`,jsdom/happy-dom 都没装),所以 `renderQueue`、`OpPanel`、`lookup` 的**所有 DOM 接线都没有守卫** —— 只有被抽出来的纯逻辑有。这次想验的「每张卡片带自己的理由」正是纯 DOM 性质,自己写 stub 等于测 stub。加 happy-dom 是对的方向,但 worktree 的 `node_modules` 是指向主 checkout 的**符号链接**,在 worktree 里装会改动所有 checkout 共享的安装状态 —— 要在主 checkout 上做,并单独一个 PR。**2026-09-04 部分完成**:按 pr-daemon 的建议改为瞄准会破坏那条性质的重构形状(断言 admin.html 无 id 含 reason + admin-queue.ts 用 createElement 而非 byId),见 test/unit/admin-reason-scope.test.ts。DOM 环境本身仍未装
-- [ ] FU-9 · B · src=PR#73 · 2026-09-04 · **我合并了一个没被正式 APPROVE 的 sha。**
+- [x] FU-9 · B · src=PR#73 · 2026-09-04 · **已完成(2026-09-04,PR#75)**:新增 `scripts/check-approval-sha.mjs` + 10 格单测(三格对照),写进 practices.md〈合并前协议〉。实跑三个真实 PR:#74 无 review 时拒 · #73 已合并放行不拦 · #62 通过。**第一次真实使用就是用在 #74 自己身上:`approved at b31d05e` == head,核对后才合。** 原文:**我合并了一个没被正式 APPROVE 的 sha。**
   评审的 APPROVE 落在 `39c49cf`,我合进 preview 的是 `e7c5393`,差三个文件。
   我读的是 `gh pr view --json reviewDecision` 返回的 `APPROVED` —— **那是仓库级摘要,
   不带 sha**,把它读成"这个 sha 已通过"是把作用域比问题小的证据当成了答案(取证规程)。
@@ -40,3 +40,11 @@
   比对最后一条 APPROVE 的 commit 与当前 head,
   不一致就退出非零;合并前跑它。放在本仓库,不动 pilot 的 git-guard(那是 skill 的文件)。
   (评审说他自己在 #62 上反复提醒的正是这条,这次轮到他撞上 —— 所以更该做成机械检查。)
+- [ ] FU-10 · B · src=PR#74 · 2026-09-04 · **`docs/DELEGATED-HOSTING.md` 那份"运营方技术上能做什么"的枚举里,「日志」出现 0 次。**
+  #74 把证明模式的失败原因从"丢掉"改成了"写进 worker 日志",方向对(不进响应体,#30 就是从那儿漏的),
+  但评审指出委托托管下「运营方」有歧义:**worker 日志落在 host 的账户里,而 host ≠ 委托方**。
+  于是三方是:调用方拿通用错误 · host 拿完整原因 · **委托方什么都没有 —— 而他才是在排查自己解析的人**。
+  不是缺陷(泄露必须先堵),但它给信任面加了一条,而那份文档整个设计就是枚举这类能力。
+  做法:在 DELEGATED-HOSTING.md 的枚举里加一行。
+  若委托方确实需要原因:响应体带**不透明 id**、日志写 id + 原因 —— 委托方拿到的是可向 host 引用的凭据
+  而非原因本身,代价一行,**且把"要不要给你看"从技术问题变回运营问题**。
