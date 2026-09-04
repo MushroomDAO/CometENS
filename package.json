@@ -15,6 +15,7 @@
     "check:skipped": "node scripts/check-skipped.mjs",
     "delegate": "node scripts/delegate.mjs",
     "dev": "vite",
+    "docs:ens": "bash scripts/sync-ens-docs.sh",
     "preflight": "node scripts/preflight.mjs",
     "preview": "vite preview",
     "rotate:gateway-signer": "node scripts/rotate-gateway-signer.mjs",
