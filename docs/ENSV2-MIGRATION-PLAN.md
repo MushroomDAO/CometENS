@@ -200,10 +200,34 @@ L2 (Optimism) —— L2Records + Gateway
 | T4.1.0 | 建立本地文档镜像 + 同步脚本（`pnpm docs:ens`），把我们依赖的上游事实摘进 `docs/reference/ENSV2-UPSTREAM.md` | ✅ **本 PR 已完成** |
 | T4.1.1 | 在 Sepolia 上跑通 ENSv2：部署一个 PermissionedRegistry，注册一个子名，`grantRoles` / `revokeRoles` 各跑一次并留下 tx hash | 地址表已就位（`docs/reference/ensv2-deployments-sepolia.md`，`contracts-v2@97a5729`，部署于 2026-07-30） |
 | T4.1.2 | 把 `resolve()` 的回归测试指向 UniversalResolverV2，并加 `test.offchaindemo.eth` / `ur.integration-tests.eth` 两条外部基线 | 无 |
-| T4.1.3 | 审计前端与 SDK 里所有 `.eth` 硬编码判断 —— 文档点名这是最常见的坑（DNS 名字会被漏掉） | 无 |
-| T4.1.4 | 审计所有写路径：**禁止硬编码 resolver 地址**，改成写前现查（文档原话："not even one you deployed"） | 无 |
+| T4.1.3 | 放开 `bootstrap-community.mjs` / `delegate.mjs` 的 `.eth` 专用校验 —— **前置于 M3 与 DNS 名字，不是当前 bug**（见下） | M3 或 V2 DNS 落地时才必须 |
+| T4.1.4 | 写路径 resolver 地址：**当前不适用**（见下），等 M4.2 引入 EAC 写路径时一并立规矩 | M4.2 |
 
-**T4.1.3 / T4.1.4 与 ENSv2 是否上线无关，现在就该做。** 它们是当前代码里的真实缺陷，V2 只是让它们变致命。
+#### T4.1.3 / T4.1.4 的实际审计结果（2026-09-04 实跑，**修正本文档初稿的说法**）
+
+初稿在这里写的是「它们是当前代码里的真实缺陷」。**跑完审计发现这句说过头了，两条都不是当前缺陷。**
+如实记在原地，因为一份夸大风险的方案会让下一个人在错的地方花时间：
+
+**T4.1.3 —— 是限制，不是 bug。** 只有两处硬编码 `.eth`：
+
+```
+scripts/bootstrap-community.mjs:65   /^([a-z0-9-]+\.)+eth$/  → 拒绝非 .eth 根域
+scripts/delegate.mjs:117             同上
+```
+
+但**当前配置的每个根域名都是 `.eth`**（`workers/api/wrangler.toml`：
+`aastar.eth,forest.aastar.eth,game.aastar.eth`），而 `.box` 走的是 `src/main.ts` 里
+另一条等官方接口的独立流程，**根本不经过这两个脚本**。所以今天没有任何用户会撞上它。
+
+它会在两件事之一发生时变成真 bug：M3 的 `mushroom.cv` 落地，或 V2 的 DNS 名字进来。
+**在那之前它是个待办，不是欠债。**（`Brood/orgs/mycelium/INTERFACES.md` 里那句
+「多根域名支持：.box, .cv, .zparty.eth」相对这两个脚本是**超前声明** —— 那份文件在
+Brood 仓库，不归本 PR 改，但值得下次同步时对齐。）
+
+**T4.1.4 —— 当前不适用。** F8 警告的是「通过 resolver 写记录」这条路径。
+CometENS 的写路径是 `API worker → L2Records`，**不经过任何 ENS resolver**；
+`src/config.ts:47` 的 `l1ResolverAddress` 只用于读侧解析。
+真正需要立这条规矩的时刻是 M4.2 引入 EAC 写路径的时候，那时再立。
 
 ### M4.2 — 治理层迁到 EAC（本次迁移的核心价值）
 
