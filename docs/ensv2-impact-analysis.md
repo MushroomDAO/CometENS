@@ -2,6 +2,14 @@
 
 *April 2026 — Technical Roadmap Note*
 
+> ⚠️ **Partially superseded (2026-09-04).** Sections 2 and 4 (CCIP-Read and unruggable
+> gateways are unaffected) still hold and were re-confirmed against the published ENSv2 docs.
+> **Section "(b) What we need to update: Nothing immediately" is the part that aged.** It
+> answered "will V2 break us?" but never "how much of what we are hand-building does V2 ship
+> natively?" — the answer is nine things, one of which is the root cause of acceptance item
+> **B2 (verifiable revocation), unverifiable since M1**.
+> See [ENSV2-MIGRATION-PLAN.md](./ENSV2-MIGRATION-PLAN.md).
+
 ---
 
 ## 1. The ENS V2 Pivot: What Changed
