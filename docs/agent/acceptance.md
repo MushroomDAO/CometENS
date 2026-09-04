@@ -69,11 +69,29 @@ CometENS 是**大系统里的一个组件**,不承担用户账号体系。目标
 3. 无论哪条路径,名字**真归 jack**:`subnodeOwner(node)` 是他的地址,他能把 NFT 转走。
 4. 任何人(不登录)都能在公开查询页输入名字,看到它解析到哪个地址。
 
-⚠️ **与当前代码的差距(必须先拍板)**:仓库里 `register.html` + `src/register.ts` 是一条
-**已上线、且从首页 `index.html:32` 直接链接**的自助注册流(连钱包即可自己申领),
-`workers/api/src/index.ts:569` 的注释写着 "Self-service model: any wallet can register
-their own subdomain."。这与"用户不注册、只被授予"的定位直接冲突。
-处置方式需要用户决定,见 tasks.md TB.4 —— 在拍板前,本文件不把"jack 不注册"当成既成事实。
+✅ **那个冲突已经解决(2026-09-04 复核)。** 下面保留原文,因为它记录的是一次真实的
+定位冲突 —— 抹掉它会让下一个读到 `register.html` 的人重新怀疑一遍。
+
+> ⚠️ ~~**与当前代码的差距(必须先拍板)**:仓库里 `register.html` + `src/register.ts` 是一条
+> **已上线、且从首页 `index.html:32` 直接链接**的自助注册流(连钱包即可自己申领),
+> `workers/api/src/index.ts:569` 的注释写着 "Self-service model: any wallet can register
+> their own subdomain."。这与"用户不注册、只被授予"的定位直接冲突。
+> 处置方式需要用户决定,见 tasks.md TB.4 —— 在拍板前,本文件不把"jack 不注册"当成既成事实。~~
+
+**TB.4 已于 2026-09-03 拍板**(改造成「申请 → 审批 → 授予」,审批模式可配置),
+T1.6.1 / T1.6.2(#38)/ T1.6.3 均已合并。逐条实核:
+
+| 原文断言 | 2026-09-04 实测 |
+|---|---|
+| worker 注释写着 "Self-service model" | **0 处** —— 已不存在 |
+| `register.ts` 是自助申领 | 打到 **`/apply`**(另有 `/approval-mode`、`/check-label` 等只读端点) |
+| 首页 `index.html:32` 直链 register.html | **0 处** —— 首页已不链它 |
+| 审批端点不存在 | worker 里有 `/apply` `/approve` `/applications` `/approval-mode` |
+
+**⚠️ 但「已实现」不等于「已上线」。** 这四个端点**是否部署到线上那台 testnet API worker**
+是另一个问题,`pnpm check:deploy-order` 会当场告诉你 —— 上一次跑的结果是**线上缺这四个**。
+验收判据针对的是仓库,不是那台 worker;把它们混在一起读,会得到"用户现在就能申请"这个
+错误结论。
 
 ## 界面验收(用户 2026-09 明确要求)
 
