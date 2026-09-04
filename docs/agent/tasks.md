@@ -393,7 +393,7 @@
 
 ---
 
-### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/  `DONE` (PR#73)
+### T1.7.1 把 typecheck 覆盖到 test/ server/ sdk/  `DONE (PR #73)`
 - **优先级**:mid
 - **来源**:由 FU-5 提升(§2.5:"某条其实是真 feature/bug 规模的 → 提升为正常 task")。
   做 FU-5 时发现剩余工作量不是一次收尾能完成的,而且它**已经藏过一个生产 bug**
@@ -449,7 +449,7 @@
   受影响:`sdk/CometENS.ts:71`、`server/gateway/index.ts:60`、
   `test/e2e/{register-multi-root,transfer-subnode}.test.ts`、`test/integration/deployed.test.ts`(×4)
 
-### T1.7.2 把 typecheck 覆盖到 gateway worker  `PR_OPEN` (PR#74)
+### T1.7.2 把 typecheck 覆盖到 gateway worker  `PR_OPEN (PR #74)`
 - **优先级**:mid(**高于它看起来的样子** —— 七端点 500 那个生产 bug 就长在这个目录)
 - **来源**:由 T1.7.1 拆出(pr-daemon 在 #73 指出标题与验收命令范围不一致)。
 - ⚠️ **这条标题我改过一次**。原本叫「覆盖到 `workers/`」——**而实测下来 `workers/` 里
