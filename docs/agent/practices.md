@@ -73,9 +73,20 @@
   评审当晚在 #62 上撞到的正是这个读数(`Test Files 1 failed | 40 passed` +
   `694 passed | 13 skipped (707)`),**而按我第一版的措辞,他会把一次真实失败判成"前置条件"**。
 
-  规范形态:**`Test Files 通过/失败` + `passed | skipped (total)` 一起给**。
-  能从中读出的只有:**`total` 没变而 `passed` 降,说明那批没跑 —— 不说明为什么。**
-  为什么在 `Test Files` 那一行,不在这三个数里。
+  **同一句话在另一个方向上也说反过**,第二个探针(评审造,我复现):
+
+      // 一条断言真的失败
+      PROBE_BAD=0 → Test Files 1 passed    Tests 2 passed (2)
+      PROBE_BAD=1 → Test Files 1 failed    Tests 1 failed | 1 passed (2)
+                                                 ↑ total 没变、passed 降,而它跑了,还失败了
+
+  我第二版写的是「说明**那批没跑**」——「没跑」本身就是在说**为什么**。
+  `passed` 下降有**三种**来源:**被跳过 / 文件级失败 / 真失败**,而后一种是跑了的。
+
+  规范形态:**直接抄 vitest 那两行原文**(`Test Files …` 与 `Tests …`)——
+  有失败时它本来就会打 `failed`,不需要我再转述。
+  而从 `total` 与 `passed` 本身能读出的,只有一句:
+  **那批不再计入 `passed`。** 是哪一种,看 `Test Files` 和 `failed`。
 - **原来没有 `git fetch`**。没 fetch 的 rebase 用的是可能已落后的本地跟踪引用 ——
   正是本协议要防的错误,发生在上一层。
 
