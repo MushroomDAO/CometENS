@@ -77,8 +77,22 @@ describe('no PR_OPEN task points at an already-merged PR', () => {
 
   // Without this the assertion above passes on an empty log, a broken regex, or a set that is
   // simply never populated — and would keep passing forever.
+  //
+  // NOT hypothetical: this fired on the first CI run of the PR that added it. GitHub's default
+  // checkout is shallow (one commit), so the set was empty, and the main assertion above went
+  // GREEN because "no stale entry" is vacuously true when nothing is known to be merged. The
+  // fix is `fetch-depth: 0` in .github/workflows/test.yml; the message below names it, because
+  // a bare "expected 0 to be greater than 5" sends the reader to the wrong file.
   it('the merged-PR set is actually populated (control)', () => {
-    expect(merged.size).toBeGreaterThan(5)
+    const shallow =
+      execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: ROOT, encoding: 'utf8' }).trim() ===
+      'true'
+    expect(
+      merged.size,
+      shallow
+        ? 'shallow clone — commit subjects are not visible, so this guard is inert. Set fetch-depth: 0 on actions/checkout.'
+        : 'no `(#n)` found in the last 400 commit subjects — the squash-merge convention changed, or the regex broke.',
+    ).toBeGreaterThan(5)
   })
 
   it('an OPEN pr number is absent from the set (control)', () => {

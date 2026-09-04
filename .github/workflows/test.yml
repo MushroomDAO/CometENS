@@ -30,6 +30,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, because test/unit/task-ledger.test.ts reads merged PR numbers out of
+          # commit subjects (`… (#74)`). The default shallow checkout gives it ONE commit, the
+          # set comes back empty, and its main assertion — "no PR_OPEN entry cites a merged PR"
+          # — passes vacuously. It did exactly that on this PR's first CI run: green main
+          # assertion, and only the two controls red. That is the whole reason those controls
+          # exist, and the first time either has fired anywhere but a deliberate mutation.
+          fetch-depth: 0
 
       # Two of contracts/lib/* ARE submodules and the contracts import them:
       #
