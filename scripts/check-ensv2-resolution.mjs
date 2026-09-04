@@ -82,7 +82,13 @@ const UR_ABI = parseAbi(['function resolve(bytes name, bytes data) view returns 
 const calldata = encodeFunctionData({ abi: ADDR_ABI, functionName: 'addr', args: [namehash(NAME)] })
 const dnsName = dnsEncode(NAME)
 
-const result = { name: NAME, urv2: URV2, offchainLookup: false, followed: false, resolver: null, value: null }
+// failureMode 把两种「offchainLookup=false」分开 —— 它们的 exit code 和文案本来一样,
+// 而含义天差地别(见文件末尾 FAIL 分支)。这正是本脚本注释里那个坑的同族:
+// **值**那一层我用 ccipRead:false 拆开了「协议断了」和「记录是空的」,
+// 但**失败**那一层原来又把两种合上了 —— 读输出的人分得开,读 exit code 的 CI 分不开。
+//   'answered-directly' = 没 revert,URv2 当场给了答案 → 我们的离线路径没被使用(配置问题)
+//   'other-revert'      = revert 了,但不是 OffchainLookup → 有东西真的坏了
+const result = { name: NAME, urv2: URV2, offchainLookup: false, followed: false, resolver: null, value: null, failureMode: null }
 
 // ── 1. ccipRead 关闭:必须看到 OffchainLookup ─────────────────────────────────
 const noCcip = createPublicClient({ chain: sepolia, transport: http(RPC), ccipRead: false })
@@ -90,9 +96,20 @@ try {
   await noCcip.readContract({ address: URV2, abi: UR_ABI, functionName: 'resolve', args: [dnsName, calldata] })
   // 没 revert = URv2 当场就有答案 = 它**没有**走我们的离线路径。
   result.offchainLookup = false
+  result.failureMode = 'answered-directly'
 } catch (e) {
   result.offchainLookup = String(e).includes(OFFCHAIN_LOOKUP_SELECTOR)
-  if (!result.offchainLookup) result.error = String(e.shortMessage ?? e.message ?? e).split('\n')[0].slice(0, 200)
+  if (!result.offchainLookup) {
+    result.failureMode = 'other-revert'
+    // shortMessage 常常是「reverted with the following signature:」这种半句,
+    // 而**下一个人真正需要的是那个 selector** —— 拿它去 4byte 一查就知道是什么错。
+    // 只打半句等于把他送回来重跑一遍脚本。
+    const raw = String(e)
+    const sel = raw.match(/reverted with the following signature:\s*(0x[0-9a-fA-F]{8})/)?.[1]
+              ?? raw.match(/0x[0-9a-fA-F]{8}/)?.[0]
+    result.error = [String(e.shortMessage ?? e.message ?? e).split('\n')[0].slice(0, 120),
+                    sel ? `selector=${sel}` : null].filter(Boolean).join('  ')
+  }
 }
 
 // ── 2. ccipRead 打开:应当跟到网关并返回 ──────────────────────────────────────
@@ -125,8 +142,22 @@ if (asJson) {
 // 判据只有两条,都必须为真。返回值是不是零地址**不是**判据:
 // 那取决于该名字有没有设记录,是数据问题,不是协议问题。
 if (!result.offchainLookup || !result.followed) {
-  console.error('\nENSV2_CHECK: FAIL — ENSv2 的 UniversalResolverV2 没有走通我们的 CCIP-Read 路径。')
-  console.error('这会推翻 docs/ENSV2-MIGRATION-PLAN.md §2「不变的部分」的第一条,进而推翻整个迁移方案的可行性前提。')
+  console.error('\nENSV2_CHECK: FAIL')
+  // 三种失败,该查的地方完全不同 —— 只打一句通用文案等于把分诊工作推给下一个人。
+  if (result.failureMode === 'answered-directly') {
+    console.error('  原因:URv2 直接作答,没有触发 OffchainLookup —— 我们的离线路径根本没被使用。')
+    console.error('  先查配置,不是查代码:这个名字在 ENS 上的 resolver 是不是还指向我们的 OffchainResolver?')
+    console.error(`  (对照:\`--name vitalik.eth\` 这类纯链上名字本来就会走到这里,它不是故障。)`)
+  } else if (result.failureMode === 'other-revert') {
+    console.error(`  原因:URv2 以非 OffchainLookup 的错误 revert —— 有东西真的坏了。`)
+    console.error(`  revert: ${result.error}`)
+  } else if (!result.followed) {
+    console.error('  原因:OffchainLookup 触发了,但跟随失败 —— 链路前半段是好的,断在网关那一跳。')
+    console.error(`  error: ${result.followError}`)
+    console.error('  先查网关是否在线、URL 是否可达,再查 L1 合约。')
+  }
+  console.error('\n  前两种会推翻 docs/ENSV2-MIGRATION-PLAN.md §2「不变的部分」第一条,')
+  console.error('  进而推翻整个迁移方案的可行性前提;第三种是我们自己这侧的运维问题,不影响那条断言。')
   process.exit(1)
 }
 console.log('\nENSV2_CHECK: ok — CCIP-Read 在 ENSv2 的 UniversalResolverV2 下按原样工作。')
