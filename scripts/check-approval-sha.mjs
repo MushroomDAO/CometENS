@@ -165,9 +165,9 @@ const indent = (t) => t.split('\n').map((l) => `  ${l}`).join('\n')
  *
  * Returning lines instead of printing them puts the branch inside the tests' reach.
  */
-export function mismatchReport(v, base) {
+export function mismatchReport(v, base, cwd = process.cwd()) {
   const lines = ['', 'Ask the reviewer to re-approve at the current head, or merge the approved commit.']
-  for (const sha of ownCommits(v.approved, v.head, base)?.shas ?? []) lines.push(`  ${sha}`)
+  for (const sha of ownCommits(v.approved, v.head, base, cwd)?.shas ?? []) lines.push(`  ${sha}`)
   return lines
 }
 

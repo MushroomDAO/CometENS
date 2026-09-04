@@ -95,7 +95,7 @@ import { tmpdir } from 'node:os'
 import { join as pjoin } from 'node:path'
 import { execFileSync } from 'node:child_process'
 // @ts-expect-error — plain .mjs script, no type declarations.
-import { ownCommits } from '../../scripts/check-approval-sha.mjs'
+import { ownCommits, mismatchReport } from '../../scripts/check-approval-sha.mjs'
 
 describe('ownCommits — nothing reachable from base counts as this branch', () => {
   let repo: string
@@ -168,6 +168,23 @@ describe('ownCommits — nothing reachable from base counts as this branch', () 
     expect(r.exact).toBe(false)
     expect(r.shas).toContain(baseTip) // over-reports, which is why exact:false must be surfaced
   })
+
+  // THE ASSERTION THIS PR ACTUALLY NEEDS. The three around it all use synthetic shas against
+  // 'no-such-base', where `ownCommits` returns null and the loop yields nothing — so a correct
+  // implementation and one with the sha loop DELETED give the same answer. The reviewer
+  // measured it: removing the loop entirely left all of them green.
+  //
+  // Which is the rule I wrote in #84, applied to me: a control only has force in the direction
+  // you built it for. The earlier mutation (restore the bad binding) was real, and it covered
+  // exactly one direction — the ReferenceError.
+  //
+  // So this one drives the real git fixture the file already builds, where the range is
+  // genuinely non-empty.
+  it('lists the branch\'s own commits — the whole point of the change', () => {
+    const lines = mismatchReport({ approved, head }, 'main', repo)
+    expect(lines.some((l: string) => l.includes(head))).toBe(true)
+  })
+
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
