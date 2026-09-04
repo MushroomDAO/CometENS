@@ -169,7 +169,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # version 必填 —— package.json 里没有 `packageManager` 字段,
+      # 不给版本这一步直接报 "No pnpm version is specified"。
+      # 上面的 `test` job 也是这么钉的,两处要一起改。
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
