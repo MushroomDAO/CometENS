@@ -91,6 +91,19 @@ const short = (s) => (typeof s === 'string' ? s.slice(0, 7) : String(s))
  * the first version did, tests the state of that afternoon; this tests the property.
  */
 export function ownCommits(approved, head, base, cwd = process.cwd()) {
+  // ⚠️ TO WHOEVER MUTATION-TESTS THIS: there are TWO nearly identical `--no-merges` calls
+  // below. The first is the main path and carries `^${base}`; the second is the fallback and
+  // legitimately does not. A naive "delete the `^base` line" anchor matches the SECOND one,
+  // which changes nothing that matters — and the suite comes back FULLY GREEN, whose meaning
+  // is the exact opposite of the truth: it reads as "the exclusion is not load-bearing".
+  //
+  // This is not hypothetical. The reviewer hit it on the first attempt and nearly recorded
+  // "deleting ^base breaks nothing"; they caught it only because they printed the diff of what
+  // they had actually changed before reading the result.
+  //
+  // So: anchor on a string containing `^${base}` and assert it matches exactly once. Correct
+  // mutation → `reports only the branch's own new commit` and `reports NOTHING that is
+  // reachable from base` both fail, and the other 12 stay green.
   for (const args of [
     ['log', '--format=%H', '--no-merges', `${approved}..${head}`, `^${base}`],
     ['log', '--format=%H', '--no-merges', `${approved}..${head}`],
