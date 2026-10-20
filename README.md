@@ -7,6 +7,8 @@
 
 > ⚠️ **当前仅测试网**(OP Sepolia + Ethereum Sepolia)。主网未上线。
 
+> **2026-10 Goal 计划**：[业务目标原文](docs/goal/VISION.md) · [技术架构与安全边界](docs/goal/ARCHITECTURE.md) · [G0–G7 里程碑及验收标准](docs/goal/MILESTONES.md) · [验收状态](docs/goal/STATUS.md)。这是新业务目标的执行计划；原有 `docs/agent/roadmap.md` 保留历史记录。
+
 [English](#english) · [自部署指南](docs/SELF-HOSTING.md) · [上游 API](docs/UPSTREAM-API.md) · [委托托管](docs/DELEGATED-HOSTING.md)
 
 ---
