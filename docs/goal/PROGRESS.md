@@ -41,6 +41,12 @@
 结果：仅提交 G0 架构、图和里程碑文档，无 SDK/合约业务实现、无链上交易。本批次接受标准仍须用户审阅后明确给出 G0 ACCEPTED；未获得前不可开始 G1。
 下一步：提交/推送本批文档至 PR #110，检查 CI/Review；如安全模型获用户确认再解除 G1 阻塞。
 
+### 2026-10-20 · G0 文档修订首次提交与推送
+
+已完成 Git commit **f30816ea8e851678279ea54add77f2738eae3a6e**，提交说明为 docs(goal): define AAStar hosted profiles and verifiable ENS handoff；origin/goal/g0-community-ens-plan 已成功推送，远端 refs/heads/goal/g0-community-ens-plan 指向该 SHA。GitHub PR #110 API 确认 head 已同步、状态 OPEN、mergeable=true，但因 review requirement 仍 blocked。按 2026-10-20 清迈时间约 15:15 的实时检查，新 head cla-check PASS、test PENDING；检查结果是当时快照，后续应重新读取 CI 实时状态。
+
+该提交记录的是 G0 的设计修订。继续等待**用户明确 G0 验收**才可实现 G1；GitHub PR 合并与用户业务验收是两种独立动作。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
