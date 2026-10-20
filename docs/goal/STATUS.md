@@ -5,7 +5,7 @@
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
 | **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确确认；[PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 仍待 GitHub review） | G1 可启动；G0 PR 需单独按合并规则收口 |
-| G1 独立 SDK | `IN_PROGRESS`（2026-10-20） | SDK/安全修复、独立消费测试、PR 与用户验收 |
+| G1 独立 SDK | `READY_FOR_ACCEPTANCE`（2026-10-20；PR 提交中） | 需 GitHub CI/review 和用户 G1 验收；此前不得进入 G2 |
 | G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
 | G4 开源自部署、demo、UI 安全 | `BLOCKED` | G3 被用户验收 |
@@ -16,6 +16,19 @@
 ## G0 2026-10-20 复审
 
 用户提出新的产品/安全约束，属于 G0 修改意见，**尚非 G0 验收通过**。新增 [SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)（默认托管/自部署、NameWrapper/v2、两阶段交权、保障等级、续费基金和证明方案），[PROGRESS.md](PROGRESS.md) 记录每一步和恢复点。
+
+## G1 交付清单（用户验收前）
+
+- [x] 可打包 @cometens/sdk 0.1.0（只生成产物、未正式 npm 发布）
+- [x] API/gateway fail-closed 加固与独立安全 review
+- [x] AAStar testnet profile、自部署 network profile、服务端 API-key 客户端与 EIP-712 全签名数据协议
+- [x] 独立 Vanilla TS Demo 与包消费测试
+- [x] 集成 Node22 root typecheck、41 文件/766 unit tests、root+SDK+demo build、Foundry、secret scan/diff-check PASS
+- [x] OP Sepolia live check:chain 及 SDK real read；记录 L2 与 L1 ENS 结果可不同，不将其等同
+- [ ] GitHub G1 PR 完成及 CI/review 通过
+- [ ] 用户明确 G1 验收（完成后才进入 G2）
+
+验收证据与例外见 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)，[PROGRESS.md](PROGRESS.md)。
 
 ## G0 交付清单
 

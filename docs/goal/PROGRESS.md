@@ -65,6 +65,20 @@ worker-1 独立工作树 goal/g1-api 交付并推送 9f6ba66a92fede8df7eb9cf79c3
 
 **集成复验**：Node22 pnpm typecheck PASS；Node22+Foundry pnpm vitest run test/unit/，39 test files / 743 tests PASS。当前 Worker KV 的 get/put 仍非原子，不能证明并发 nonce 只成功一次；G2 需链上/强一致机制。生产示例 wrangler 配置中 ALLOWED_SENDERS 可能未启用，现在缺少配置的 gateway 明确拒绝请求；部署前必须填写真实 resolver 地址，详见 docs/SDK-INTEGRATION.md。
 
+### 2026-10-20 · G1 SDK + API 初次集成复验、线上只读探针
+
+SDK worker 首次提交 70599ab（独立包、配置、EIP712、读写和单测），普通合并到 goal/g1-integration，merge commit b899d08。当前集成根项目 Node22 typecheck、Vite build、41 test files / 754 Vitest tests、Foundry forge test -q、SDK standalone build 均 PASS。examples/sdk-vanilla 独立 pnpm install/typecheck/build PASS；dist-secrets scanner PASS。SDK worker正在处理独立安全 review 后续修复，故以上为初始合并快照，不能代替最终复验。
+
+真实测试网读取（无交易）：OP Sepolia chainId 11155420、SDK profile 双链/字节码验证通过；直接 L2Records 上 aastar.eth 有 ETH 地址 0xb5600060e6de5E11D3636731964218E53caadf0E，而 getEnsAddress(aastar.eth) 的标准 Ethereum Sepolia ENS 查询为 null。此差异不能伪装为一致性证明，说明 L1 resolver 指针与 OP 记录的完整端到端验证仍需补齐。详细回执在 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)。
+
+### 2026-10-20 · G1 SDK 复审收尾与最终集成验证
+
+worker-2 分支 goal/g1-sdk 提交并推送 70599ab、6034814、c580f1f（最终 c580f1fbcae6104fd1d4f0119134392cb5642edf），基于 8652eb8，含 ESM/types、可配置 profile、6 种 EIP-712 API 和 server-only 密钥、codehash 可选校验、60 秒复查/写前再验、HTTP 错误语义及 RPC 脱敏。独立安全审核 worker-1 检查了签名 schema parity 与威胁路径。SDK 修改普通合并至集成分支（b899d08 初合并，4c59c20 安全修复合并）。SDK external package tarball ESM+types 消费测试由 worker 通过；SDK 构建和独立 Vanilla demo 由 Prime 再次验证。
+
+**最终机器验证（Node v22 + Foundry）**：pnpm typecheck PASS；pnpm vitest run test/unit/ **41 files / 766 tests PASS**；pnpm build PASS；sdk pnpm build PASS；contracts forge test -q PASS；examples/sdk-vanilla pnpm install --force / pnpm typecheck / pnpm build PASS；pnpm check:dist-secrets PASS；git diff --check PASS。无 npm publish/主网交易。
+
+**已知安全边界**：G1 完成 SDK 的兼容接入和 fail-closed Worker，不具备 G2 的 per-parent 原生不可夺权合约。Worker KV replay consume get+put 非原子，需 G2 处理。ENS L1/OP L2 结果对同名可能不同；已记录真实测试网样本，G3/G5 再做生产等级连续解析与可重跑 E2E。Gateway 需要设置实际 ALLOWED_SENDERS，G4 的 API key 计费/免费额度服务端尚未实现。G1 功能待用户验收，不允许因此自动进入 G2。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
