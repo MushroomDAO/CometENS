@@ -8,6 +8,40 @@ A consumer selects an AAStar preset or creates a self-hosted deployment profile 
 
 Using AAStar hosting means accepting AAStar operations under the current V3 trust model. An AAStar-managed profile is an endpoint/configuration convenience; it is not a certificate of ENS NFT sovereignty. Self-hosters replace contract addresses, parent domain, endpoint URLs and signer infrastructure in their own profile, export and verify records, then arrange resolver changes with the real L1 name owner. A public profile must not contain a secret API key.
 
+### Example: replace all infrastructure with your own profile
+
+The package exposes a standalone client. Every address below is an illustrative placeholder; replace it with the verified deployment and use the matching chain IDs:
+
+~~~typescript
+import { createCometENSClient, createSelfHostedProfile } from '@cometens/sdk'
+
+const profile = createSelfHostedProfile({
+  id: 'community-sepolia',
+  protocol: 'v3-readonly',
+  rootName: 'community.eth',
+  l1: {
+    chainId: 11155111,
+    rpcUrl: 'https://your-l1-sepolia-rpc.example',
+    resolverAddress: '0x1111111111111111111111111111111111111111',
+  },
+  l2: {
+    chainId: 11155420,
+    rpcUrl: 'https://your-op-sepolia-rpc.example',
+    recordsAddress: '0x2222222222222222222222222222222222222222',
+  },
+  apiBaseUrl: 'https://api.community.example',
+  gatewayUrls: ['https://ccip.community.example/hybrid'],
+})
+const sdk = createCometENSClient(profile)
+await sdk.verifyNetwork()
+const l2Record = await sdk.getAddr('jason.community.eth')
+const ensResult = await sdk.getEnsAddress('jason.community.eth')
+~~~
+
+The two reads intentionally have different meanings. The first queries OP records directly, while the second follows Ethereum ENS resolution, which may involve CCIP-Read. They may differ if a community has not set its L1 resolver or its L2 profile points elsewhere. A normal successful L2 record read does not prove that the ENS name has been issued as a real L1 ENS node.
+
+For server-side metering integrations only, import createCometENSServerClient from the server subpath and supply getApiKey from a backend secret provider at runtime. That key is deliberately absent from the public profile. The current G1 deployment does **not** implement backend API-key billing or quota validation yet; those service features are scheduled for G4.
+
 ## Authentication
 
 Browser clients can use a public project identifier as a metering label; it must not be relied upon as an authorization secret. A confidential API key belongs only in a server-side SDK client and may be used for quota and service access. It never authorizes a transfer, registrar permission or record update by itself. Each signed request must carry the exact signer, EIP-712 domain/chainId/verifying contract, original message, nonce and deadline; a relayer does not reconstruct them.

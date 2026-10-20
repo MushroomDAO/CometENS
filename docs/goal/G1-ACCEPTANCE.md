@@ -25,7 +25,7 @@ G1 must clearly state the residual risks: V3 global owner can override registere
 | Integration worktree initial unit suite | PASS: 38 files / 727 tests, Foundry on PATH |
 | Integration worktree initial Vite site build | PASS: pnpm build |
 | SDK unit and npm pack consumer | PENDING worker implementation and integration |
-| Worker/API negative security suite | PENDING worker implementation and integration |
+| Worker/API negative security suite | PASS: worker branch 9f6ba66, merged as 078c995; 13 new route safety tests; typecheck, unit suite 39 files/743 tests PASS |
 | SDK vanilla demo typecheck/build | PENDING SDK package integration |
 | Final full CI, Foundry and diff-check | PENDING after merge |
 | PR URL/head/review/checks | PENDING |

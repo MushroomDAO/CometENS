@@ -59,6 +59,12 @@
 
 集成支线已开始 docs/SDK-INTEGRATION.md 和 examples/sdk-vanilla（外部可消费 TS demo）；修正旧 docs/ens-domain-transfer.md 里的普通 Registry 转让后不可能收回的错误安全承诺。待两 worker 提交、实测 SDK 最终 public API，再校正 sample imports/config、执行独立 build/typecheck/pack 及主仓库 tests。本条记录是进行中事实，尚不代表 G1 已交付。
 
+### 2026-10-20 · G1.6 API 安全分支完成，已普通合并至集成分支
+
+worker-1 独立工作树 goal/g1-api 交付并推送 9f6ba66a92fede8df7eb9cf79c3bfb0a9d968fa8。API/CCIP Gateway 加强空 parent/allowlist fail-closed、nonce KV 不可用拒绝写入、32 KiB 请求边界、签名请求校验及错误脱敏，新增 13 路由级负例。集成分支以普通 merge 提交 078c995 引入该提交（无 rebase/force）。
+
+**集成复验**：Node22 pnpm typecheck PASS；Node22+Foundry pnpm vitest run test/unit/，39 test files / 743 tests PASS。当前 Worker KV 的 get/put 仍非原子，不能证明并发 nonce 只成功一次；G2 需链上/强一致机制。生产示例 wrangler 配置中 ALLOWED_SENDERS 可能未启用，现在缺少配置的 gateway 明确拒绝请求；部署前必须填写真实 resolver 地址，详见 docs/SDK-INTEGRATION.md。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
