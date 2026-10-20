@@ -88,6 +88,25 @@ G0 GitHub PR #110 在用户 G0 业务验收后因旧文档状态未统一而遭 
 
 G1 已 push 并创建 [PR #111](https://github.com/MushroomDAO/CometENS/pull/111)，base 为 goal/g0-community-ens-plan；已在纳入 G0 审核修订的 G1 集成树上复跑 Node22 typecheck PASS、root Vite build PASS、41 Vitest unit 文件/766 tests PASS，git diff --check PASS。SDK/Foundry/独立 demo 的前一次完整验收结果继续适用，改动只涉及 G0 文档；最终 GitHub 新 head CI/review 需实际读取，G1 尚需用户验收后才解锁 G2。
 
+### 2026-10-20 · G1 PR 拆分及最新完整复验
+
+按 2026-10-20 用户规定的独立 worktree/原子 PR 和 PR-Daemon v1.4.1 检查，G1 原聚合 PR #111 进一步拆分为从 G0 出发的顺序栈：
+
+1. [#112](https://github.com/MushroomDAO/CometENS/pull/112)，goal/g1-api（最终含 G0 parent 的普通 merge 039351a），仅 API/CCIP Worker fail-closed；2 文件/19 定向安全测试 PASS；pre-pr-check 1.4.1 block 0。
+2. [#113](https://github.com/MushroomDAO/CometENS/pull/113)，goal/g1-sdk-foundation（a5a4bef），独立 Profile/EIP-712 schema/4 项协议负例，Node22 typecheck/定向测试 PASS；pre-pr-check block 0。
+3. [#114](https://github.com/MushroomDAO/CometENS/pull/114)，goal/g1-sdk（SDK 依次普通 merge API 和 foundation，附 0.1.0 CHANGLELOG、LICENSE 等）；24 项 SDK 定向测试 PASS；pre-pr-check block 0。
+4. [#111](https://github.com/MushroomDAO/CometENS/pull/111)，goal/g1-integration，SDK 最新原子栈普通 merge 3239d47；GitHub PR base 已改为 goal/g1-sdk，仅保留独立示例、文档、验收和状态（无需 rebase 或 force）。
+
+最新**整合集成本地复验**：Node22 pnpm typecheck PASS；**42 files / 770 unit tests PASS**；主应用 Vite build PASS；SDK package build PASS；独立示例 TS typecheck + Vite build PASS；Foundry forge test -q PASS；git diff --check PASS；此前 browser dist secret scan PASS。无主网交易，无 npm 正式发布，G1 用户验收仍 PENDING，G2 BLOCKED。
+
+正式 GitHub `test.yml` workflow 的 pull_request 触发目标仅为 main/preview，当前叠加式 goal/* base 的 PR 无独立测试 check，CLA 可以运行但不可假称 CI 全绿。代码分支均已本地复验；在 G0、G1 PR 顺序合并并 retarget 后，再以 GitHub 合并结果 CI 作为合并条件。G0 PR #110 自身 cla/test 成功，但此前 reviewer 的 CHANGES_REQUESTED 仍需新审查解除。
+
+### 2026-10-20 · G0 重新请求审核与 G1 精细化 PR 检查
+
+用户 G0 验收有效。G0 PR #110 head a0b34c0 GitHub cla-check/test 两项成功，旧的 clestons CHANGES_REQUESTED 针对前一 head。作者已更新 PR body、逐项答复 Medium/Low findings，并重新向 clestons 请求精确提交复审；PR 尚未合并。独立 PR-Daemon 1.4.1 (3105515ec11c) 通过 selftest，所有 G0/G1 PR block 级命中为 0；G0 564 行纯文档架构合同有 SZ-1 review 级说明，SDK 代码按 300/500 行约束拆层。
+
+G1 子任务 PR 正式组成：[API #112](https://github.com/MushroomDAO/CometENS/pull/112)（基于 G0）、[SDK Foundation #113](https://github.com/MushroomDAO/CometENS/pull/113)（基于 API）、[SDK Package #114](https://github.com/MushroomDAO/CometENS/pull/114)（基于 foundation）、[Demo/Goal 验收 #111](https://github.com/MushroomDAO/CometENS/pull/111)（基于 SDK package）。#113 包括 4 项可独立复现的 EIP-712/profile 安全负例，#114 已补充 v0.1.0 CHANGELOG，#111 仅保留集成 Demo/文档并显示安全类型错误。最新 full local pass 42 suites / 770 tests、SDK/Vite/demo build/Foundry PASS；最终 PR 评论和 GitHub CI 状态仍以远端实时查询为准。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。

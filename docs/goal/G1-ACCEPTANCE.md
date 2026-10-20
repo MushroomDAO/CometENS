@@ -27,8 +27,8 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 | SDK unit and npm pack consumer | SDK branch final c580f1f, tarball ESM + d.ts external PNPM install/import PASS; final sdk TypeScript build PASS, independent demo install + typecheck + build PASS |
 | Worker/API negative security suite | PASS: worker branch 9f6ba66, merged as 078c995; 13 new route safety tests; typecheck, unit suite 39 files/743 tests PASS |
 | SDK vanilla demo typecheck/build | PASS: independent examples/sdk-vanilla pnpm install, pnpm typecheck, pnpm build after SDK package build |
-| Final full CI, Foundry and diff-check | Final merged integration 4c59c20: Node22 root typecheck PASS, 41 files / 766 unit tests PASS, Vite build PASS, standalone SDK build PASS, Foundry forge test -q PASS, dist-secret scan PASS, git diff --check PASS; GitHub PR CI pending |
-| PR URL/head/review/checks | [G1 PR #111](https://github.com/MushroomDAO/CometENS/pull/111) OPEN, branch goal/g1-integration stacked on G0 #110; review/CI required before merging; latest head tracked in PROGRESS |
+| Final full CI, Foundry and diff-check | G1 atomic stack merged in integration after 3239d47: Node22 root typecheck PASS, 42 files / 770 unit tests PASS, Vite build PASS, standalone SDK build PASS, independent demo typecheck/build PASS, Foundry forge test -q PASS; prior dist-secret scan PASS, diff-check PASS. PR test workflow only monitors main/preview base; awaiting final GitHub CI when PR stack merges/retargets |
+| PR URL/head/review/checks | Stacked G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) → API [#112](https://github.com/MushroomDAO/CometENS/pull/112) → SDK Foundation [#113](https://github.com/MushroomDAO/CometENS/pull/113) → SDK runtime [#114](https://github.com/MushroomDAO/CometENS/pull/114) → Demo/acceptance [#111](https://github.com/MushroomDAO/CometENS/pull/111). All G1 PRs are independent code-review gates, user acceptance remains pending |
 | User G1 acceptance | PENDING — G2 blocked |
 
 ## Live testnet read-only evidence, 2026-10-20
