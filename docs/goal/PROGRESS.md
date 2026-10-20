@@ -82,6 +82,12 @@ worker-2 分支 goal/g1-sdk 提交并推送 70599ab、6034814、c580f1f（最终
 
 PR-Daemon 对 G0 接受回执 head 8652eb8 提出 CHANGES_REQUESTED：G0 已验收的表格和部分未同步的“当前仍只执行 G0”说明矛盾。逐项修订 STATUS/VISION/MILESTONES/PROGRESS 的状态、恢复步骤和当前/历史叙述；统一两份 G1 NetworkProfile 技术草案，修正 V3 Worker 实际可能持有全局 owner 权限的图示。此条记录针对 GitHub 审核整改，**不撤销用户已经确认的 G0 业务验收**。修正提交 a0b34c0 已推送至 G0 PR #110，并通过普通 merge 同步到 G1 的 goal/g1-integration（最终 merge commit 以 Git 日志为准）；PR #110 仍需 GitHub reviewer 重新审阅，G1 的 READY_FOR_ACCEPTANCE 不代表业务验收通过。
 
+### 2026-10-20 · G0 GitHub review 修复同步及 G1 PR 开立
+
+G0 GitHub PR #110 在用户 G0 业务验收后因旧文档状态未统一而遭 CHANGES_REQUESTED。G0 分支以 a0b34c07874bbbcb2e73bc33519bab99f3cee540 修订并推送，38 单测文件/724 项 PASS、Node22 typecheck PASS、Foundry PASS、Markdown 链接和格式检查 PASS；PR #110 仍需新 head 的 GitHub 代码 review。G1 集成分支使用普通 merge 2156952 纳入该 G0 父分支（无 rebase/force），PROGRESS 冲突为两个分支在同一位置追加日志，已合并保留全部历史。
+
+G1 已 push 并创建 [PR #111](https://github.com/MushroomDAO/CometENS/pull/111)，base 为 goal/g0-community-ens-plan；已在纳入 G0 审核修订的 G1 集成树上复跑 Node22 typecheck PASS、root Vite build PASS、41 Vitest unit 文件/766 tests PASS，git diff --check PASS。SDK/Foundry/独立 demo 的前一次完整验收结果继续适用，改动只涉及 G0 文档；最终 GitHub 新 head CI/review 需实际读取，G1 尚需用户验收后才解锁 G2。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。

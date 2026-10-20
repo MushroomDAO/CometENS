@@ -28,7 +28,7 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 | Worker/API negative security suite | PASS: worker branch 9f6ba66, merged as 078c995; 13 new route safety tests; typecheck, unit suite 39 files/743 tests PASS |
 | SDK vanilla demo typecheck/build | PASS: independent examples/sdk-vanilla pnpm install, pnpm typecheck, pnpm build after SDK package build |
 | Final full CI, Foundry and diff-check | Final merged integration 4c59c20: Node22 root typecheck PASS, 41 files / 766 unit tests PASS, Vite build PASS, standalone SDK build PASS, Foundry forge test -q PASS, dist-secret scan PASS, git diff --check PASS; GitHub PR CI pending |
-| PR URL/head/review/checks | G1 PR to be created from goal/g1-integration against accepted G0 branch; GitHub review/CI required |
+| PR URL/head/review/checks | [G1 PR #111](https://github.com/MushroomDAO/CometENS/pull/111) OPEN, branch goal/g1-integration stacked on G0 #110; review/CI required before merging; latest head tracked in PROGRESS |
 | User G1 acceptance | PENDING — G2 blocked |
 
 ## Live testnet read-only evidence, 2026-10-20
