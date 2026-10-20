@@ -449,6 +449,14 @@
   受影响:`sdk/CometENS.ts:71`、`server/gateway/index.ts:60`、
   `test/e2e/{register-multi-root,transfer-subnode}.test.ts`、`test/integration/deployed.test.ts`(×4)
 
+  **2026-10-20 G1 后续测量**：G1 的新 SDK 类型收窄使原 `sdk/CometENS.ts`
+  宽范围错误消失，剩余 **5** 条带链 viem 泛型错误位于 server/gateway、
+  两处 e2e 和 integration（2 处）。同步将
+  `scripts/check-typecheck-scope.mjs` 的 `BUDGET` 从 6 降到 5，并从 `KNOWN`
+  移除 SDK 路径；原 2026-09-04 的 113→6 作为历史基线保留。
+  CI 的 pull_request 目标另增加 `goal/**`，让 Goal 的逐级 PR 栈在各自目标分支上
+  直接运行与 main/preview 一样的完整门禁；通过后仍需 reviewer 审核。
+
 ### T1.7.2 把 typecheck 覆盖到 gateway worker  `DONE (PR #74)`
 - **优先级**:mid(**高于它看起来的样子** —— 七端点 500 那个生产 bug 就长在这个目录)
 - **来源**:由 T1.7.1 拆出(pr-daemon 在 #73 指出标题与验收命令范围不一致)。
