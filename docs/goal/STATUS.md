@@ -4,7 +4,7 @@
 
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
-| **G0 原文/架构/计划基线** | `READY_FOR_ACCEPTANCE`（待最终验收包链接/用户确认） | 用户明确接受 G0 交付物及阶段划分 |
+| **G0 原文/架构/计划基线** | `READY_FOR_ACCEPTANCE`（[PR #110](https://github.com/MushroomDAO/CometENS/pull/110)，待用户确认） | 用户明确接受 G0 交付物及阶段划分 |
 | G1 独立 SDK | `BLOCKED` | G0 被用户验收 |
 | G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
@@ -19,7 +19,7 @@
 - [x] 既有能力、SDK、合约权限、跨链解析、ENSv2 路线：`ARCHITECTURE.md`
 - [x] G0–G7 子任务、验收门槛和依赖：`MILESTONES.md`
 - [x] 基线：2026-10-20 `pnpm typecheck` PASS；`pnpm vitest run test/unit/` 38 files/706 tests PASS；`forge test -q` PASS（本机 Node v22/Foundry）
-- [ ] G0 分支提交 / PR（填写链接、SHA 后勾选）
+- [x] G0 已提交分支 `goal/g0-community-ens-plan`，验收 [PR #110](https://github.com/MushroomDAO/CometENS/pull/110)；以 PR 最新 head SHA 为准
 - [ ] 用户 G0 验收回执（填写日期与明确结论后才开启 G1）
 
 ## G0 验收者需要确认
