@@ -171,8 +171,15 @@ export class CometENS implements ICometENS {
     const body: unknown = await response.json().catch(() => null)
     const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {}
     if (!response.ok) {
-      // Do not echo server-provided errors: a misconfigured provider may include secrets.
-      throw new SDKError('api-error', `CometENS write API returned HTTP ${response.status}`, response.status)
+      // Never echo upstream free-form messages: RPC/provider failures can embed keys.
+      const safeCodes = new Set(['LABEL_TAKEN', 'APPROVAL_REQUIRED', 'OWNER_UNVERIFIABLE'])
+      const code = typeof payload.code === 'string' && safeCodes.has(payload.code) ? payload.code : undefined
+      const statusKind = response.status === 401 || response.status === 403 ? 'unauthorized'
+        : response.status === 409 ? 'conflict'
+          : response.status === 429 ? 'rate-limited'
+            : response.status === 503 ? 'service-unavailable'
+              : response.status === 400 ? 'invalid-input' : 'api-error'
+      throw new SDKError(statusKind, `CometENS write API returned HTTP ${response.status}${code ? ` (${code})` : ''}`, response.status, code)
     }
     if (typeof payload.txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(payload.txHash)) {
       throw new SDKError('api-error', 'CometENS API did not confirm an L2 transaction hash', response.status)

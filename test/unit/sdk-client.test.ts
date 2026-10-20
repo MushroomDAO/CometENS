@@ -37,7 +37,10 @@ const selectors = {
   coinAddr: toFunctionSelector('addr(bytes32,uint256)'),
 }
 
-function mockRpcAndApi(options: { l1Chain?: number; l2Chain?: number; noCode?: boolean; apiStatus?: number; noTxHash?: boolean } = {}) {
+function mockRpcAndApi(options: {
+  l1Chain?: number; l2Chain?: number; noCode?: boolean; apiStatus?: number;
+  noTxHash?: boolean; apiCode?: string;
+} = {}) {
   const apiBodies: Array<{ path: string; json: Record<string, unknown>; headers: Headers }> = []
   vi.stubGlobal('fetch', vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
     const url = String(request)
@@ -47,7 +50,10 @@ function mockRpcAndApi(options: { l1Chain?: number; l2Chain?: number; noCode?: b
         json: JSON.parse(String(init?.body)) as Record<string, unknown>,
         headers: new Headers(init?.headers),
       })
-      return new Response(JSON.stringify(options.noTxHash ? { ok: true } : { ok: true, txHash: TX }), {
+      const payload = options.apiStatus && options.apiStatus >= 400
+        ? { error: 'Unsafe RPC provider URL https://rpc.example/v2/SECRET_VALUE', code: options.apiCode }
+        : options.noTxHash ? { ok: true } : { ok: true, txHash: TX }
+      return new Response(JSON.stringify(payload), {
         status: options.apiStatus ?? 200, headers: { 'content-type': 'application/json' },
       })
     }
@@ -88,6 +94,22 @@ describe('@cometens/sdk network and reads', () => {
     })
   })
 
+  it('reads records only from OP, while ENS lookup follows the L1 ENS path', async () => {
+    mockRpcAndApi()
+    const client = new CometENS(profile)
+    await client.verifyNetwork()
+    const fetchSpy = vi.mocked(fetch)
+    fetchSpy.mockClear()
+    await client.getAddr('alice.community.eth')
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual(['https://l2.test/'])
+    fetchSpy.mockClear()
+    // The generic mock doesn't implement the complete universal resolver ABI,
+    // but still verifies this method invokes the canonical L1, never OP.
+    await client.getEnsAddress('alice.community.eth').catch(() => null)
+    expect(fetchSpy.mock.calls.some(([url]) => String(url) === 'https://l1.test/')).toBe(true)
+    expect(fetchSpy.mock.calls.some(([url]) => String(url) === 'https://l2.test/')).toBe(false)
+  })
+
   it('fails closed on incorrect RPC networks and missing deployed contract code', async () => {
     mockRpcAndApi({ l2Chain: 10 })
     await expect(new CometENS(profile).getAddr('alice.community.eth')).rejects.toMatchObject({ kind: 'chain-mismatch' })
@@ -114,6 +136,7 @@ describe('@cometens/sdk network and reads', () => {
     expect(() => new CometENS({ ...profile, l2: { ...profile.l2, chainId: 10 } })).toThrow(SDKError)
     expect(() => new CometENS({ ...profile, l1: { ...profile.l1, resolverAddress: '0x0000000000000000000000000000000000000000' } })).toThrow(SDKError)
     expect(() => new CometENS({ ...profile, protocol: 'v4' })).toThrow(/G2/)
+    expect(() => new CometENS({ ...profile, apiBaseUrl: 'https://api.test/?token=secret' })).toThrow(SDKError)
     expect(aastarTestnetProfile.l1.chainId).toBe(11155111)
     expect(aastarTestnetProfile.l2.chainId).toBe(11155420)
   })
@@ -203,5 +226,26 @@ describe('@cometens/sdk signed write compatibility', () => {
     await expect(client.register({ from: signer.address, signature: '0x1234', message: { ...mismatch, parent: profile.rootName } }))
       .rejects.toMatchObject({ kind: 'api-error' })
     expect(bodies).toHaveLength(1)
+  })
+
+  it.each([
+    [401, 'unauthorized', undefined],
+    [403, 'unauthorized', undefined],
+    [409, 'conflict', 'LABEL_TAKEN'],
+    [429, 'rate-limited', undefined],
+    [503, 'service-unavailable', undefined],
+  ] as const)('maps write HTTP %i to safe %s without exposing upstream credentials', async (status, kind, code) => {
+    mockRpcAndApi({ apiStatus: status, apiCode: code })
+    const client = new CometENS(profile)
+    const req = { from: signer.address, signature: '0x1234' as Hex,
+      message: { parent: profile.rootName, label: 'alice', owner: RECIPIENT, nonce: 1n, deadline: 2000000000n },
+    }
+    try {
+      await client.register(req)
+      throw new Error('expected SDKError')
+    } catch (error) {
+      expect(error).toMatchObject({ kind, status, code })
+      expect(String(error)).not.toContain('SECRET_VALUE')
+    }
   })
 })
