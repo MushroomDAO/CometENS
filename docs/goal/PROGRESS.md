@@ -107,6 +107,14 @@ G1 已 push 并创建 [PR #111](https://github.com/MushroomDAO/CometENS/pull/111
 
 G1 子任务 PR 正式组成：[API #112](https://github.com/MushroomDAO/CometENS/pull/112)（基于 G0）、[SDK Foundation #113](https://github.com/MushroomDAO/CometENS/pull/113)（基于 API）、[SDK Package #114](https://github.com/MushroomDAO/CometENS/pull/114)（基于 foundation）、[Demo/Goal 验收 #111](https://github.com/MushroomDAO/CometENS/pull/111)（基于 SDK package）。#113 包括 4 项可独立复现的 EIP-712/profile 安全负例，#114 已补充 v0.1.0 CHANGELOG，#111 仅保留集成 Demo/文档并显示安全类型错误。最新 full local pass 42 suites / 770 tests、SDK/Vite/demo build/Foundry PASS；最终 PR 评论和 GitHub CI 状态仍以远端实时查询为准。
 
+### 2026-10-20 · G1 最终 CI 收口与全套端到端本地测试
+
+为重现 `.github/workflows/test.yml` 实际流程，在 G1 集成 worktree 运行 Node 22、Foundry、根项目及 `workers/gateway` 的各自 `pnpm install --frozen-lockfile`。发现新依赖环境下的 Vitest mock 未覆盖另一份 viem 实例，导致签名路线测试返回 502；改为确定性的 KV 测试夹具，并在 Worker 中显式导入 Cloudflare 类型。同时 SDK EIP-712 变体测试采用各自的强类型签名调用，解决宽范围类型回归。上述修复由 #112 的 8c95e6c 开始、下游按顺序 ordinary merge，不 rebase/force，SDK 类型测试提交 eb33a28 已被纳入 #114。
+
+完整 `pnpm vitest run`：**48 文件 809 PASS，1 文件 9 SKIPPED**，跳过项是需要真实 Sepolia RPC/部署的集成测试；`pnpm check:skipped vitest-report.json` PASS。主站/SDK/独立 Demo build、root typecheck、Foundry `forge test -q` PASS。`pnpm check:typecheck-scope` 发现上层 SDK 修复使宽范围错误从 6 减为 5；依据已有 T1.7.1 不允许静默吸收进步的规定，新建独立 [#115](https://github.com/MushroomDAO/CometENS/pull/115)（goal/g1-typecheck-budget，ec206e2、b380ef5）将预算收紧至 5、更新任务账本，并使 `test.yml` 的 pull_request 支持 `goal/**` base。#115 本地 Worker 自身类型 0，wide errors 5/budget 5，检查 PASS；YAML 可解析。G1 集成普通 merge 纳入 #115 后仍需重跑与确认新的 GitHub CI。
+
+最新 PR 合并次序：G0 #110 → API #112 → SDK foundation #113 → SDK package #114 → CI #115 → G1 demo/验收 #111。所有 PR 必须分别得到当前 head 审批、CI 通过与可合并状态；用户已经接受 G0，但 **G1 业务验收尚未收到**，所以 G2 继续 BLOCKED。线上 ENS L1 与 OP L2 同名解析结果可能不一致，仍由后续 G3/G5 的真实部署与故障演练验证，不列为 G1 已解决。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。

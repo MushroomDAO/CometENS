@@ -23,10 +23,11 @@
 - [x] API/gateway fail-closed 加固与独立安全 review
 - [x] AAStar testnet profile、自部署 network profile、服务端 API-key 客户端与 EIP-712 全签名数据协议
 - [x] 独立 Vanilla TS Demo 与包消费测试
-- [x] 集成 Node22 root typecheck、42 文件/770 unit tests、root+SDK+demo build、Foundry、secret scan/diff-check PASS
+- [x] 集成 Node22 root typecheck、完整 Vitest 48 文件/809 通过、9 项在线集成测试按预设跳过，root+SDK+demo build、Foundry、secret scan/diff-check PASS
 - [x] OP Sepolia live check:chain 及 SDK real read；记录 L2 与 L1 ENS 结果可不同，不将其等同
 - [x] G1 原子 PR 栈均已创建和推送：[API #112](https://github.com/MushroomDAO/CometENS/pull/112) → [协议基础层 #113](https://github.com/MushroomDAO/CometENS/pull/113) → [SDK 客户端 #114](https://github.com/MushroomDAO/CometENS/pull/114) → [最终集成 Demo / 验收 #111](https://github.com/MushroomDAO/CometENS/pull/111)，基于 G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110)
-- [ ] G0/G1 PR 均通过 GitHub 审核与 CI；当前 test workflow 仅监听 main/preview base，叠加式分支上的独立 PR 暂无全量 CI，已有本地全量证据，须在目标分支最终转向 main 后再核验
+- [x] 增加独立 [G1 CI #115](https://github.com/MushroomDAO/CometENS/pull/115)：宽范围类型错误从 6 收口为 5，CI `pull_request` 支持 `goal/**` base；本地 `pnpm check:typecheck-scope` 通过
+- [ ] G0/G1 PR 完成 GitHub reviewer 审核与新 head CI，工作流触发及完整 CI 仍须用 GitHub 实际结果核对；G0 #110 历史 `CHANGES_REQUESTED` 尚待重新审批
 - [ ] 用户明确 G1 验收（完成后才进入 G2）
 
 验收证据与例外见 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)，[PROGRESS.md](PROGRESS.md)。
