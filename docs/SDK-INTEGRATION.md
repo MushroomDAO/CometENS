@@ -22,6 +22,14 @@ A registered domain can be Managed (operator retains control), Sovereign (L1 ENS
 4. With L1 name-owner approval, update the resolver pointer and test standard ENS resolution. Preserve old addresses/proofs for audit and rollback. For a purely offchain subname with no owned L1 node, a member cannot independently switch the resolver.
 5. Check expiry/renewal and (in G2+) handoff fuses/roles separately before advertising native ENS name sovereignty.
 
+## Operator configuration required by the hardened Worker
+
+The G1 API Worker deliberately refuses write operations if ROOT_DOMAIN/ROOT_DOMAINS is blank or if neither REGISTRY nor RECORD_CACHE KV binding exists. The KV store supports best-effort nonce consumption; get-then-put is eventually consistent and **not atomic across PoPs**. Its protection is inadequate for the final irrevocable property model, which G2 must enforce on-chain. Bind the KV and configure the allowed parent names before enabling a testnet write flow.
+
+The CCIP gateway also requires a non-empty ALLOWED_SENDERS list containing the exact deployed L1 resolver(s). A missing list returns an explicit configuration error and refuses signing/proofs. Some existing production example wrangler configurations have this field commented out: deployers must set and verify it against the resolver address before switching any ENS resolver pointer to the gateway. Never make a public all-senders fallback to restore availability; instead publish a reproducible configuration preflight.
+
+These limits protect the current managed V3 compatibility path; they do not turn that contract into a final Sovereign implementation.
+
 ## Release and verification
 
 The package must publish ESM/type exports and be installable into an independent consumer. G1 acceptance requires npm pack/install smoke, direct read test, typed write request parity, wrong chain/nonce/signature negatives, browser bundle secret scan and the full unit + Foundry suite. Live Sepolia end-to-end, ENSv2 migration hardening, and irreversible handoff remain gated by G2–G5; see [MILESTONES](goal/MILESTONES.md).
