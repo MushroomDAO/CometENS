@@ -4,7 +4,7 @@
 
 ## Public configuration
 
-A consumer selects an AAStar preset or creates a self-hosted deployment profile with explicit L1/L2 chain IDs and RPCs, resolver, L2 record contract, parent name, distinct management API URL and CCIP gateway URLs. All addresses are checked against their chain and known codehash/version, and an unknown or wrong chain stops write operations. Mainnet profiles are disabled until verified mainnet deployment; do not silently use testnet defaults in production.
+A consumer selects an AAStar preset or creates a self-hosted deployment profile with explicit L1/L2 chain IDs and RPCs, resolver, L2 record contract, parent name, distinct management API URL and CCIP gateway URLs. The SDK verifies the chain IDs, nonempty deployed bytecode and V3 read interface, and optionally checks `expectedCodeHash` pins supplied by the deployer; without pins it does **not** attest a known code version. Wrong chains or missing contracts stop reads and writes. The AAStar preset is testnet-only because AAStar mainnet contracts have not been deployed or verified under G6. **Self-hosted Ethereum Mainnet / OP Mainnet configuration is allowed by the SDK** (chain IDs 1/10), but those deployments are independently operated and have not passed CometENS's G5/G6 security and mainnet acceptance gates.
 
 Using AAStar hosting means accepting AAStar operations under the current V3 trust model. An AAStar-managed profile is an endpoint/configuration convenience; it is not a certificate of ENS NFT sovereignty. Self-hosters replace contract addresses, parent domain, endpoint URLs and signer infrastructure in their own profile, export and verify records, then arrange resolver changes with the real L1 name owner. A public profile must not contain a secret API key.
 

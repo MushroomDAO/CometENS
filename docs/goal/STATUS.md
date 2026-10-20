@@ -4,7 +4,7 @@
 
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
-| **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确确认；[PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 仍待 GitHub review） | G1 可启动；G0 PR cla/test 全绿，已重新请求 reviewer 撤销旧 CHANGES_REQUESTED，需单独按 GitHub 合并规则收口 |
+| **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确验收，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED 并合并，merge `813f1e2`） | G1 已解锁 |
 | G1 独立 SDK | `READY_FOR_ACCEPTANCE`（2026-10-20；[PR #111](https://github.com/MushroomDAO/CometENS/pull/111) 已创建） | 需 GitHub CI/review 和用户 G1 验收；此前不得进入 G2 |
 | G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
@@ -28,7 +28,8 @@
 - [x] G1 原子 PR 栈均已创建和推送：[API #112](https://github.com/MushroomDAO/CometENS/pull/112) → [协议基础层 #113](https://github.com/MushroomDAO/CometENS/pull/113) → [SDK 客户端 #114](https://github.com/MushroomDAO/CometENS/pull/114) → [最终集成 Demo / 验收 #111](https://github.com/MushroomDAO/CometENS/pull/111)，基于 G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110)
 - [x] 增加独立 [G1 CI #115](https://github.com/MushroomDAO/CometENS/pull/115)：宽范围类型错误从 6 收口为 5，CI `pull_request` 支持 `goal/**` base；本地 `pnpm check:typecheck-scope` 通过
 - [x] GitHub [#115](https://github.com/MushroomDAO/CometENS/pull/115) 及最终集成 [#111](https://github.com/MushroomDAO/CometENS/pull/111) 的 `cla-check` / 完整 `test` 均在对应已验证 head 通过（run 链接见 G1-ACCEPTANCE）；后续 head 更新需重新验证
-- [ ] G0/G1 PR 完成 GitHub reviewer 审核与新 head CI，工作流触发及完整 CI 仍须用 GitHub 实际结果核对；G0 #110 历史 `CHANGES_REQUESTED` 尚待重新审批
+- [x] G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED、cla/test SUCCESS，并合并至 main（2026-10-20，813f1e2）
+- [ ] G1 PR #112–#115 与 #111 分别满足 GitHub 最新 head 审批、目标分支更新和 CI；#112 在改 base/main 后原有审批失效，已请求重新审核；#111 两项 Medium 修正待最新 head review
 - [ ] 用户明确 G1 验收（完成后才进入 G2）
 
 验收证据与例外见 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)，[PROGRESS.md](PROGRESS.md)。

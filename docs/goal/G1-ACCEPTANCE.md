@@ -12,7 +12,7 @@
 | G1.4 | Exact EIP-712 write operations and signed message envelope | Register, SetAddr, SetText, SetContenthash: from, typed message, nonce, deadline, domain/verifyingContract, signature; no Date.now reconstruction; invalid signer/chain/nonce fail |
 | G1.5 | Stable exports, errors/events, README and minimal independent demo | public error kinds and package import; examples/sdk-vanilla build and read demo; AAStar SDK composition boundary |
 | G1.6 | API Worker and CCIP Gateway reject unauthorized/malformed requests | Empty root allowlist fails closed; size, sender/calldata and error-redaction tests; no unsafe success fallback |
-| G1.7 | AAStar managed testnet preset and full self-host profile + server key separation | API URL distinct from gateway; mainnet unavailable until deployed; no API key in browser import or compiled bundle |
+| G1.7 | AAStar managed testnet preset and full self-host profile + server key separation | API URL distinct from gateway; **AAStar mainnet preset not offered until verified G6 deployment**, but explicit third-party self-hosted mainnet profiles are supported; no API key in browser import or compiled bundle |
 
 G1 release-candidate scope is complete, but acceptance is explicitly gated on user review and GitHub checks. G1 must clearly state the residual risks: V3 global owner can override registered records and transfer OP ERC721s; current KV-backed nonce store is not an atomic blockchain authority. Native L1 ENS subdomain transfer, per-parent operator grant/revoke, final unseizable ownership and irreversible records belong to G2–G5. No G1 package shall claim that old V3 already meets these.
 
@@ -20,7 +20,7 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 
 | Check | Result / command / context |
 |---|---|
-| G1 branch base | G0 accepted head 8652eb8; three isolated worktrees and branch names recorded in PROGRESS |
+| G1 branch base | G0 accepted and merged via #110 to main as 813f1e2; independent G1 worktrees and branches remain isolated; #112 retargeted to main and awaiting fresh reviewer approval |
 | Integration worktree initial typecheck | PASS with Node v22.22.2 |
 | Integration worktree initial unit suite | PASS: 38 files / 727 tests, Foundry on PATH |
 | Integration worktree initial Vite site build | PASS: pnpm build |
@@ -44,4 +44,4 @@ CI tests using mocks and local Foundry are not independent confirmation of an ac
 
 ## Audit and dependencies
 
-G1 pull request is based on the accepted G0 branch until G0 is merged to main. G1's pending implementation must not bypass GitHub review requirements. G2 may start only after this document records confirmed G1 acceptance by the user.
+G0 #110 has merged into main. G1 stacked PRs must be retargeted/rechecked in order, without bypassing GitHub review requirements or using outdated approvals. G2 may start only after this document records confirmed G1 acceptance by the user.

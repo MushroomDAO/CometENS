@@ -121,6 +121,16 @@ G1 新增的 Goal PR CI 触发器已由 GitHub 实际验证：[PR #115](https://
 
 本记录如通过新的 commit 写入 #111，**前一提交的 CI 绿灯不得自动视作新 head 的绿灯**；再次检查最新 GitHub head/status 后才可宣称最终 ready。G0 #110 在 head a0b34c0 cla-check/test SUCCESS，旧的 `CHANGES_REQUESTED` 尚待 clestons 对修复后的 head 重新审批。用户 G1 验收仍 PENDING，G2 继续 BLOCKED。
 
+### 2026-10-20 夜间 · G0 合并及 G1 Review landing（PR #110–#115）
+
+最新 GitHub 状态复核：G0 #110 由 clestons 在 head a0b34c0 重新 APPROVE，cla-check/test SUCCESS，2026-10-20 合并到 main，merge commit `813f1e219f12f3bcc1d35a2b08a7ee925f046104`。G1 #112/#113/#114/#115 的原始 head 都曾收到 APPROVE，只有最终 Demo/文档 PR #111 在 head 8d8d1be 收到两项 Medium 的 REQUEST_CHANGES。
+
+为了确保 G1 真正进入 main，先将 #112 的 base 从原 G0 分支更新到 main，正常 merge origin/main 至其独立 worktree 并 push 新 head `46868083c05395ec60c58a7c34d4bec5189766f2`（未使用 rebase/force）。当前 head 的 GitHub cla-check/test 均 SUCCESS，GitHub 因 base/head 更新将此前审批转成 REVIEW_REQUIRED；已逐条回复并重新邀请 clestons 审查精确 head。其余 PR 需等父 PR 合入 main 后顺序更新 base、重新核验 CI/reviewer，再合并。
+
+#111 两项 Medium 已在独立 goal/g1-integration worktree 修复：提交之前检查 `.gitignore` 的 `.env*` 排除导致实际有 `.env.example` 但未追踪；新增精确豁免并纳入文件、添加五个 VITE_ 字段说明和 Git-tracked 契约测试。把错误的「Mainnet profiles disabled」更正为「AAStar 不提供主网 preset，但 SDK 支持自部署主网 1/10」并补 SDK API 负例/正例。Demo 不再通过 `as NetworkProfile` 绕过配置验证，启动时构造 `createSelfHostedProfile`，错误时禁用按钮并指导用户修改 .env。相关 Low 的 bytecode/optional codehash 和父域名解析范围声明同步修正。以上变更须在最终集成测试通过、git commit/push 后请求精确 head 复审。
+
+G1 用户业务验收仍待确认，**G2 BLOCKED**。无正式 npm publish 或新链上写入，历史 G1 09:00 的测试读数仅表示其对应 head。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
