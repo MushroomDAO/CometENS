@@ -50,7 +50,7 @@ export const RemoveRegistrarTypes = {
 } as const
 
 function checkCommon(message: { nonce: bigint; deadline: bigint }): void {
-  if (typeof message.nonce !== 'bigint' || message.nonce < 0n ||
+  if (typeof message.nonce !== 'bigint' || message.nonce < 0n || message.nonce > (1n << 256n) - 1n ||
       typeof message.deadline !== 'bigint' || message.deadline <= 0n) {
     throw new SDKError('invalid-input', 'nonce and deadline must be explicit nonnegative uint256 / positive Unix seconds')
   }
@@ -83,11 +83,14 @@ export function validateSetText(message: SetTextMessage): void {
   if (!isBytes32(message.node) || !message.key || typeof message.value !== 'string') {
     throw new SDKError('invalid-input', 'Invalid node, text key or value')
   }
+  if (new TextEncoder().encode(message.key).length > 256 || new TextEncoder().encode(message.value).length > 4096) {
+    throw new SDKError('invalid-input', 'Text key or value exceeds Worker byte limits')
+  }
 }
 
 export function validateSetContenthash(message: SetContenthashMessage): void {
   checkCommon(message)
-  if (!isBytes32(message.node) || !isHex(message.hash)) {
+  if (!isBytes32(message.node) || !isHex(message.hash) || message.hash.length > 8194 || message.hash.length % 2 !== 0) {
     throw new SDKError('invalid-input', 'Invalid node or contenthash bytes')
   }
 }
