@@ -7,7 +7,7 @@
 - Repo：MushroomDAO/CometENS；工作树：/dev/mycelium/CometENS。
 - 当前 G0 工作分支：goal/g0-community-ens-plan；原始提交 6ada685，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110)。本次修订需要检查最后一次提交和 CI 结果，不应以旧 SHA 作为最新 head。
 - 用户的七条原始目标完整保留在 [VISION.md](VISION.md)。2026-10-20 复审要求 AAStar 托管 + 免费层、SDK 可配置 API/key/合约、自部署、运营方退出后的真实产权/解析保障、临时超级权限清理、社区 L1 ENS 原生子名、续费基金、三张架构图、每步写 progress。
-- 正在执行 G0 **架构设计修订**。用户尚未正式验收 G0；按照 Goal 模式，G1 的代码实施不得自动开始。
+- G0 **2026-10-20 已获用户验收**；G1 已解锁并开始实施，G2 继续等待 G1 的独立验收。
 - 新主方案：[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)，包含 V3/ENSv1/ENSv2 架构、两阶段状态机、Managed/Sovereign/Locked Record 等级、故障兜底、续费基金、独立交权凭证与可重跑验收矩阵。新增子任务已进入 [MILESTONES.md](MILESTONES.md)，状态见 [STATUS.md](STATUS.md)。
 - 现有测试基线（来自本轮此前 G0 执行记录，非本次修订后重跑）：2026-10-20，pnpm typecheck PASS；38 文件/706 项 Vitest unit PASS；forge test -q PASS。CI 在本次修订前的原 G0 commit 6ada685 上 cla-check 和 test 均 SUCCESS；本次修订推送后应重新看新 head CI。
 - 现有关键风险：V3 global owner 可覆写任何节点、代转 ERC721 和绕开 registrar；HybridResolver 的 owner 可换 signer/verifier/网关/L2 地址，gateway 可选择 SIG 模式；SDK 仍猜 RPC 网址链型、写旧 API 和重建 nonce。现有 OP ERC721 不是 ENS 原生子名产权。主网未部署。
@@ -46,6 +46,12 @@
 已完成 Git commit **f30816ea8e851678279ea54add77f2738eae3a6e**，提交说明为 docs(goal): define AAStar hosted profiles and verifiable ENS handoff；origin/goal/g0-community-ens-plan 已成功推送，远端 refs/heads/goal/g0-community-ens-plan 指向该 SHA。GitHub PR #110 API 确认 head 已同步、状态 OPEN、mergeable=true，但因 review requirement 仍 blocked。按 2026-10-20 清迈时间约 15:15 的实时检查，新 head cla-check PASS、test PENDING；检查结果是当时快照，后续应重新读取 CI 实时状态。
 
 该提交记录的是 G0 的设计修订。继续等待**用户明确 G0 验收**才可实现 G1；GitHub PR 合并与用户业务验收是两种独立动作。
+
+### 2026-10-20 · 用户 G0 验收，授权 G1 开始
+
+用户原文：「可以,按你建议来,验收通过,每个G完成,记得commit, push,发pr,所有工作在独立worktree或者分支,可以并行subagent互不影响」。确认 G0 交付物（验收时分支 head f92a4b4），允许进入 G1。流程规则：每个 Goal 验证完成后 commit、push、PR，并等待用户验收；并行工作使用彼此独立的 branch/worktree，保护他人更改，禁止跳过门禁。
+
+当前 GitHub G0 PR #110（head f92a4b4）cla-check/test 均 PASS，mergeable=true，但 reviewDecision=REVIEW_REQUIRED；需按仓库规则继续评审，不把聊天验收冒充 GitHub PR 审核。
 
 ## 下一次进入项目时
 

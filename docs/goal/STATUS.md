@@ -4,8 +4,8 @@
 
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
-| **G0 原文/架构/计划基线** | `READY_FOR_ACCEPTANCE`（[PR #110](https://github.com/MushroomDAO/CometENS/pull/110)，待用户确认） | 用户明确接受 G0 交付物及阶段划分 |
-| G1 独立 SDK | `BLOCKED` | G0 被用户验收 |
+| **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确确认；[PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 仍待 GitHub review） | G1 可启动；G0 PR 需单独按合并规则收口 |
+| G1 独立 SDK | `IN_PROGRESS`（2026-10-20） | SDK/安全修复、独立消费测试、PR 与用户验收 |
 | G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
 | G4 开源自部署、demo、UI 安全 | `BLOCKED` | G3 被用户验收 |
@@ -27,7 +27,7 @@
 - [x] G0 复审设计与至少三张架构图、故障/状态/证据方案
 - [x] G0 持续记录：PROGRESS.md
 - [x] 复审后本机验证：Node v22 pnpm typecheck PASS；38 文件/724 个 unit tests PASS；contracts 下 forge test -q PASS；文档链接/5 张 Mermaid/diff-check PASS
-- [ ] 用户 G0 验收回执（填写日期与明确结论后才开启 G1）
+- [x] 用户 G0 验收回执：2026-10-20 用户回复「可以,按你建议来,验收通过」；认可 G0 修订版，起始验收 head f92a4b4（填写日期与明确结论后才开启 G1）
 
 ## G0 验收者需要确认
 
@@ -47,4 +47,4 @@
 
 `G0 ACCEPTED / CHANGES_REQUESTED — 日期 — 验收提交 SHA — 意见/阻塞`。
 
-只有收到用户明确 `G0 ACCEPTED`（或等效意思）才能把 G1 改成 `IN_PROGRESS`。每个阶段都沿用同一机制；不能自动跳过。
+G0 已于 2026-10-20 由用户明确验收通过。G1 现可启动；G1 只有在实现、验证、提交推送 PR 并取得用户下一次明确验收后，才能开启 G2。GitHub review/CI 和用户业务验收是独立门禁。
