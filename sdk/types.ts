@@ -84,7 +84,7 @@ export interface TxResult { txHash: Hex }
 
 export interface ICometENS {
   readonly profile: Readonly<NetworkProfile>
-  verifyNetwork(): Promise<void>
+  verifyNetwork(options?: { force?: boolean }): Promise<void>
   getAddr(name: string): Promise<Address | null>
   getAddrByCoinType(name: string, coinType: bigint): Promise<Hex | null>
   getText(name: string, key: string): Promise<string | null>

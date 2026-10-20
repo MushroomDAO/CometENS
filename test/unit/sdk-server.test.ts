@@ -4,6 +4,7 @@ import { createSelfHostedProfile } from '../../sdk/profiles'
 import type { NetworkProfile } from '../../sdk/types'
 
 const signer = '0x1111111111111111111111111111111111111111' as const
+const DEADLINE = BigInt(Math.floor(Date.now() / 1000) + 600)
 const profile: NetworkProfile = createSelfHostedProfile({
   id: 'selfhost-test',
   protocol: 'v3',
@@ -41,10 +42,10 @@ describe('@cometens/sdk/server secret segregation', () => {
     }))
     const client = createCometENSServerClient(profile, { getApiKey: async () => 'server-only-key' })
     await expect(client.register({ from: signer, signature: '0x', message: {
-      parent: 'example.eth', label: 'alice', owner: signer, nonce: 4n, deadline: 2000000000n,
+      parent: 'example.eth', label: 'alice', owner: signer, nonce: 4n, deadline: DEADLINE,
     } })).rejects.toMatchObject({ kind: 'invalid-input' })
     await client.register({ from: signer, signature: '0x1234', message: {
-      parent: 'example.eth', label: 'alice', owner: signer, nonce: 4n, deadline: 2000000000n,
+      parent: 'example.eth', label: 'alice', owner: signer, nonce: 4n, deadline: DEADLINE,
     } })
     expect(calls).toHaveLength(1)
     expect(calls[0]?.authorization).toBe('Bearer server-only-key')

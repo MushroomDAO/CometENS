@@ -54,6 +54,10 @@ function checkCommon(message: { nonce: bigint; deadline: bigint }): void {
       typeof message.deadline !== 'bigint' || message.deadline <= 0n) {
     throw new SDKError('invalid-input', 'nonce and deadline must be explicit nonnegative uint256 / positive Unix seconds')
   }
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  if (message.deadline < now || message.deadline > now + 86_400n) {
+    throw new SDKError('invalid-input', 'deadline is expired or exceeds Worker 24-hour validity limit')
+  }
 }
 
 export const nodeOf = (name: string): Hex => namehash(name) as Hex
