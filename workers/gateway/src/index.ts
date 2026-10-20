@@ -461,15 +461,27 @@ async function _decideUseProof(
 async function handleHybrid(requestHex: Hex, sender: Hex, env: Env): Promise<Response> {
   // HybridResolver.resolve sends abi.encode(bytes context, GatewayRequest req, bytes data).
   // GatewayRequest is the struct { bytes ops }.
-  const [context, reqStruct, recordData] = decodeAbiParameters(
-    [
-      { type: 'bytes' },
-      { type: 'tuple', components: [{ name: 'ops', type: 'bytes' }] },
-      { type: 'bytes' },
-    ],
-    requestHex,
-  ) as [Hex, { ops: Hex }, Hex]
+  let decoded: [Hex, { ops: Hex }, Hex]
+  try {
+    decoded = decodeAbiParameters(
+      [
+        { type: 'bytes' },
+        { type: 'tuple', components: [{ name: 'ops', type: 'bytes' }] },
+        { type: 'bytes' },
+      ],
+      requestHex,
+    ) as [Hex, { ops: Hex }, Hex]
+  } catch {
+    throw new GatewayInputError('Invalid hybrid request')
+  }
+  const [context, reqStruct, recordData] = decoded
 
+  // The proof VM request and the ENS record call both come from an untrusted HTTP client.
+  if (context.length > 16386 || reqStruct.ops.length > 16386) {
+    throw new GatewayInputError('Hybrid proof request too large', 413)
+  }
+  validateHexData(recordData)
+  validateReadCalldata(recordData)
   const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data: recordData })
   if (!args) throw new Error('Unsupported selector')
 
@@ -526,6 +538,92 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
+const MAX_CCIP_BODY_BYTES = 32 * 1024
+const MAX_CCIP_CALLDATA_BYTES = 8 * 1024
+
+class GatewayInputError extends Error {
+  constructor(message: string, readonly status = 400) { super(message) }
+}
+
+function gatewayError(message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status, headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  })
+}
+
+/** All endpoints, including signature mode, must be restricted to deployed resolvers. */
+function validateSender(sender: unknown, env: Env): void {
+  if (typeof sender !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(sender)) {
+    throw new GatewayInputError('Invalid sender address')
+  }
+  const configured = env.ALLOWED_SENDERS?.split(',').map(s => s.trim()) ?? []
+  if (!configured.length || configured.some(s => !/^0x[0-9a-fA-F]{40}$/.test(s))) {
+    throw new GatewayInputError('Gateway sender allowlist is not configured', 503)
+  }
+  if (!configured.some(s => s.toLowerCase() === sender.toLowerCase())) {
+    throw new GatewayInputError('Sender not allowed', 403)
+  }
+}
+
+function validateHexData(value: unknown, maxBytes = MAX_CCIP_CALLDATA_BYTES): asserts value is Hex {
+  if (typeof value !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(value) || value.length < 10) {
+    throw new GatewayInputError('Invalid calldata')
+  }
+  if ((value.length - 2) / 2 > maxBytes) throw new GatewayInputError('Calldata too large', 413)
+}
+
+/** Signature responses must correspond to a supported, bounded ENS read. */
+function validateReadCalldata(data: Hex): void {
+  try {
+    const { functionName, args } = decodeFunctionData({ abi: L2RecordsV2ABI, data })
+    if (!['addr', 'text', 'contenthash'].includes(functionName)) throw new Error('not a record read')
+    if (functionName === 'text' && (!args || typeof args[1] !== 'string' ||
+      new TextEncoder().encode(args[1]).length > 256)) throw new Error('invalid text key')
+  } catch {
+    throw new GatewayInputError('Unsupported or invalid ENS record call')
+  }
+}
+
+async function parseCcipJson(request: Request): Promise<Record<string, unknown>> {
+  if (Number(request.headers.get('content-length') ?? '0') > MAX_CCIP_BODY_BYTES) {
+    throw new GatewayInputError('Request body too large', 413)
+  }
+  const reader = request.body?.getReader()
+  let body = ''
+  if (reader) {
+    let size = 0
+    const decoder = new TextDecoder()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > MAX_CCIP_BODY_BYTES) {
+          void reader.cancel()
+          throw new GatewayInputError('Request body too large', 413)
+        }
+        body += decoder.decode(value, { stream: true })
+      }
+      body += decoder.decode()
+    } finally {
+      reader.releaseLock()
+    }
+  }
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    return parsed as Record<string, unknown>
+  } catch {
+    throw new GatewayInputError('Invalid JSON body')
+  }
+}
+
+function safeGatewayFailure(e: unknown, fallback: string): Response {
+  if (e instanceof GatewayInputError) return gatewayError(e.message, e.status)
+  // Do not reflect viem/ethers RPC URLs, request bodies or provider tokens to callers.
+  return gatewayError(fallback, 502)
+}
+
 // Matches EIP-3668 GET URL template: /{sender}/{data}
 // sender: 0x + 40 hex chars (address)
 // data:   0x + any hex (calldata)
@@ -548,56 +646,14 @@ export default {
       const m = path.match(PROOF_PATH_RE)
       if (m) {
         const [, sender, calldata] = m
-        // Validate sender against allowlist (if configured).
-        // sender = L1 resolver address that emitted OffchainLookup.
-        if (env.ALLOWED_SENDERS) {
-          const allowed = env.ALLOWED_SENDERS.split(',').map((s) => s.trim().toLowerCase())
-          if (!allowed.includes(sender.toLowerCase())) {
-            return new Response(JSON.stringify({ error: 'Sender not allowed' }), {
-              status: 403,
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            })
-          }
-        }
-
-        // Validate calldata format: must be valid hex, 4+ bytes (selector), ≤ 8KB.
-        const dataHex = calldata.slice(2) // strip 0x
-        if (dataHex.length % 2 !== 0) {
-          return new Response(JSON.stringify({ error: 'Invalid calldata: odd-length hex' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-        if (dataHex.length < 8) { // minimum 4 bytes = function selector
-          return new Response(JSON.stringify({ error: 'Calldata too short' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-        if (dataHex.length > 16384) { // 8KB max
-          return new Response(JSON.stringify({ error: 'Calldata too large' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
         try {
+          validateSender(sender, env)
+          validateHexData(calldata)
           return await handleProofMode(calldata as Hex, sender as Hex, env)
         } catch (e) {
-          // Logged, not returned. The reason was already being computed here and then dropped
-          // on the floor, so a proof-mode failure was undiagnosable: the caller got
-          // "Proof generation failed" and the operator got nothing at all — this worker had no
-          // console output anywhere.
-          //
-          // It stays out of the response body deliberately. #30 shipped a credential leak
-          // through exactly that path: an upstream error string carrying the RPC provider key,
-          // returned to anonymous callers. Worker logs are the operator's own; a response body
-          // is the whole internet's.
-          const message = e instanceof Error ? e.message : String(e)
-          console.error('[proof-mode] proof generation failed:', message)
-          return new Response(JSON.stringify({ error: 'Proof generation failed' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
+          // Avoid logging provider URLs with embedded API keys, even in central logs.
+          if (!(e instanceof GatewayInputError)) console.error('[proof-mode] proof generation failed')
+          return safeGatewayFailure(e, 'Proof generation failed')
         }
       }
     }
@@ -613,30 +669,12 @@ export default {
         })
       }
       try {
-        const payload = (await request.json()) as { sender?: Hex; data?: Hex }
-        if (!payload.data || !payload.data.startsWith('0x')) {
-          return new Response(JSON.stringify({ error: 'Missing data' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-        if (!payload.sender || !payload.sender.startsWith('0x')) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid sender' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-        if (env.ALLOWED_SENDERS) {
-          const allowed = env.ALLOWED_SENDERS.split(',').map((s) => s.trim().toLowerCase())
-          if (!allowed.includes(payload.sender.toLowerCase())) {
-            return new Response(JSON.stringify({ error: 'Sender not allowed' }), {
-              status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            })
-          }
-        }
-        return await handleHybrid(payload.data, payload.sender, env)
-      } catch {
-        return new Response(JSON.stringify({ error: 'Hybrid resolution failed' }), {
-          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        })
+        const payload = await parseCcipJson(request)
+        validateSender(payload.sender, env)
+        validateHexData(payload.data, MAX_CCIP_BODY_BYTES)
+        return await handleHybrid(payload.data, payload.sender as Hex, env)
+      } catch (e) {
+        return safeGatewayFailure(e, 'Hybrid resolution failed')
       }
     }
 
@@ -652,27 +690,13 @@ export default {
       }
 
       try {
-        const payload = (await request.json()) as {
-          data?: Hex
-          calldata?: Hex
-          sender?: Hex
-        }
+        const payload = await parseCcipJson(request)
 
         const calldata = payload.calldata ?? payload.data
-        if (!calldata || !calldata.startsWith('0x')) {
-          return new Response(JSON.stringify({ error: 'Missing calldata' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-
-        if (!payload.sender || !payload.sender.startsWith('0x')) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid sender (resolver address)' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          })
-        }
-        const resolverAddress: Hex = payload.sender
+        validateSender(payload.sender, env)
+        validateHexData(calldata)
+        validateReadCalldata(calldata)
+        const resolverAddress = payload.sender as Hex
 
         const result = await handleResolveSigned(calldata, resolverAddress, env)
 
@@ -681,11 +705,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        return new Response(JSON.stringify({ error: message }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        })
+        return safeGatewayFailure(e, 'CCIP resolution failed')
       }
     }
 

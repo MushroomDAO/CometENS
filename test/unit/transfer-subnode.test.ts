@@ -67,6 +67,14 @@ function makeEnv(overrides: Partial<{
     ROOT_DOMAIN: 'aastar.eth',
     OP_RPC_URL: 'http://localhost:8545',
     WORKER_EOA_PRIVATE_KEY: OWNER_PK,
+    // Writes now fail closed when no replay KV is configured. Each test needs a
+    // nonce store to reach the input/signature/ownership check it intends to test.
+    REGISTRY: {
+      get: async () => null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true }),
+    },
     ...overrides,
   }
 }
