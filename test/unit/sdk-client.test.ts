@@ -15,7 +15,6 @@ import type { NetworkProfile } from '../../sdk/types'
 const CONTRACT = '0x1111111111111111111111111111111111111111' as Address
 const RESOLVER = '0x2222222222222222222222222222222222222222' as Address
 const RECIPIENT = '0x3333333333333333333333333333333333333333' as Address
-const HASH = ('0x' + '55'.repeat(32)) as Hex
 const TX = ('0x' + '44'.repeat(32)) as Hex
 const DEADLINE = BigInt(Math.floor(Date.now() / 1000) + 600)
 const signer = privateKeyToAccount(('0x' + '01'.repeat(32)) as Hex)
@@ -227,9 +226,19 @@ describe('@cometens/sdk signed write compatibility', () => {
       { path: '/set-contenthash', data: typedDataForSetContenthash(profile, contenthash), message: contenthash, run: client.setContenthash.bind(client) },
     ] as const
     for (const item of messages) {
-      const signature = await signer.signTypedData(item.data)
+      // Narrow the EIP-712 primary type for viem's generic signer API.
+      const signature = item.path === '/set-addr'
+        ? await signer.signTypedData(typedDataForSetAddr(profile, addr))
+        : item.path === '/set-text'
+          ? await signer.signTypedData(typedDataForSetText(profile, text))
+          : await signer.signTypedData(typedDataForSetContenthash(profile, contenthash))
       await item.run({ from: signer.address, signature, message: item.message } as never)
-      expect(await verifyTypedData({ ...item.data, address: signer.address, signature })).toBe(true)
+      const valid = item.path === '/set-addr'
+        ? await verifyTypedData({ ...typedDataForSetAddr(profile, addr), address: signer.address, signature })
+        : item.path === '/set-text'
+          ? await verifyTypedData({ ...typedDataForSetText(profile, text), address: signer.address, signature })
+          : await verifyTypedData({ ...typedDataForSetContenthash(profile, contenthash), address: signer.address, signature })
+      expect(valid).toBe(true)
     }
     expect(bodies.map(b => b.path)).toEqual(messages.map(item => 'https://api.test' + item.path))
     expect(bodies[0]?.json.message).toEqual({
