@@ -10,45 +10,29 @@
 4. **可撤销工作 EOA**。受限 operator 负责被授权 parent 下的“尚未最终交权的发行与管理”，包含 parent、权限、配额、到期时间、nonce/epoch；所有状态写操作以链上权限为最终仲裁。撤销的生效基准是交易所在链达到所选确认程度；已先确认的操作不可倒退。
 5. **AAStar 多签的边界**。仅管理 AAStar 自有服务 profile、部署和运营资金；不可保留已交权社区/成员名字的超级管理员路径。共享不可升级核心应按 parent 隔离；运维层（API、限流、网关、索引器）可升级，不能授予自己管理已交权产权或修改不可变记录的权限。严禁共享 owner、代理管理员、任意 delegatecall、角色管理员、桥接守护人或 emergency owner 形成同等后门。
 
-### 1.1 SDK 与后端配置契约（拟定，G1 锁定）
+### 1.1 SDK 与后端配置合同（G1 统一）
 
-~~~typescript
-type CometENSProfile = {
-  profileId: string;                   // aastar-sepolia / aastar-mainnet / community-*
-  protocol: 'ens-v1' | 'ens-v2-beta';  // 主网 v2 尚需正式部署核实
-  parentName: string;                  // 例如 communityxxx.eth
-  chains: {
-    l1: { chainId: 11155111 | 1; rpcUrl: string };
-    l2: { chainId: 11155420 | 10; rpcUrl: string };
-  };
-  contracts: {
-    l1Resolver: `0x${string}`;
-    l2Records: `0x${string}`;
-    controller?: `0x${string}`;
-    ensRegistry?: `0x${string}`;
-    nameWrapper?: `0x${string}`; // ENSv1，需记录标准部署地址/链
-    verifier?: `0x${string}`;
-  };
-  services: {
-    apiBaseUrl?: string;               // 管理/中继，独立于 CCIP gateway
-    gatewayUrls: string[];             // 解析网关（可配置多个）
-    projectId?: string;                // 可公开、限额、按站点约束的标识符
-  };
-  deploymentManifest: {
-    schemaVersion: string;
-    contractVersion: string;
-    chainCodeHashes: Record<string, `0x${string}`>;
-  };
+G1 正式字段以 `sdk/types.ts` 导出的 `NetworkProfile` 为准，下面和 [ARCHITECTURE.md](ARCHITECTURE.md) §2 一致；AAStar 托管和自部署共用接口，未来 G2/G4 配置与 metadata 通过独立适配器扩展。
+
+```typescript
+type NetworkProfile = {
+  id: string;
+  mode: 'managed' | 'selfHosted';
+  protocol: 'v3-readonly' | 'v3' | 'v4';
+  rootName: string; // communityxxx.eth 等 parent
+  l1: { chainId: 1 | 11155111; rpcUrl: string; resolverAddress: Address; expectedCodeHash?: Hex };
+  l2: { chainId: 10 | 11155420; rpcUrl: string; recordsAddress: Address; expectedCodeHash?: Hex };
+  apiBaseUrl?: string;  // 写入 API，独立于网关
+  gatewayUrls?: readonly string[];
 };
 
-// 秘密 API key 只在后端的 server-side client 注入，禁止放进公开 profile。
-createCometENSClient({ profile, walletClient });
-createCometENSServerClient({ profile, getApiKey: () => serverSecret });
-~~~
+createCometENSClient(profile); // 浏览器和服务器均可公开使用，无机密
+createCometENSServerClient(profile, { getApiKey }); // 仅 server-only 子入口
+```
 
-部署 manifest 需附链 ID、源代码版本、地址、codehash、合约不可变/代理情况、角色管理员清单、proof/signer mode。链与地址必须读 RPC 验证；profile 错链、合约无代码、关键 codehash 不符一律停止写入。SDK 应提供 **AAStar 默认 preset（显式选择 testnet/mainnet）** 和 **self-host preset**；不允许通过 RPC URL 字符串猜链或从 CCIP gateway URL 拼写入 API。
+部署 manifest（schema/version、字节码哈希、ENSv1 NameWrapper、controller、verifier、角色管理员及 ENSv2 资源权限）作为**未来 G2/G4 的独立安全证据/扩展合同**。G1 可选 expectedCodeHash（runtime keccak256）防地址被替换；未提供 hash 时只能确认链 ID/字节码存在及 V3 ABI 兼容，不能宣称特定已审计代码完全一致。主网 AAStar 默认 preset 必须等主网实际部署后才能提供。自部署用户可完整替换两条链 RPC、合约地址、写入 API 与解析网关。
 
-**API key 与签名用途完全不同**：前端只能使用可撤销且受 origin/限速约束的公开 project ID（不能当作安全凭证）；服务端 API key 用于限额、账单、租户身份、服务防滥用。它**不能授权链上写操作**；创建、签名、撤销和最终交权必须由社区 owner、成员 owner 或受限 operator 在链上接受验证。SDK 不保存任何 owner 私钥。免费层不能控制社区的解锁/退出。
+**API key 与签名用途完全不同**：前端只能使用无写权限且可限流的公开 project ID（G4 待实现），服务端机密 key 在 runtime 单独注入，绝不放入 VITE_ 变量、public profile 或 URL。链上发行/改记录/撤销仍必须签署并由链上或相应 Worker 权限验证；V3 全局 owner 风险不会因 API key 或多签代管自动消失。免费额度、租户计费/访问验证亦是 G4 计划能力，G1 只交付 SDK 的 server-only 注入通道。
 
 ## 2. 现有合约与将来 ENSv1/ENSv2 的三张架构图
 
@@ -62,7 +46,7 @@ flowchart LR
   G --> L["OP L2RecordsV3<br/>ERC721 + records"]
   P["V3 全局 owner"] -->|"可覆写记录 / 收回 NFT / 管 registrar"| L
   P -->|"可换 signer / verifier / gateway / L2 地址"| H
-  W["Worker / registrar"] -->|"被限制的部分发行权限"| L
+  W["Worker EOA / registrar<br/>当前部署可能就是全局 owner"] -->|"registrar 时有限；owner 时可越权"| L
   M["成员持有 OP ERC721"] --> L
 ~~~
 

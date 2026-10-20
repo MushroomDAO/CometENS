@@ -43,37 +43,28 @@ flowchart LR
 - API Worker 中若 `ROOT_DOMAIN` 与 `ROOT_DOMAINS` 都缺失，部分 `/register` 根域名白名单路径会放行（`workers/api/src/index.ts`）；必须改为启动/请求 fail-closed，并覆盖错误部署测试。
 - 现有 KV nonce `get` + `put` 缺乏原子性，且未配置 KV 时可能跳过重放保护。G1/G2 的写入接口需链上 nonce 或同等强度的原子状态门禁；不能以 KV 最终一致性作为不可重放承诺。
 
-## 2. G1 SDK 稳定外观（拟定）
+## 2. G1 SDK 稳定外观（唯一合同）
+
+**2026-10-20 评审统一**：以 G1 PR 的 `sdk/types.ts` 中 `NetworkProfile` 和 `sdk/index.ts` 为唯一字段/导出基准；[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md) §1.1 使用相同模型。本节是稳定合同示意，正式实现以 G1 PR #111 的源码/版本为准。
 
 ```typescript
 type NetworkProfile = {
-  l1ChainId: 11155111 | 1;
-  l2ChainId: 11155420 | 10;
-  l1RpcUrl: string;
-  l2RpcUrl: string;
-  l1Resolver: `0x${string}`;
-  l2Records: `0x${string}`;
-  apiUrl?: string;       // 显式设置，不通过 gateway URL 推导
-  gatewayUrls: string[]; // 可空；直接 L2 read 不依赖网关
+  id: string;
+  mode: 'managed' | 'selfHosted';
+  protocol: 'v3-readonly' | 'v3' | 'v4';
+  rootName: string; // 授权 parent 名字
+  l1: { chainId: 1 | 11155111; rpcUrl: string; resolverAddress: Address; expectedCodeHash?: Hex };
+  l2: { chainId: 10 | 11155420; rpcUrl: string; recordsAddress: Address; expectedCodeHash?: Hex };
+  apiBaseUrl?: string; // 独立写入 API
+  gatewayUrls?: readonly string[]; // CCIP gateway；与 apiBaseUrl 不混用
 };
-
-// 拟定的能力面；以下是设计示例，并非当前可运行 API。
-interface CommunityENSClient {
-  read: {
-    getAddr(name: string): Promise<`0x${string}` | null>;
-    getText(name: string, key: string): Promise<string | null>;
-    resolve(name: string, strategy: 'l2' | 'ens'): Promise<unknown>;
-  };
-  owner: { grantOperator(input: unknown): Promise<unknown>; revokeOperator(input: unknown): Promise<unknown> };
-  operator: { allocate(input: unknown): Promise<unknown>; setRecord(input: unknown): Promise<unknown> };
-}
 ```
 
-- `read`、`owner`、`operator`、`compat/ensv1`、未来 `compat/ensv2` 以子路径独立暴露，可树摇；默认公共读取无需钱包/密钥。
-- 显式 `parentName` / `parentNode` 与当前持有者绑定，避免单 `ROOT_DOMAIN` 隐含操作范围。EIP-712 的 domain、chainId、verifyingContract、nonce、deadline 与签名时的消息必须逐字段一致。
-- 错误结构至少包含 `kind`（invalid-input / unauthorized / revoked / stale / chain-mismatch / unsupported-network / rpc-unavailable / ccip-failure）、`chainId`、安全的关联 id；任何 RPC 凭据和私钥绝不进入错误响应。
-- SDK 不强制调用本项目托管 worker；自部署者提供自己的 RPC/API/网关。第三方 AAStar 应通过组合适配器接入，避免形成对整个 `@aastar/sdk` 的循环依赖。
-- ABI 和公开类型应提供语义版本；新版 V4 与 V3 协议适配器显式分离，不利用猜地址/读不出就降级到不安全接口。
+- `new CometENS(profile)` / `createCometENSClient(profile)`：`verifyNetwork()` 验两条链 ID/地址 bytecode，可选 runtime codehash；`getAddr/getText/getContenthash/resolve` **直接读取 OP**，`getEnsAddress` 通过 Ethereum 标准 ENS 查解析，不能混为一谈。
+- `typedDataForRegister/SetAddr/SetText/SetContenthash/AddRegistrar/RemoveRegistrar` 构造当前 V3 Worker 的严格签名合同；提交接口接收调用者签好的完整 `{from, signature, message}`，不再重建 nonce/deadline/owner。
+- `protocol:'v3-readonly'` 不允许写，`protocol:'v3'` 兼容当前 Worker；`protocol:'v4'` 须等 G2 实际合约验证后才开放。V3 旧合约的全局 owner 能绕过 registrar，不能把这个接口宣传成 G2 的可撤销独立权限。
+- `createCometENSServerClient(profile, { getApiKey })` 仅在 `@cometens/sdk/server` 子入口支持机密服务 API key；公开 profile 和浏览器构建不能含 key。API key 负责服务计量/访问，不赋予链上写权限。
+- SDK 内的配置字段及错误语义必须版本化；自托管显式填写服务地址，不能由 RPC URL 或 gateway URL 猜链、拼写接口、或在失败时隐式转到平台托管路径。未来 G2 的 per-parent controller、ENSv2 roles 和 G4 部署 manifest 是**另一个阶段的协议能力**，不会偷偷混入 G1 public profile。
 
 ## 3. G2 owner 与可撤销工作 EOA（拟定）
 
