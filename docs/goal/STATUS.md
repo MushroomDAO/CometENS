@@ -27,6 +27,7 @@
 - [x] OP Sepolia live check:chain 及 SDK real read；记录 L2 与 L1 ENS 结果可不同，不将其等同
 - [x] G1 原子 PR 栈均已创建和推送：[API #112](https://github.com/MushroomDAO/CometENS/pull/112) → [协议基础层 #113](https://github.com/MushroomDAO/CometENS/pull/113) → [SDK 客户端 #114](https://github.com/MushroomDAO/CometENS/pull/114) → [最终集成 Demo / 验收 #111](https://github.com/MushroomDAO/CometENS/pull/111)，基于 G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110)
 - [x] 增加独立 [G1 CI #115](https://github.com/MushroomDAO/CometENS/pull/115)：宽范围类型错误从 6 收口为 5，CI `pull_request` 支持 `goal/**` base；本地 `pnpm check:typecheck-scope` 通过
+- [x] GitHub [#115](https://github.com/MushroomDAO/CometENS/pull/115) 及最终集成 [#111](https://github.com/MushroomDAO/CometENS/pull/111) 的 `cla-check` / 完整 `test` 均在对应已验证 head 通过（run 链接见 G1-ACCEPTANCE）；后续 head 更新需重新验证
 - [ ] G0/G1 PR 完成 GitHub reviewer 审核与新 head CI，工作流触发及完整 CI 仍须用 GitHub 实际结果核对；G0 #110 历史 `CHANGES_REQUESTED` 尚待重新审批
 - [ ] 用户明确 G1 验收（完成后才进入 G2）
 

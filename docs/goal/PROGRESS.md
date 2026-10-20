@@ -115,6 +115,12 @@ G1 子任务 PR 正式组成：[API #112](https://github.com/MushroomDAO/CometEN
 
 最新 PR 合并次序：G0 #110 → API #112 → SDK foundation #113 → SDK package #114 → CI #115 → G1 demo/验收 #111。所有 PR 必须分别得到当前 head 审批、CI 通过与可合并状态；用户已经接受 G0，但 **G1 业务验收尚未收到**，所以 G2 继续 BLOCKED。线上 ENS L1 与 OP L2 同名解析结果可能不一致，仍由后续 G3/G5 的真实部署与故障演练验证，不列为 G1 已解决。
 
+### 2026-10-20 · GitHub G1 最终集成 CI 验证完成
+
+G1 新增的 Goal PR CI 触发器已由 GitHub 实际验证：[PR #115](https://github.com/MushroomDAO/CometENS/pull/115) 的 `cla-check` 和 `test` 均 SUCCESS。最终 [PR #111](https://github.com/MushroomDAO/CometENS/pull/111) 在 head `9306f21b5c7522124f5cc6340e13fd24abe977f6` 上的 [Tests 工作流 run 39413890122](https://github.com/MushroomDAO/CometENS/actions/runs/39413890122) `conclusion=success`，同一 head 的 `cla-check` SUCCESS。该证据证明 `goal/**` 基分支可以运行完整 GitHub 门禁，但**不代替**上游各 PR 独立 reviewer 的批准。
+
+本记录如通过新的 commit 写入 #111，**前一提交的 CI 绿灯不得自动视作新 head 的绿灯**；再次检查最新 GitHub head/status 后才可宣称最终 ready。G0 #110 在 head a0b34c0 cla-check/test SUCCESS，旧的 `CHANGES_REQUESTED` 尚待 clestons 对修复后的 head 重新审批。用户 G1 验收仍 PENDING，G2 继续 BLOCKED。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
