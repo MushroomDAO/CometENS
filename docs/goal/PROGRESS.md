@@ -53,6 +53,12 @@
 
 当前 GitHub G0 PR #110（head f92a4b4）cla-check/test 均 PASS，mergeable=true，但 reviewDecision=REVIEW_REQUIRED；需按仓库规则继续评审，不把聊天验收冒充 GitHub PR 审核。
 
+### 2026-10-20 · G1 worktree 并行启动
+
+基线：G0 用户验收文档提交 8652eb8f7607825898553ae1e458e460a81f8711，已推送 origin/goal/g0-community-ens-plan。独立 worktree：goal/g1-sdk 位于 ../CometENS-g1-sdk（SDK package/profile/typed write，worker-2）；goal/g1-api 位于 ../CometENS-g1-api（API Worker / Gateway fail-closed，worker-1）；goal/g1-integration 位于 ../CometENS-g1-integration（SDK 独立 demo、文档、合并与整体验证，由 prime 负责）。
+
+集成支线已开始 docs/SDK-INTEGRATION.md 和 examples/sdk-vanilla（外部可消费 TS demo）；修正旧 docs/ens-domain-transfer.md 里的普通 Registry 转让后不可能收回的错误安全承诺。待两 worker 提交、实测 SDK 最终 public API，再校正 sample imports/config、执行独立 build/typecheck/pack 及主仓库 tests。本条记录是进行中事实，尚不代表 G1 已交付。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。

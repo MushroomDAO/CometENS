@@ -1,5 +1,8 @@
 # ENS 域名转让与控制机制
 
+> **安全修正（2026-10-20）：本文包含早期设计假设，不能作为“转让后绝对不可收回”的证明。** 在普通 ENS Registry 下，父名 owner 仍可通过 setSubnodeOwner/setSubnodeRecord 重新分配子名。ENSv1 需验证 NameWrapper 父名 CANNOT_UNWRAP、子名 PARENT_CANNOT_CONTROL + CANNOT_UNWRAP、真实 owner、expiry/续期；ENSv2 使用不同 EAC 权限模型。参见 [G0 交权设计](goal/SECURITY-AND-SERVICE.md)。
+
+
 ## 核心概念：ENS 所有权 vs Resolver
 
 ```
@@ -125,15 +128,15 @@ aastar.eth (你的)
 forest.aastar.eth (转让给社区后)
 ├── 社区可以创建子域名：alice.forest.aastar.eth
 ├── 社区可以设置子域名的 Resolver
-└── 你不能再控制 forest.aastar.eth 下的任何操作
+└── 普通 ENS Registry 下父名仍有收回能力；最终交权需 NameWrapper fuse 和有效期验证
 ```
 
 ## 关键点
 
 ### 1. 二级域名所有权独立
-- `forest.aastar.eth` 是一个独立的 NFT（在 ENS 注册表中）
+- 普通 ENS Registry 中的子名只是 node→owner 映射，本身不是独立 NFT；NameWrapper 使用 ERC-1155 来表示被封装的名字
 - 转让后，你保留 `aastar.eth`，社区获得 `forest.aastar.eth`
-- 双方各自控制自己的子域名
+- 普通 Registry 转让仍保留父名收回能力；不可收回必须另做 NameWrapper 交权证明
 
 ### 2. 解析器（Resolver）可以共用
 - 多个域名可以共用同一个 OffchainResolver
@@ -246,6 +249,6 @@ await l2Records.addRegistrar(
 | 转让后谁控制子域名注册？ | 新的 owner（社区）|
 | 需要改 Resolver 吗？ | 可选，可以共用或独立部署 |
 | 需要改 L2Records 吗？ | 可选，可以授权或独立部署 |
-| 你可以收回吗？ | ❌ 不可以，除非社区同意转回 |
+| 上级 owner 可以收回吗？ | 普通 ENS Registry 下可以；正确的 NameWrapper fuse 在有效期内限制该能力，仍存在治理和到期风险 |
 
-这是 ENS 的标准功能，完全可行！
+必须根据 ENSv1 Registry/NameWrapper 或 ENSv2 的真实权限、expiry 与治理路径做链上验证。
