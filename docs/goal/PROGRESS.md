@@ -5,12 +5,12 @@
 ## 本次会话可恢复摘要（2026-10-20）
 
 - Repo：MushroomDAO/CometENS；工作树：/dev/mycelium/CometENS。
-- 当前 G0 工作分支：goal/g0-community-ens-plan；原始提交 6ada685，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110)。本次修订需要检查最后一次提交和 CI 结果，不应以旧 SHA 作为最新 head。
+- G0 工作分支：goal/g0-community-ens-plan，用户验收回执记录于 8652eb8（最初规划提交为 6ada685，仅作历史追溯）；GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 另有代码评审门禁。G1 在独立 worktree/PR 开发；每次恢复应查询各 PR 最新 head 和 CI。
 - 用户的七条原始目标完整保留在 [VISION.md](VISION.md)。2026-10-20 复审要求 AAStar 托管 + 免费层、SDK 可配置 API/key/合约、自部署、运营方退出后的真实产权/解析保障、临时超级权限清理、社区 L1 ENS 原生子名、续费基金、三张架构图、每步写 progress。
 - G0 **2026-10-20 已获用户验收**；G1 已解锁并开始实施，G2 继续等待 G1 的独立验收。
 - 新主方案：[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)，包含 V3/ENSv1/ENSv2 架构、两阶段状态机、Managed/Sovereign/Locked Record 等级、故障兜底、续费基金、独立交权凭证与可重跑验收矩阵。新增子任务已进入 [MILESTONES.md](MILESTONES.md)，状态见 [STATUS.md](STATUS.md)。
 - 现有测试基线（来自本轮此前 G0 执行记录，非本次修订后重跑）：2026-10-20，pnpm typecheck PASS；38 文件/706 项 Vitest unit PASS；forge test -q PASS。CI 在本次修订前的原 G0 commit 6ada685 上 cla-check 和 test 均 SUCCESS；本次修订推送后应重新看新 head CI。
-- 现有关键风险：V3 global owner 可覆写任何节点、代转 ERC721 和绕开 registrar；HybridResolver 的 owner 可换 signer/verifier/网关/L2 地址，gateway 可选择 SIG 模式；SDK 仍猜 RPC 网址链型、写旧 API 和重建 nonce。现有 OP ERC721 不是 ENS 原生子名产权。主网未部署。
+- G0 初始代码基线的关键风险：V3 global owner 可覆写节点、代转 ERC721 和绕开 registrar；HybridResolver owner 可换 signer/verifier/网关/L2 地址，gateway 可选择 SIG 模式；**旧版 SDK** 猜 RPC 网址链型、写旧 API 和重建 nonce，这些 SDK 问题在独立 G1 PR 中修复。现有 OP ERC721 不是 ENS 原生子名产权；主网未部署。
 - 上游 ENSv1 NameWrapper 的 PCC/CU/expiry 有期限和父名安全前提，且 NameWrapper 上游本身具升级/治理信任；ENSv2 采用可重新授予的 EAC 角色，不能自动继承 v1 fuse 保障。公开产品话术不得绝对保证“无条件永久”。
 
 ## 执行日志（追加记录）
@@ -78,10 +78,13 @@ worker-2 分支 goal/g1-sdk 提交并推送 70599ab、6034814、c580f1f（最终
 **最终机器验证（Node v22 + Foundry）**：pnpm typecheck PASS；pnpm vitest run test/unit/ **41 files / 766 tests PASS**；pnpm build PASS；sdk pnpm build PASS；contracts forge test -q PASS；examples/sdk-vanilla pnpm install --force / pnpm typecheck / pnpm build PASS；pnpm check:dist-secrets PASS；git diff --check PASS。无 npm publish/主网交易。
 
 **已知安全边界**：G1 完成 SDK 的兼容接入和 fail-closed Worker，不具备 G2 的 per-parent 原生不可夺权合约。Worker KV replay consume get+put 非原子，需 G2 处理。ENS L1/OP L2 结果对同名可能不同；已记录真实测试网样本，G3/G5 再做生产等级连续解析与可重跑 E2E。Gateway 需要设置实际 ALLOWED_SENDERS，G4 的 API key 计费/免费额度服务端尚未实现。G1 功能待用户验收，不允许因此自动进入 G2。
+### 2026-10-20 · G0 PR #110 评审整改
+
+PR-Daemon 对 G0 接受回执 head 8652eb8 提出 CHANGES_REQUESTED：G0 已验收的表格和部分未同步的“当前仍只执行 G0”说明矛盾。逐项修订 STATUS/VISION/MILESTONES/PROGRESS 的状态、恢复步骤和当前/历史叙述；统一两份 G1 NetworkProfile 技术草案，修正 V3 Worker 实际可能持有全局 owner 权限的图示。此条记录针对 GitHub 审核整改，**不撤销用户已经确认的 G0 业务验收**。修正提交 a0b34c0 已推送至 G0 PR #110，并通过普通 merge 同步到 G1 的 goal/g1-integration（最终 merge commit 以 Git 日志为准）；PR #110 仍需 GitHub reviewer 重新审阅，G1 的 READY_FOR_ACCEPTANCE 不代表业务验收通过。
 
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
-2. 若用户已认可 G0 并明确给出验收结论，将其日期、head SHA 和条件写入 STATUS；G1 才进入 IN_PROGRESS。若还没有验收，继续处理 G0 评论/复审，勿开始 G1 合约/SDK 实施。
+2. G0 已于 2026-10-20 获用户验收，G1 实施已启动。继续检查 G0 GitHub review/CI 及 G1 独立 PR 的执行和业务验收状态；**G1 用户验收前 G2 保持 BLOCKED**。
 3. 每个 Goal 先固定 API/ABI、权限与可重跑验收；实现后附 unit + Foundry + Sepolia 链上交易和独立验证证据。主网广播只属于完成 G5 且用户明确批准的 G6。
 4. 每完成一次审计、设计、修复、提交或阻塞，**追加**此文件的时间、结果、证据、失败、下一步；最后更新 STATUS，避免依赖聊天上下文。
