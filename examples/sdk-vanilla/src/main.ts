@@ -1,4 +1,4 @@
-import { createCometENSClient, type NetworkProfile } from '@cometens/sdk'
+import { createCometENSClient, SDKError, type NetworkProfile } from '@cometens/sdk'
 
 const text = (key: string): string => import.meta.env[key]?.trim() ?? ''
 const rootName = text('VITE_PARENT_NAME')
@@ -46,6 +46,9 @@ form.addEventListener('submit', async (event) => {
       source: 'L2Records direct read (not Universal Resolver)',
     }, null, 2)
   } catch (error) {
-    result.textContent = error instanceof Error ? error.message : 'Network or record lookup failed'
+    // Display a stable code, never an arbitrary third-party exception or RPC URL.
+    result.textContent = error instanceof SDKError
+      ? `Network or record lookup failed (${error.kind})`
+      : 'Network or record lookup failed'
   }
 })
