@@ -207,15 +207,18 @@ export default {
       trackEvent(env.ANALYTICS, path, 404)
       return jsonError('Not Found', 404)
     } catch (e: any) {
-      const status = e?.status ?? 500
+      const status = Number.isInteger(e?.status) && e.status >= 400 && e.status <= 599 ? e.status : 500
       trackEvent(env.ANALYTICS, path, status)
+      // Upstream errors may include RPC URLs, access tokens or request bodies in arbitrary
+      // fields. Only errors deliberately classified as client errors are safe to show.
+      const message = status >= 500 ? 'Service unavailable' : sanitiseErrorMessage(String(e?.message ?? 'Invalid request'))
       if (status === 429) {
-        return new Response(JSON.stringify({ error: sanitiseErrorMessage(String(e?.message ?? e)) }), {
+        return new Response(JSON.stringify({ error: message }), {
           status: 429,
           headers: { 'content-type': 'application/json', 'Retry-After': '60', ...corsHeaders() },
         })
       }
-      return jsonError(sanitiseErrorMessage(String(e?.message ?? e)), status)
+      return jsonError(message, status)
     }
   },
 }
@@ -226,13 +229,15 @@ async function handleCheckLabel(url: URL, env: Env): Promise<Response> {
   const label = url.searchParams.get('label')?.trim().toLowerCase()
   const parent = url.searchParams.get('parent')?.trim()
   if (!label || !parent) return jsonError('Missing label or parent param', 400)
+  if (label.length > 63 || !/^[a-z0-9_-]+$/.test(label)) return jsonError('Invalid label', 400)
 
   // Validate parent format and whitelist
   if (parent.length > 253 || !/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(parent)) {
     return jsonError('parent must be a valid ENS name', 400)
   }
   const allowedParents = getRootDomains(env)
-  if (allowedParents.length > 0 && !allowedParents.includes(parent)) {
+  if (allowedParents.length === 0) return jsonError('Root domains not configured', 503)
+  if (!allowedParents.includes(parent)) {
     return jsonError(`parent '${parent}' is not an allowed root domain`, 400)
   }
 
@@ -480,7 +485,9 @@ async function buildResolveEstimate(env: Env): Promise<Record<string, unknown>> 
 async function handleV1RegisterEndpoint(request: Request, env: Env): Promise<Response> {
   const allowedRaw = env.UPSTREAM_ALLOWED_SIGNERS ?? ''
   if (!allowedRaw) return jsonError('UPSTREAM_ALLOWED_SIGNERS not configured on server', 503)
-  if (!env.ROOT_DOMAIN) return jsonError('ROOT_DOMAIN not configured on server', 503)
+  if (!env.ROOT_DOMAIN?.trim() || !getRootDomains(env).includes(env.ROOT_DOMAIN.trim().toLowerCase())) {
+    return jsonError('ROOT_DOMAIN not configured as an allowed root', 503)
+  }
 
   const payload = await parseJson(request)
   const allowedSigners = allowedRaw.split(',').map((a: string) => a.trim())
@@ -582,6 +589,11 @@ async function requireValidSignature(params: Parameters<typeof verifyTypedData>[
 }
 
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
+  // No state-changing route may execute without a durable replay store.
+  // CF KV is not atomic across PoPs; G2 will replace this with on-chain nonces.
+  if (!env.REGISTRY && !env.RECORD_CACHE) {
+    throw Object.assign(new Error('Nonce storage is not configured'), { status: 503 })
+  }
   const payload = await parseJson(request)
 
   const from = payload.from as string | undefined
@@ -653,14 +665,17 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // could store XSS/injection payloads that are returned to clients.
     const parent = msg.parent as string
     if (parent.length > 253) throw badReq('parent too long')
-    if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
+    if (!/^[a-z0-9_-]{1,63}(\.[a-z0-9_-]{1,63})+$/.test(parent)) throw badReq('parent must be a valid ENS name (e.g. forest.aastar.eth)')
 
     // Security: reject parent domains not in ROOT_DOMAINS whitelist.
     // The Worker EOA is the contract owner and can write to ANY parentNode on-chain,
     // so without this check an attacker could register under arbitrary ENS namespaces
     // (e.g. vitalik.eth) that this service has no authority over.
     const allowedParents = getRootDomains(env)
-    if (allowedParents.length > 0 && !allowedParents.includes(parent)) {
+    if (allowedParents.length === 0) {
+      throw Object.assign(new Error('ROOT_DOMAIN(S) not configured'), { status: 503 })
+    }
+    if (!allowedParents.includes(parent)) {
       throw badReq(`parent '${parent}' is not an allowed root domain`)
     }
 
@@ -746,6 +761,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     if (typeof msg.key !== 'string' || !msg.key) throw badReq('Invalid key')
     if (typeof msg.value !== 'string') throw badReq('Invalid value')
+    if (new TextEncoder().encode(msg.key).length > 256) throw badReq('Text key too long (max 256 bytes)')
+    if (new TextEncoder().encode(msg.value).length > 4096) throw badReq('Text value too long (max 4096 bytes)')
 
     const message = {
       node: msg.node as Hex,
@@ -786,6 +803,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const msg = payload.message ?? {}
     if (!isBytes32(msg.node)) throw badReq('Invalid node: must be 32-byte hex (0x + 64 chars)')
     if (!isHex(msg.hash)) throw badReq('Invalid hash')
+    if (msg.hash.length > 8194 || msg.hash.length % 2 !== 0) throw badReq('Contenthash too large or malformed')
 
     const message = {
       node: msg.node as Hex,
@@ -837,6 +855,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       deadline: asBigInt(msg.deadline, 'deadline'),
     }
     if (!isAddress(message.owner)) throw badReq('Invalid owner address')
+    // Validate the namespace before consuming a one-time signature.
+    requireAllowedRoot(message.parent, env)
     checkDeadline(message.deadline)
 
     // A distinct primaryType, so an Apply signature cannot be replayed as a Register.
@@ -1049,10 +1069,19 @@ async function registryAppendName(kv: KVNamespace, address: string, fullName: st
 
 /** Returns all configured root domains. Falls back to ROOT_DOMAIN if ROOT_DOMAINS is not set. */
 function getRootDomains(env: Env): string[] {
-  if (env.ROOT_DOMAINS) {
-    return env.ROOT_DOMAINS.split(',').map(d => d.trim()).filter(Boolean)
+  const configured = env.ROOT_DOMAINS?.trim()
+    ? env.ROOT_DOMAINS.split(',').map(d => d.trim().toLowerCase())
+    : env.ROOT_DOMAIN?.trim() ? [env.ROOT_DOMAIN.trim().toLowerCase()] : []
+  if (configured.some(d => d.length > 253 || !/^[a-z0-9_-]{1,63}(\.[a-z0-9_-]{1,63})+$/.test(d))) {
+    throw Object.assign(new Error('Invalid ROOT_DOMAIN(S) configuration'), { status: 503 })
   }
-  return env.ROOT_DOMAIN ? [env.ROOT_DOMAIN] : []
+  return configured
+}
+
+function requireAllowedRoot(parent: string, env: Env): void {
+  const allowed = getRootDomains(env)
+  if (!allowed.length) throw Object.assign(new Error('ROOT_DOMAIN(S) not configured'), { status: 503 })
+  if (!allowed.includes(parent)) throw badReq('parent is not an allowed root domain')
 }
 
 /**
@@ -1102,10 +1131,13 @@ function requireWriter(env: Env): L2RecordsWriterV2 {
 }
 
 function asBigInt(value: unknown, fieldName = 'field'): bigint {
-  if (typeof value === 'bigint') return value
-  if (typeof value === 'number') return BigInt(value)
-  if (typeof value === 'string' && value !== '') return BigInt(value)
-  throw badReq(`Invalid or missing bigint ${fieldName}`)
+  let parsed: bigint
+  if (typeof value === 'bigint') parsed = value
+  else if (typeof value === 'number' && Number.isSafeInteger(value)) parsed = BigInt(value)
+  else if (typeof value === 'string' && /^(?:[0-9]{1,78}|0x[0-9a-fA-F]{1,64})$/.test(value)) parsed = BigInt(value)
+  else throw badReq(`Invalid or missing bigint ${fieldName}`)
+  if (parsed < 0n || parsed > (1n << 256n) - 1n) throw badReq(`Invalid bigint ${fieldName}`)
+  return parsed
 }
 
 function checkDeadline(deadline: bigint): void {
@@ -1117,13 +1149,12 @@ function checkDeadline(deadline: bigint): void {
 /**
  * Prevent signature replay: store nonce in KV with TTL = remaining deadline.
  *
- * KV is eventually consistent across CF PoPs (~1-2s window).
- * This is acceptable because: chain-level uniqueness (AlreadyRegistered) provides
- * the hard guarantee for registration; for set-addr/text/contenthash, the worst
- * case of a replayed mutation is a redundant write with no net state change.
+ * KV is eventually consistent across CF PoPs and get+put is not atomic.
+ * This is a best-effort replay gate, NOT an exactly-once guarantee; G2 needs
+ * an atomic/on-chain nonce before privileged mutations can claim that property.
  *
  * Throws 409 if the nonce was already used within its validity window.
- * No-op when KV is not bound (local dev without KV).
+ * Refuse writes when no KV binding is present (including local development).
  */
 const MAX_NONCE_TTL = 86_400 // 24 hours hard cap
 
@@ -1134,16 +1165,21 @@ async function consumeNonce(
   nonce: bigint,
   deadline: bigint,
 ): Promise<void> {
-  if (!kv) return  // local dev without KV — skip replay protection
+  if (!kv) throw Object.assign(new Error('Nonce storage is not configured'), { status: 503 })
 
   const key = `nonce:${chainId}:${from.toLowerCase()}:${nonce}`
   const nowSecs = BigInt(Math.floor(Date.now() / 1000))
   const remaining = deadline > nowSecs ? deadline - nowSecs : 0n
   const ttl = Math.min(MAX_NONCE_TTL, Math.max(60, Number(remaining)))
 
-  const existing = await kv.get(key)
-  if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
-  await kv.put(key, '1', { expirationTtl: ttl })
+  try {
+    const existing = await kv.get(key)
+    if (existing !== null) throw Object.assign(new Error('Nonce already used'), { status: 409 })
+    await kv.put(key, '1', { expirationTtl: ttl })
+  } catch (error: any) {
+    if (error?.status === 409) throw error
+    throw Object.assign(new Error('Nonce store unavailable'), { status: 503 })
+  }
 }
 
 // D7: Rate limiting intentionally deferred. EIP-712 auth + on-chain idempotency (AlreadyRegistered)
@@ -1161,8 +1197,36 @@ function isBytes32(v: unknown): v is Hex {
 
 async function parseJson(request: Request): Promise<any> {
   try {
-    return await request.json()
-  } catch {
+    const max = 32 * 1024
+    if (Number(request.headers.get('content-length') ?? '0') > max) {
+      throw Object.assign(new Error('Request body too large'), { status: 413 })
+    }
+    const reader = request.body?.getReader()
+    let body = ''
+    if (reader) {
+      const decoder = new TextDecoder()
+      let size = 0
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          size += value.byteLength
+          if (size > max) {
+            void reader.cancel()
+            throw Object.assign(new Error('Request body too large'), { status: 413 })
+          }
+          body += decoder.decode(value, { stream: true })
+        }
+        body += decoder.decode()
+      } finally {
+        reader.releaseLock()
+      }
+    }
+    const parsed: unknown = JSON.parse(body)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw badReq('Expected JSON object')
+    return parsed
+  } catch (e: any) {
+    if (e?.status) throw e
     throw Object.assign(new Error('Invalid JSON body'), { status: 400 })
   }
 }
