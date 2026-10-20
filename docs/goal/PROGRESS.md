@@ -131,6 +131,16 @@ G1 新增的 Goal PR CI 触发器已由 GitHub 实际验证：[PR #115](https://
 
 G1 用户业务验收仍待确认，**G2 BLOCKED**。无正式 npm publish 或新链上写入，历史 G1 09:00 的测试读数仅表示其对应 head。
 
+### 2026-10-20 深夜 · PR 审批后的顺序合并与两项 Medium 修复完成
+
+复查全部六个 PR 的 live Review/CI：G0 #110 对 a0b34c0 APPROVED/CI 绿并合并进 main（`813f1e2`）。G1 API #112 对旧 head 8c95e6c 曾 APPROVED；因更新 base 到 main，GitHub 正确废止旧审批。普通合并 origin/main 后 head `46868083c05395ec60c58a7c34d4bec5189766f2` 新 CI 两项成功、clestons 在最新 head 重新 APPROVE，现已合并进 main，merge `2734474c20eb8adf9ca6fbbdb1c207a17f0ed76e`。未使用 rebase 或 force。
+
+SDK Foundation #113 已将 base 更新到 main，并普通合并最新 origin/main，head `4416b105795df66e6a6f34d539c92c1d0d0539e0`；GitHub cla/test SUCCESS、mergeable，但 GitHub 由于基线变化要求重新审批（reviewDecision=REVIEW_REQUIRED），已在 PR 逐项解释 parent sync 并重新请求 clestons 审核。未获 APPROVE 不执行 merge，也不提前更新后续 PR 的 base 破坏原有 stack 合同。
+
+Demo #111 原 head 8d8d1be 被要求修改两项 Medium：`.env.example` 被 `.gitignore` 排除；文档错误宣称 SDK 阻止自部署主网。当前修复 head `afd13cabc601ae90365f450716a51f85e5a8cce5` 已推送，新增 git-tracked 环境示例、五字段运行指南、启动时真实 SDK profile 检查，明确 AAStar 只有 testnet preset 而用户主网 1/10 profile 可用，补 2 个回归测试，亦修正 codehash pin 等 Low。该 head 本地 49 test files / 811 PASS，9 个需实时部署的测试按既有规则跳过，主站/独立 Demo/typecheck/Foundry 均 PASS；[GitHub run 39458665006](https://github.com/MushroomDAO/CometENS/actions/runs/39458665006) 完整 test SUCCESS，CLA SUCCESS。修复详情已在 PR 评论说明，await exact-head reviewer；父 PR 进入 main 后需普通同步主分支与新 head Review。
+
+按照已冻结的 Goal 模式，**用户尚未验收 G1，G2 BLOCKED**；在上游审核门仍未解除时停止进一步 G1 合并，但所有可修改内容均已修复、测试、提交并推送。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
