@@ -39,4 +39,3 @@
 `G0 ACCEPTED / CHANGES_REQUESTED — 日期 — 验收提交 SHA — 意见/阻塞`。
 
 只有收到用户明确 `G0 ACCEPTED`（或等效意思）才能把 G1 改成 `IN_PROGRESS`。每个阶段都沿用同一机制；不能自动跳过。
-
