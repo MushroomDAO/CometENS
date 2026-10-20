@@ -3,11 +3,11 @@
 **给社区成员一个属于他们自己的 ENS 名字。** 开源、可自部署、Apache-2.0。
 
 社区拥有一个 `.eth` 域名,成员加入时获得它下面的一个子域名 —— `alice.community.eth`。
-成员可以自己改记录、可以转让,不需要经过谁。
+这是我们的最终自治目标；现有 V3 托管版本的运营方仍能覆写记录、代转 L2 NFT，尚不具备不可撤销的 ENS L1 子名保证。
 
 > ⚠️ **当前仅测试网**(OP Sepolia + Ethereum Sepolia)。主网未上线。
 
-> **2026-10 Goal 计划**：[业务目标原文](docs/goal/VISION.md) · [技术架构与安全边界](docs/goal/ARCHITECTURE.md) · [G0–G7 里程碑及验收标准](docs/goal/MILESTONES.md) · [验收状态](docs/goal/STATUS.md)。这是新业务目标的执行计划；原有 `docs/agent/roadmap.md` 保留历史记录。
+> **2026-10 Goal 计划**：[业务目标原文](docs/goal/VISION.md) · [技术架构与安全边界](docs/goal/ARCHITECTURE.md) · [G0–G7 里程碑及验收标准](docs/goal/MILESTONES.md) · [验收状态](docs/goal/STATUS.md) · [服务与交权安全设计](docs/goal/SECURITY-AND-SERVICE.md) · [持续进度及恢复](docs/goal/PROGRESS.md)。这是新业务目标的执行计划；原有 `docs/agent/roadmap.md` 保留历史记录。
 
 [English](#english) · [自部署指南](docs/SELF-HOSTING.md) · [上游 API](docs/UPSTREAM-API.md) · [委托托管](docs/DELEGATED-HOSTING.md)
 

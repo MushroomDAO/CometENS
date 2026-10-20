@@ -13,6 +13,10 @@
 | G6 OP + Ethereum 主网部署 | `BLOCKED` | G5 完成且用户确认生产参数/交易 |
 | G7 AAStar SDK / AirAccount 集成 | `BLOCKED` | G6 被用户验收 |
 
+## G0 2026-10-20 复审
+
+用户提出新的产品/安全约束，属于 G0 修改意见，**尚非 G0 验收通过**。新增 [SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)（默认托管/自部署、NameWrapper/v2、两阶段交权、保障等级、续费基金和证明方案），[PROGRESS.md](PROGRESS.md) 记录每一步和恢复点。
+
 ## G0 交付清单
 
 - [x] 七条需求及执行指令原文：`VISION.md`
@@ -20,13 +24,18 @@
 - [x] G0–G7 子任务、验收门槛和依赖：`MILESTONES.md`
 - [x] 基线：2026-10-20 `pnpm typecheck` PASS；`pnpm vitest run test/unit/` 38 files/706 tests PASS；`forge test -q` PASS（本机 Node v22/Foundry）
 - [x] G0 已提交分支 `goal/g0-community-ens-plan`，验收 [PR #110](https://github.com/MushroomDAO/CometENS/pull/110)；以 PR 最新 head SHA 为准
+- [x] G0 复审设计与至少三张架构图、故障/状态/证据方案
+- [x] G0 持续记录：PROGRESS.md
+- [x] 复审后本机验证：Node v22 pnpm typecheck PASS；38 文件/724 个 unit tests PASS；contracts 下 forge test -q PASS；文档链接/5 张 Mermaid/diff-check PASS
 - [ ] 用户 G0 验收回执（填写日期与明确结论后才开启 G1）
 
 ## G0 验收者需要确认
 
 1. 这七条原文是否准确，G0–G7 的先后顺序是否符合预期。
 2. G2 是否同意选择 **链上 per-parent 独立 owner、受限可撤销 operator、NFT 持有人不可被平台直接没收** 的目标模型；V3 老部署只作兼容，另发新合约。
-3. G6 在 G5 的测试和审计门通过后才执行，且每个 `.eth` owner **主动选择** 设置 ENS resolver / 子 registry。
+3. 接受以 L1 原生 ENS 名称、NameWrapper fuse/EAC 断权证明为 Sovereign 前提；Managed 与 Locked Record 各自另有条件，所有保障受期限限制。
+4. 接受 AAStar 多签限于服务合约与基金，SDK profile 可替换，生产不得保留可重新夺权的超级管理员。
+5. G6 在 G5 的测试和审计门通过后才执行，且每个 `.eth` owner **主动选择** 设置 ENS resolver / 子 registry。
 
 ## 近期必须重新核实的事项
 

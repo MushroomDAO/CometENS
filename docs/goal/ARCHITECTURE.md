@@ -107,7 +107,16 @@ flowchart TB
 - **证明信任边界**：`HybridResolver` 当前模式由回应方选择，签名网关可以让客户端接受与 L2 真值不符的结果；不能将“proofMode: true”作为强制链上证明的承诺。应增加强制证明可选部署和直接读 OP 的一致性抽查，防止无痕伪造。
 - **参考官方来源**（2026-10-20 核对）：[ENSv2 Overview](https://docs.ens.domains/ensv2/overview/)、[Migration](https://docs.ens.domains/ensv2/migration/)、[Readiness](https://docs.ens.domains/web/ensv2-readiness/)、[2026-08-12 Sepolia Beta](https://ens.domains/blog/post/ensv2-beta-public-testing)。监控程序在 G3 才实现，G0 尚无持续告警。
 
-## 5. 部署/验收映射
+## 5. G0 复审：默认托管、交权和原生 ENS 主权
+
+本节及 [SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md) 是 2026-10-20 用户复审后的新增设计，所有拟实施能力均非现有功能。当前任务进展见 [PROGRESS.md](PROGRESS.md)。
+
+- SDK 应有 AAStar 托管 preset 和自部署 profile：独立 API base URL、CCIP gateway URLs、链 ID/RPC、合约地址及代码版本。API key 仅供服务端限额和认证，不能放入公开客户端，也不取代签名/链上授权。
+- AAStar 多签只能管理 AAStar 的服务资源和资金，不能在成员完成 ENS L1 原生名字交权后保留超级权限。当前 worker 尚无 API key/免费额度机制，由 G4/G5 研发验证。
+- 以 Managed → Sovereign 两阶段区分：现有 OP ERC721 是应用层 token，并不直接等于 Ethereum L1 的 ENS NameWrapper/Registry 所有权。Sovereign 需要原生 ENS 子名及全部特权路径验收。
+- 产权不可收回、特定记录不可改和解析持续可用是不同命题。ENSv1 的 PCC/CU 有期限；ENSv2 可通过 EAC 权限重授；信任签名网关不能代替强制链上 proof。续费基金有帮助，但不能保证无条件永久。
+
+## 6. 部署/验收映射
 
 | 阶段 | 链与组件 | 关键安全关口 |
 |---|---|---|
