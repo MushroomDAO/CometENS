@@ -1,189 +1,219 @@
-/**
- * CometENS SDK — core implementation.
- *
- * Reads records directly from L2Records (no gateway needed for reads).
- * Writes go through the gateway's /api/manage endpoints (EIP-712 authorised).
- *
- * Usage:
- *   const sdk = new CometENS({
- *     rootDomain: 'aastar.eth',
- *     l1ResolverAddress: '0x87d97a2e...',
- *     l2RecordsAddress:  '0x9Ed5d101...',
- *     l1RpcUrl: 'https://eth-sepolia.g.alchemy.com/v2/...',
- *     l2RpcUrl: 'https://opt-sepolia.g.alchemy.com/v2/...',
- *     gatewayUrl: 'https://ens.aastar.io/api/ccip',  // or /api/ccip for local
- *   })
- *
- *   const addr = await sdk.getAddr('alice.aastar.eth')
- *   await sdk.register({ label: 'alice', owner: '0x...', signature: '0x...', deadline: ... })
- */
-
 import {
-  createPublicClient,
-  http,
-  namehash,
-  encodeAbiParameters,
-  type Address,
-  type Hex,
-  type PublicClient,
+  createPublicClient, http, isAddress, isHex, keccak256, namehash,
+  type Address, type Hex, type PublicClient,
 } from 'viem'
-import { optimismSepolia, sepolia, optimism, mainnet } from 'viem/chains'
+import { mainnet, sepolia, optimism, optimismSepolia } from 'viem/chains'
+import {
+  typedDataForRegister, typedDataForSetAddr, typedDataForSetText, typedDataForSetContenthash,
+  typedDataForAddRegistrar, typedDataForRemoveRegistrar,
+} from './protocol.js'
+import { SDKError, validateNetworkProfile } from './profiles.js'
 import type {
-  CometENSOptions,
-  ICometENS,
-  ResolvedName,
-  RegisterRequest,
-  RegisterResult,
-  SetAddrRequest,
-  SetTextRequest,
-} from './types'
-
-// ─── ABIs ─────────────────────────────────────────────────────────────────────
+  NetworkProfile, ICometENS, ResolvedName, RegisterRequest, RegisterResult,
+  SetAddrRequest, SetTextRequest, SetContenthashRequest,
+  AddRegistrarRequest, RemoveRegistrarRequest, TxResult,
+} from './types.js'
 
 const L2_ABI = [
-  { type: 'function', name: 'addr', stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'addr', stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }],
-    outputs: [{ type: 'bytes' }] },
-  { type: 'function', name: 'text', stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }],
-    outputs: [{ type: 'string' }] },
-  { type: 'function', name: 'contenthash', stateMutability: 'view',
-    inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'bytes' }] },
+  { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'subnodeOwner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'addr', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'addr', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }, { name: 'coinType', type: 'uint256' }], outputs: [{ type: 'bytes' }] },
+  { type: 'function', name: 'text', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }, { name: 'key', type: 'string' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'contenthash', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'bytes' }] },
 ] as const
 
-// ─── Chain resolution ──────────────────────────────────────────────────────────
+const ZERO = '0x0000000000000000000000000000000000000000'
+const serialize = (value: unknown) => JSON.stringify(value, (_key, part) => typeof part === 'bigint' ? part.toString() : part)
 
-function getChains(l1RpcUrl: string, l2RpcUrl: string) {
-  // Detect testnet vs mainnet by checking if the RPC URL mentions "sepolia"
-  const isTestnet = l1RpcUrl.includes('sepolia') || l2RpcUrl.includes('sepolia')
-  return {
-    l1: isTestnet ? sepolia : mainnet,
-    l2: isTestnet ? optimismSepolia : optimism,
-  }
-}
-
-// ─── CometENS class ────────────────────────────────────────────────────────────
-
+/** Browser-safe client. No API credentials can be configured in its profile. */
 export class CometENS implements ICometENS {
-  readonly options: CometENSOptions
-  private l2Client: PublicClient
+  readonly profile: Readonly<NetworkProfile>
+  /** Compatibility alias; profile is the preferred public name. */
+  get options(): Readonly<NetworkProfile> { return this.profile }
+  private readonly l1Client: PublicClient
+  private readonly l2Client: PublicClient
+  private verified: Promise<void> | undefined
 
-  constructor(options: CometENSOptions) {
-    this.options = options
-    const { l2 } = getChains(options.l1RpcUrl, options.l2RpcUrl)
-    this.l2Client = createPublicClient({ chain: l2, transport: http(options.l2RpcUrl) })
+  constructor(profile: NetworkProfile) {
+    validateNetworkProfile(profile)
+    if (profile.protocol === 'v4') {
+      throw new SDKError('unsupported-protocol', 'V4 root-scoped delegation requires G2; no V4 adapter is available')
+    }
+    this.profile = Object.freeze({
+      ...profile, l1: Object.freeze({ ...profile.l1 }), l2: Object.freeze({ ...profile.l2 }),
+      gatewayUrls: profile.gatewayUrls && Object.freeze([...profile.gatewayUrls]),
+    })
+    const l1 = profile.l1.chainId === 1 ? mainnet : sepolia
+    const l2 = profile.l2.chainId === 10 ? optimism : optimismSepolia
+    this.l1Client = createPublicClient({ chain: l1, transport: http(profile.l1.rpcUrl) }) as PublicClient
+    this.l2Client = createPublicClient({ chain: l2, transport: http(profile.l2.rpcUrl) }) as PublicClient
   }
 
-  // ── Resolution ───────────────────────────────────────────────────────────────
+  getCapabilities() {
+    return Object.freeze({ protocol: this.profile.protocol, directL2Reads: true, signedWorkerWrites: this.profile.protocol === 'v3', revocableRootOperator: false })
+  }
+
+  /** Validates both chains and verifies contracts exist before any reads or writes. */
+  async verifyNetwork(): Promise<void> {
+    if (!this.verified) {
+      this.verified = this.checkNetwork().catch((e: unknown) => {
+        this.verified = undefined // transient RPC failure must permit recovery
+        throw e
+      })
+    }
+    return this.verified
+  }
+
+  private async checkNetwork(): Promise<void> {
+    let actualL1: number
+    let actualL2: number
+    let l1Code: Hex | undefined
+    let l2Code: Hex | undefined
+    try {
+      [actualL1, actualL2] = await Promise.all([this.l1Client.getChainId(), this.l2Client.getChainId()])
+      if (actualL1 !== this.profile.l1.chainId || actualL2 !== this.profile.l2.chainId) {
+        throw new SDKError('chain-mismatch', `Expected L1/L2 chainId ${this.profile.l1.chainId}/${this.profile.l2.chainId}, received ${actualL1}/${actualL2}`)
+      }
+      [l1Code, l2Code] = await Promise.all([
+        this.l1Client.getBytecode({ address: this.profile.l1.resolverAddress }),
+        this.l2Client.getBytecode({ address: this.profile.l2.recordsAddress }),
+      ])
+    } catch (e) {
+      if (e instanceof SDKError) throw e
+      throw new SDKError('rpc-unavailable', 'Could not verify the configured Ethereum/Optimism RPC endpoints')
+    }
+    if (!l1Code || l1Code === '0x' || !l2Code || l2Code === '0x') {
+      throw new SDKError('contract-missing', 'The configured L1 resolver or L2 records address has no deployed bytecode')
+    }
+    if ((this.profile.l1.expectedCodeHash && keccak256(l1Code).toLowerCase() !== this.profile.l1.expectedCodeHash.toLowerCase()) ||
+        (this.profile.l2.expectedCodeHash && keccak256(l2Code).toLowerCase() !== this.profile.l2.expectedCodeHash.toLowerCase())) {
+      throw new SDKError('contract-missing', 'Contract runtime bytecode hash does not match expectedCodeHash')
+    }
+    // V3-compatible record reader sanity check. Bytecode alone cannot identify an ABI.
+    try {
+      const owner = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'owner' })
+      if (!isAddress(owner)) throw new Error('Invalid owner result')
+      const holder = await this.l2Client.readContract({
+        address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'subnodeOwner', args: [namehash(this.profile.rootName)],
+      })
+      if (!isAddress(holder)) throw new Error('Invalid subnodeOwner result')
+    } catch {
+      throw new SDKError('contract-missing', 'Configured L2 records contract does not implement the V3 read interface')
+    }
+  }
 
   async getAddr(name: string): Promise<Address | null> {
-    const node = namehash(name) as Hex
-    const addr = await this.l2Client.readContract({
-      address: this.options.l2RecordsAddress,
-      abi: L2_ABI,
-      functionName: 'addr',
-      args: [node],
-    }) as Address
-    return addr === '0x0000000000000000000000000000000000000000' ? null : addr
+    await this.verifyNetwork()
+    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name)] })
+    return value.toLowerCase() === ZERO ? null : value
   }
 
   async getAddrByCoinType(name: string, coinType: bigint): Promise<Hex | null> {
-    const node = namehash(name) as Hex
-    const bytes = await this.l2Client.readContract({
-      address: this.options.l2RecordsAddress,
-      abi: L2_ABI,
-      functionName: 'addr',
-      args: [node, coinType],
-    }) as Hex
-    return bytes === '0x' || bytes === '0x0000000000000000000000000000000000000000' ? null : bytes
+    if (coinType < 0n) throw new SDKError('invalid-input', 'Invalid coinType')
+    await this.verifyNetwork()
+    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name), coinType] })
+    return value === '0x' ? null : value
   }
 
   async getText(name: string, key: string): Promise<string | null> {
-    const node = namehash(name) as Hex
-    const value = await this.l2Client.readContract({
-      address: this.options.l2RecordsAddress,
-      abi: L2_ABI,
-      functionName: 'text',
-      args: [node, key],
-    }) as string
+    await this.verifyNetwork()
+    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'text', args: [namehash(name), key] })
     return value || null
   }
 
-  async resolve(name: string): Promise<ResolvedName> {
-    const [addr, contenthashRaw] = await Promise.all([
-      this.getAddr(name),
-      this._getContenthash(name),
+  async getContenthash(name: string): Promise<Hex | null> {
+    await this.verifyNetwork()
+    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'contenthash', args: [namehash(name)] })
+    return value === '0x' ? null : value
+  }
+
+  /** Direct Optimism records; caller supplies desired text keys (not enumerable). */
+  async resolve(name: string, options: { textKeys?: readonly string[] } = {}): Promise<ResolvedName> {
+    const keys = options.textKeys ?? []
+    const [addr, contenthash, ...values] = await Promise.all([
+      this.getAddr(name), this.getContenthash(name), ...keys.map((key) => this.getText(name, key)),
     ])
-    return { addr, texts: {}, contenthash: contenthashRaw }
+    const texts: Record<string, string | null> = {}
+    keys.forEach((key, i) => { texts[key] = values[i] })
+    return { addr, contenthash, texts, source: 'l2' }
   }
 
-  private async _getContenthash(name: string): Promise<Hex | null> {
-    const node = namehash(name) as Hex
-    const bytes = await this.l2Client.readContract({
-      address: this.options.l2RecordsAddress,
-      abi: L2_ABI,
-      functionName: 'contenthash',
-      args: [node],
-    }) as Hex
-    return bytes === '0x' ? null : bytes
+  /** Ethereum L1 ENS path with CCIP-Read; unlike getAddr, this uses the ENS registry. */
+  async getEnsAddress(name: string): Promise<Address | null> {
+    await this.verifyNetwork()
+    return this.l1Client.getEnsAddress({ name })
   }
 
-  // ── Registration ─────────────────────────────────────────────────────────────
+  protected async requestHeaders(): Promise<Record<string, string>> {
+    return { 'content-type': 'application/json' }
+  }
 
-  async register(req: RegisterRequest): Promise<RegisterResult> {
-    const name = `${req.label}.${this.options.rootDomain}`
-    const gwBase = this.options.gatewayUrl?.replace('/api/ccip', '') || ''
-    const resp = await fetch(`${gwBase}/api/manage/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        from: req.owner,
-        signature: req.signature,
-        message: {
-          parent: this.options.rootDomain,
-          label: req.label,
-          owner: req.owner,
-          nonce: Date.now(),
-          deadline: req.deadline,
-        },
-      }),
-    })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }))
-      throw new Error((err as any).error ?? 'Register failed')
+  private async send<M>(path: string, signed: { from: Address; signature: Hex; message: M }): Promise<TxResult> {
+    if (this.profile.protocol !== 'v3') {
+      throw new SDKError('unsupported-protocol', 'V3 readonly profile cannot submit record writes')
     }
-    const { txHash } = await resp.json() as { txHash: Hex }
-    return { name, txHash }
-  }
-
-  // ── Record updates ────────────────────────────────────────────────────────────
-
-  async setAddr(req: SetAddrRequest): Promise<{ txHash: Hex }> {
-    const node = namehash(req.name) as Hex
-    const coinType = req.coinType ?? 60n
-    const addrBytes = encodeAbiParameters([{ type: 'address' }], [req.addr]) as Hex
-    const gwBase = this.options.gatewayUrl?.replace('/api/ccip', '') || ''
-    const resp = await fetch(`${gwBase}/api/manage/set-addr`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        from: req.addr,
-        signature: req.signature,
-        message: { node, coinType: coinType.toString(), addr: req.addr, nonce: Date.now(), deadline: req.deadline },
-      }),
-    })
-    void addrBytes // kept for documentation of the encoding under test
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }))
-      throw new Error((err as any).error ?? 'SetAddr failed')
+    const api = this.profile.apiBaseUrl
+    if (!api) throw new SDKError('api-unavailable', 'apiBaseUrl is required to write records')
+    if (!isAddress(signed.from) || !isHex(signed.signature) || signed.signature === '0x') {
+      throw new SDKError('invalid-input', 'Explicit signer address and EIP-712 signature are required')
     }
-    return resp.json() as Promise<{ txHash: Hex }>
+    await this.verifyNetwork()
+    let response: Response
+    try {
+      response = await fetch(`${api.replace(/\/$/, '')}${path}`, {
+        method: 'POST', headers: await this.requestHeaders(),
+        body: serialize(signed),
+      })
+    } catch {
+      throw new SDKError('api-unavailable', 'Could not reach the configured CometENS write API')
+    }
+    const body: unknown = await response.json().catch(() => null)
+    const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+    if (!response.ok) {
+      // Do not echo server-provided errors: a misconfigured provider may include secrets.
+      throw new SDKError('api-error', `CometENS write API returned HTTP ${response.status}`, response.status)
+    }
+    if (typeof payload.txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(payload.txHash)) {
+      throw new SDKError('api-error', 'CometENS API did not confirm an L2 transaction hash', response.status)
+    }
+    return { txHash: payload.txHash as Hex }
   }
 
-  async setText(_req: SetTextRequest): Promise<{ txHash: Hex }> {
-    // Text record updates go through a future /api/manage/set-text endpoint
-    throw new Error('setText via gateway not yet implemented — use admin direct write')
+  async register(request: RegisterRequest): Promise<RegisterResult> {
+    typedDataForRegister(this.profile, request.message)
+    const result = await this.send('/register', request)
+    return { ...result, name: `${request.message.label}.${request.message.parent}` }
   }
+
+  async setAddr(request: SetAddrRequest): Promise<TxResult> {
+    typedDataForSetAddr(this.profile, request.message)
+    return this.send('/set-addr', request)
+  }
+
+  async setText(request: SetTextRequest): Promise<TxResult> {
+    typedDataForSetText(this.profile, request.message)
+    return this.send('/set-text', request)
+  }
+
+  async setContenthash(request: SetContenthashRequest): Promise<TxResult> {
+    typedDataForSetContenthash(this.profile, request.message)
+    return this.send('/set-contenthash', request)
+  }
+
+  /** V3 global contract-owner operation; revoking cannot restrict that owner. */
+  async addRegistrar(request: AddRegistrarRequest): Promise<TxResult> {
+    typedDataForAddRegistrar(this.profile, request.message)
+    return this.send('/add-registrar', request)
+  }
+
+  /** V3 registrar revocation is owner-only and does not revoke the global owner. */
+  async removeRegistrar(request: RemoveRegistrarRequest): Promise<TxResult> {
+    typedDataForRemoveRegistrar(this.profile, request.message)
+    return this.send('/remove-registrar', request)
+  }
+}
+
+export function createCometENSClient(profile: NetworkProfile): CometENS {
+  return new CometENS(profile)
 }

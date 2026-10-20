@@ -1,0 +1,76 @@
+# @cometens/sdk
+
+Standalone TypeScript ESM package for Ethereum ENS subdomains whose records live on Optimism. Package exports are `@cometens/sdk` (browser-safe), `@cometens/sdk/server` (server-only optional API key), and `@cometens/sdk/profiles`. Requires Node 20+ or a modern browser. The repository root remains a private application.
+
+The AAStar preset is **testnet only**, pointing at the reference Sepolia deployment. It is not a mainnet or availability guarantee. Verify deployment state before relying on its addresses. The SDK checks both RPC chain IDs, deployed contract bytecode, and the V3 record read interface before all calls. Optionally pin `l1.expectedCodeHash` and `l2.expectedCodeHash` to the keccak256 of each *deployed runtime bytecode*: any mismatch then fails closed. Without pins, verification only establishes bytecode presence and ABI compatibility, which is weaker than contract identity attestation; proxy implementation changes require additional monitoring. `getAddr`, `getText`, `getContenthash` and `resolve` read L2 records directly; `getEnsAddress` traverses standard Ethereum L1 ENS resolution (including CCIP-Read when supported by the resolver).
+
+```ts
+import {
+  createCometENSClient, createSelfHostedProfile,
+  typedDataForRegister,
+} from '@cometens/sdk'
+
+const profile = createSelfHostedProfile({
+  id: 'my-community-sepolia',
+  protocol: 'v3',                 // current signed Worker write protocol
+  rootName: 'community.eth',
+  l1: {
+    chainId: 11155111,           // Ethereum Sepolia
+    rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com',
+    resolverAddress: '0xYOUR_L1_RESOLVER_ADDRESS',
+  },
+  l2: {
+    chainId: 11155420,           // OP Sepolia
+    rpcUrl: 'https://sepolia.optimism.io',
+    recordsAddress: '0xYOUR_L2_RECORDS_ADDRESS',
+  },
+  apiBaseUrl: 'https://api.yourdomain.example',
+  gatewayUrls: ['https://gateway.yourdomain.example/hybrid'],
+})
+
+const sdk = createCometENSClient(profile)
+await sdk.verifyNetwork()
+const addr = await sdk.getAddr('alice.community.eth')
+const data = await sdk.resolve('alice.community.eth', { textKeys: ['com.twitter', 'url'] })
+
+// A wallet or backend signer must sign these EXACT values first.
+// nonce and deadline are supplied by the caller, never silently replaced by the SDK.
+const message = {
+  parent: profile.rootName,
+  label: 'alice',
+  owner: '0x1111111111111111111111111111111111111111' as const,
+  nonce: 123n,
+  deadline: 2000000000n,
+}
+const typed = typedDataForRegister(profile, message)
+// signature = await wallet.signTypedData({ account: signerAddress, ...typed })
+// await sdk.register({ from: signerAddress, signature, message })
+```
+
+Use `typedDataForSetAddr`, `typedDataForSetText`, and `typedDataForSetContenthash` with `client.setAddr`, `client.setText`, and `client.setContenthash`. Each signed message must carry the signer address `from`, an exact `nonce` and `deadline` in Unix seconds; signer, typed data, and request message must match. `SetAddr.addr` is a 20-byte EVM address (`0x` + 40 hex characters), regardless of coinType, matching the current V3 API Worker's address restriction. Use the zero address to clear. All writes require a configured, independently hosted `apiBaseUrl`; no API origin is inferred from gateway URLs. A successful request must return an actual L2 `txHash`.
+
+The `protocol: 'v3-readonly'` mode supports existing records but refuses write calls; `protocol: 'v3'` supports current EIP-712 API Worker writes. Neither provides community-scoped revocable owner/operator grants. `protocol: 'v4'` is intentionally rejected until the G2 contracts and adapters are complete. `getCapabilities()` reports the available feature set.
+
+For compatibility with the current V3 contract-owner workflow, `typedDataForAddRegistrar` / `typedDataForRemoveRegistrar` and `addRegistrar` / `removeRegistrar` mirror the Worker's owner-only `/add-registrar` and `/remove-registrar` endpoints. The signed `parentNode` must equal `namehash(profile.rootName)`, with explicit signer, nonce, deadline, and, when adding, `quota` and `expiry`. **V3's global contract owner bypasses registrar restrictions**: removing a registrar does not revoke or constrain the global owner, nor grant a community parent owner sovereignty. The per-parent root controller and genuinely revocable operator API require G2.
+
+### Server-only API keys
+
+This is an **optional future managed gateway integration**. The present Worker authenticates signed writes and does not implement API key metering. API keys alone never grant ownership or authorize a mint or record change.
+
+```ts
+import { createCometENSServerClient } from '@cometens/sdk/server'
+
+const serverSdk = createCometENSServerClient(profile, {
+  getApiKey: () => process.env.COMETENS_API_KEY ?? '',
+})
+```
+
+Only import `@cometens/sdk/server` from trusted Node/backend code. It refuses construction with `window` present. Never place API keys, private keys, secret RPC URLs, or a token-bearing endpoint in `NetworkProfile`, public `VITE_` variables, query parameters, frontend bundles, or logs. Browser usage requires wallet EIP-712 signatures; a publishable project identifier (if introduced by the managed service) must grant no write authority.
+
+### Self-hosting and migration
+
+The self-host factory accepts only supplied addresses and endpoints; there is no implicit AAStar fallback. Moving from managed to self-hosted requires independently checking the old L2 NFT owners and records, deploying your own L2 contract and API/gateway/resolver, reconstructing/reissuing names with appropriate holder authorizations, verifying L2 reads and independent ENS resolution, and then switching the **L1 ENS node you actually control** to the new resolver. Old L2 NFTs stay in the old contract. A pure offchain subdomain without an owned L1 node cannot independently redirect resolver. See the repository's `docs/SELF-HOSTING.md` and `docs/DELEGATED-HOSTING.md` for current deployment and trust boundaries.
+
+### Build and smoke test
+
+From the repository root: `pnpm --dir sdk install`, `pnpm --dir sdk build`, `pnpm --dir sdk pack`. Install the tarball into an empty external consumer and verify both import paths and generated type declarations. This only builds a package; it does not publish to npm.
