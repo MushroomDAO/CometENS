@@ -4,6 +4,10 @@ Standalone TypeScript ESM package for Ethereum ENS subdomains whose records live
 
 The AAStar preset is **testnet only**, pointing at the reference Sepolia deployment. It is not a mainnet or availability guarantee. Verify deployment state before relying on its addresses. The SDK checks both RPC chain IDs, deployed contract bytecode, and the V3 record read interface before all calls. Optionally pin `l1.expectedCodeHash` and `l2.expectedCodeHash` to the keccak256 of each *deployed runtime bytecode*: any mismatch then fails closed. Without pins, verification only establishes bytecode presence and ABI compatibility, which is weaker than contract identity attestation; proxy implementation changes require additional monitoring. `getAddr`, `getText`, `getContenthash` and `resolve` read L2 records directly; `getEnsAddress` traverses standard Ethereum L1 ENS resolution (including CCIP-Read when supported by the resolver).
 
+`verifyNetwork` checks that the configured L1 resolver address has code; it does not assert the current L1 ENS Registry resolver pointer for `rootName` is that address. That pointer can be changed by the ENS name owner. `getEnsAddress` follows the live L1 ENS path; compare its result to direct L2 records when investigating a resolver cutover or service inconsistency.
+
+**Observed reference-network divergence (2026-10-20):** for `aastar.eth` the AAStar testnet preset's direct OP record read returned an address while the standard Ethereum Sepolia ENS lookup returned `null`. This SDK does not silently substitute the L2 value into an ENS result; a direct OP record is a different trust/availability statement from globally resolved ENS data. G3 will address continuous resolution and finality/compatibility monitoring.
+
 ```ts
 import {
   createCometENSClient, createSelfHostedProfile,
@@ -40,7 +44,7 @@ const message = {
   label: 'alice',
   owner: '0x1111111111111111111111111111111111111111' as const,
   nonce: 123n,
-  deadline: 2000000000n,
+  deadline: BigInt(Math.floor(Date.now() / 1000) + 600),
 }
 const typed = typedDataForRegister(profile, message)
 // signature = await wallet.signTypedData({ account: signerAddress, ...typed })
@@ -65,7 +69,9 @@ const serverSdk = createCometENSServerClient(profile, {
 })
 ```
 
-Only import `@cometens/sdk/server` from trusted Node/backend code. It refuses construction with `window` present. Never place API keys, private keys, secret RPC URLs, or a token-bearing endpoint in `NetworkProfile`, public `VITE_` variables, query parameters, frontend bundles, or logs. Browser usage requires wallet EIP-712 signatures; a publishable project identifier (if introduced by the managed service) must grant no write authority.
+Only import `@cometens/sdk/server` from trusted Node/backend code. It refuses construction with `window` present. Never place API keys, private keys, secret RPC URLs, or a token-bearing endpoint in `NetworkProfile`, public `VITE_` variables, query parameters, frontend bundles, or logs. The SDK rejects URL queries, unexpected secret-shaped profile fields and obvious long provider token paths (such as `/v2/<token>`), but cannot reliably identify every credential string embedded in arbitrary URL paths: only supply public endpoints in a browser profile. Browser usage requires wallet EIP-712 signatures; a publishable project identifier (if introduced by the managed service) must grant no write authority.
+
+Write failures throw `SDKError` with safe `kind` values such as `unauthorized` (401/403), `conflict` (409), `rate-limited` (429), `service-unavailable` (503), and `api-error` for others. `status` and allowlisted `code` fields are exposed without copying untrusted raw backend error text or RPC URLs.
 
 ### Self-hosting and migration
 

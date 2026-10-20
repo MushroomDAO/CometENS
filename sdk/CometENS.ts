@@ -34,6 +34,7 @@ export class CometENS implements ICometENS {
   private readonly l1Client: PublicClient
   private readonly l2Client: PublicClient
   private verified: Promise<void> | undefined
+  private verifiedAt = 0
 
   constructor(profile: NetworkProfile) {
     validateNetworkProfile(profile)
@@ -54,15 +55,26 @@ export class CometENS implements ICometENS {
     return Object.freeze({ protocol: this.profile.protocol, directL2Reads: true, signedWorkerWrites: this.profile.protocol === 'v3', revocableRootOperator: false })
   }
 
-  /** Validates both chains and verifies contracts exist before any reads or writes. */
-  async verifyNetwork(): Promise<void> {
-    if (!this.verified) {
-      this.verified = this.checkNetwork().catch((e: unknown) => {
+  /** Network/bytecode verification is reused for at most 60s; writes force a fresh check. */
+  async verifyNetwork(options: { force?: boolean } = {}): Promise<void> {
+    const expired = this.verifiedAt !== 0 && Date.now() - this.verifiedAt > 60_000
+    if (options.force || !this.verified || expired) {
+      this.verified = this.checkNetwork().then(() => {
+        this.verifiedAt = Date.now()
+      }).catch((e: unknown) => {
         this.verified = undefined // transient RPC failure must permit recovery
+        this.verifiedAt = 0
         throw e
       })
     }
     return this.verified
+  }
+
+  private async safeRpcRead<T>(source: 'L1' | 'L2', operation: () => Promise<T>): Promise<T> {
+    try { return await operation() } catch {
+      // viem errors often contain the credential-bearing RPC URL and call body.
+      throw new SDKError('rpc-unavailable', `${source} records/ENS RPC request failed`)
+    }
   }
 
   private async checkNetwork(): Promise<void> {
@@ -105,26 +117,34 @@ export class CometENS implements ICometENS {
 
   async getAddr(name: string): Promise<Address | null> {
     await this.verifyNetwork()
-    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name)] })
+    const value = await this.safeRpcRead('L2', () => this.l2Client.readContract({
+      address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name)],
+    }))
     return value.toLowerCase() === ZERO ? null : value
   }
 
   async getAddrByCoinType(name: string, coinType: bigint): Promise<Hex | null> {
     if (coinType < 0n) throw new SDKError('invalid-input', 'Invalid coinType')
     await this.verifyNetwork()
-    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name), coinType] })
+    const value = await this.safeRpcRead('L2', () => this.l2Client.readContract({
+      address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'addr', args: [namehash(name), coinType],
+    }))
     return value === '0x' ? null : value
   }
 
   async getText(name: string, key: string): Promise<string | null> {
     await this.verifyNetwork()
-    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'text', args: [namehash(name), key] })
+    const value = await this.safeRpcRead('L2', () => this.l2Client.readContract({
+      address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'text', args: [namehash(name), key],
+    }))
     return value || null
   }
 
   async getContenthash(name: string): Promise<Hex | null> {
     await this.verifyNetwork()
-    const value = await this.l2Client.readContract({ address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'contenthash', args: [namehash(name)] })
+    const value = await this.safeRpcRead('L2', () => this.l2Client.readContract({
+      address: this.profile.l2.recordsAddress, abi: L2_ABI, functionName: 'contenthash', args: [namehash(name)],
+    }))
     return value === '0x' ? null : value
   }
 
@@ -142,7 +162,7 @@ export class CometENS implements ICometENS {
   /** Ethereum L1 ENS path with CCIP-Read; unlike getAddr, this uses the ENS registry. */
   async getEnsAddress(name: string): Promise<Address | null> {
     await this.verifyNetwork()
-    return this.l1Client.getEnsAddress({ name })
+    return this.safeRpcRead('L1', () => this.l1Client.getEnsAddress({ name }))
   }
 
   protected async requestHeaders(): Promise<Record<string, string>> {
@@ -158,7 +178,7 @@ export class CometENS implements ICometENS {
     if (!isAddress(signed.from) || !isHex(signed.signature) || signed.signature === '0x') {
       throw new SDKError('invalid-input', 'Explicit signer address and EIP-712 signature are required')
     }
-    await this.verifyNetwork()
+    await this.verifyNetwork({ force: true })
     let response: Response
     try {
       response = await fetch(`${api.replace(/\/$/, '')}${path}`, {
@@ -171,8 +191,15 @@ export class CometENS implements ICometENS {
     const body: unknown = await response.json().catch(() => null)
     const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {}
     if (!response.ok) {
-      // Do not echo server-provided errors: a misconfigured provider may include secrets.
-      throw new SDKError('api-error', `CometENS write API returned HTTP ${response.status}`, response.status)
+      // Never echo upstream free-form messages: RPC/provider failures can embed keys.
+      const safeCodes = new Set(['LABEL_TAKEN', 'APPROVAL_REQUIRED', 'OWNER_UNVERIFIABLE'])
+      const code = typeof payload.code === 'string' && safeCodes.has(payload.code) ? payload.code : undefined
+      const statusKind = response.status === 401 || response.status === 403 ? 'unauthorized'
+        : response.status === 409 ? 'conflict'
+          : response.status === 429 ? 'rate-limited'
+            : response.status === 503 ? 'service-unavailable'
+              : response.status === 400 ? 'invalid-input' : 'api-error'
+      throw new SDKError(statusKind, `CometENS write API returned HTTP ${response.status}${code ? ` (${code})` : ''}`, response.status, code)
     }
     if (typeof payload.txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(payload.txHash)) {
       throw new SDKError('api-error', 'CometENS API did not confirm an L2 transaction hash', response.status)

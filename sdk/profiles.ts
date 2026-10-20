@@ -3,9 +3,14 @@ import type { NetworkProfile } from './types.js'
 
 export class SDKError extends Error {
   constructor(
-    readonly kind: 'invalid-input' | 'unsupported-protocol' | 'chain-mismatch' | 'contract-missing' | 'rpc-unavailable' | 'api-unavailable' | 'api-error',
+    readonly kind:
+      | 'invalid-input' | 'unsupported-protocol' | 'chain-mismatch' | 'contract-missing'
+      | 'rpc-unavailable' | 'api-unavailable' | 'api-error'
+      | 'unauthorized' | 'conflict' | 'rate-limited' | 'service-unavailable',
     message: string,
     readonly status?: number,
+    /** Normalized code only; never arbitrary Worker/provider exception content. */
+    readonly code?: string,
   ) {
     super(message)
     this.name = 'CometENSError'
@@ -15,8 +20,14 @@ export class SDKError extends Error {
 const isValidUrl = (value: string) => {
   try {
     const url = new URL(value)
+    const path = url.pathname.split('/').filter(Boolean)
+    const obviousTokenPath = path.length >= 2
+      && /^(v2|v3|api-key|apikey|token)$/i.test(path[0])
+      && /^[A-Za-z0-9_-]{16,}$/.test(path[1])
+    // Public profiles cannot carry query credentials; paths must be audited
+    // by the integrator because arbitrary provider token paths are unknowable.
     return (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
-      && !url.username && !url.password && !url.hash && !url.search
+      && !url.username && !url.password && !url.hash && !url.search && !obviousTokenPath
   } catch { return false }
 }
 
