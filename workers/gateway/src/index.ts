@@ -38,6 +38,7 @@ import {
   type Hex,
 } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
+import type { KVNamespace, AnalyticsEngineDataset } from '@cloudflare/workers-types'
 import { createSigner } from '../../../server/gateway/signer'
 import { L2RecordsV2ABI } from '../../../server/gateway/abi'
 
