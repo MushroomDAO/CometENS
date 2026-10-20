@@ -165,8 +165,10 @@ describe('G1 CCIP sender, calldata and error boundaries', () => {
 
   it('preserves valid legacy signature and hybrid signature resolution', async () => {
     const gateway = (await import('../../workers/gateway/src/index')).default
-    readContract.mockResolvedValue(account.address)
-    const legacy = await gateway.fetch(post('/api/ccip', { sender: RESOLVER, data: calldata }), gatewayEnv())
+    // Exercise the signed CCIP boundary deterministically through the existing
+    // record-cache interface, independent of nested viem package resolution.
+    const cached = gatewayEnv({ RECORD_CACHE: { get: vi.fn().mockResolvedValue(account.address) } })
+    const legacy = await gateway.fetch(post('/api/ccip', { sender: RESOLVER, data: calldata }), cached)
     expect(legacy.status).toBe(200)
     const legacyBody = await legacy.json() as { data: string }
     expect(legacyBody.data).toMatch(/^0x[0-9a-f]+$/)
@@ -176,7 +178,7 @@ describe('G1 CCIP sender, calldata and error boundaries', () => {
       { type: 'tuple', components: [{ name: 'ops', type: 'bytes' }] },
       { type: 'bytes' },
     ], ['0x', { ops: '0x' }, calldata])
-    const hybrid = await gateway.fetch(post('/hybrid', { sender: RESOLVER, data: blob }), gatewayEnv())
+    const hybrid = await gateway.fetch(post('/hybrid', { sender: RESOLVER, data: blob }), cached)
     expect(hybrid.status).toBe(200)
     const hybridBody = await hybrid.json() as { data: `0x${string}` }
     const [mode] = decodeAbiParameters([{ type: 'uint8' }, { type: 'bytes' }], hybridBody.data)
@@ -195,8 +197,10 @@ describe('G1 CCIP sender, calldata and error boundaries', () => {
 
   it('does not disclose backend failure messages from signature endpoint', async () => {
     const gateway = (await import('../../workers/gateway/src/index')).default
-    readContract.mockRejectedValue(new Error('https://rpc.invalid/v2/DO_NOT_DISCLOSE'))
-    const response = await gateway.fetch(post('/api/ccip', { sender: RESOLVER, data: calldata }), gatewayEnv())
+    const failingCache = gatewayEnv({ RECORD_CACHE: {
+      get: vi.fn().mockRejectedValue(new Error('https://rpc.invalid/v2/DO_NOT_DISCLOSE')),
+    } })
+    const response = await gateway.fetch(post('/api/ccip', { sender: RESOLVER, data: calldata }), failingCache)
     expect(response.status).toBe(502)
     expect(JSON.stringify(await response.json())).not.toContain('DO_NOT_DISCLOSE')
   })
