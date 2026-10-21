@@ -343,4 +343,25 @@ contract G2ManagedLeaseIssuerTest is Test {
         bytes32 node = otherIssuer.issue("after-handoff", member, address(0));
         assertEq(other.subnodeOwner(node), member);
     }
+
+    function test_preHandoffV4SignedOnlyOperatorCannotBypassManagedIssuer() public {
+        L2CommunityRecordsV4 other = new L2CommunityRecordsV4(ROOT, owner);
+        G2ManagedLeaseIssuer otherIssuer = _issuerFor(other);
+        uint256 signedCap = other.CAP_ISSUE() | other.CAP_SIGNED_ISSUE();
+        vm.prank(owner);
+        other.grantOperator(delegated, signedCap, 3, uint64(block.timestamp + 3600));
+        vm.prank(owner);
+        other.proposeController(address(otherIssuer));
+        vm.prank(owner);
+        otherIssuer.acceptControl();
+
+        assertFalse(other.operatorActive(delegated, signedCap));
+        vm.prank(delegated);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        other.issue("unsigned-bypass", member, address(0));
+        vm.prank(delegated);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        other.issueBySig("signed-bypass", member, address(0), 0, block.timestamp + 300, hex"");
+        assertEq(other.subnodeOwner(other.nodeOf("signed-bypass")), address(0));
+    }
 }
