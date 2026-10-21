@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { keccak256, namehash } from 'viem'
 import {
   auditLegacyEnsV1, EvidenceFailure, ENSV1_SEPOLIA_REGISTRY, ENSV1_SEPOLIA_WRAPPER,
@@ -103,12 +103,21 @@ describe('G2 legacy ENSv1 Sepolia evidence (read only; never sovereignty)', () =
   })
 
   it('refuses stale finalized head, missing bytecode, incorrect pins and absent parent', async () => {
-    for (const options of [
-      { timestamp: now - 10_000n },
-      { timestamp: BigInt(Math.floor(Date.now() / 1000)) + 121n },
-    ]) {
-      await expect(auditLegacyEnsV1({ ...expected, client: fake(options).client }))
-        .rejects.toMatchObject({ code: 'stale-finality' })
+    // now is captured at module import. CI can run this suite tens of seconds
+    // later, causing a +121s fixture to fall inside the +120s safety window.
+    // Freeze time for precise, mutation-sensitive boundary assertions.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Number(now * 1000n))
+    try {
+      for (const timestamp of [now - 7201n, now + 121n]) {
+        await expect(auditLegacyEnsV1({ ...expected, client: fake({ timestamp }).client }))
+          .rejects.toMatchObject({ code: 'stale-finality' })
+      }
+      for (const timestamp of [now - 7200n, now + 120n]) {
+        await expect(auditLegacyEnsV1({ ...expected, client: fake({ timestamp }).client }))
+          .resolves.toMatchObject({ sovereignReceipt: false })
+      }
+    } finally {
+      clock.mockRestore()
     }
     await expect(auditLegacyEnsV1({ ...expected, client: fake({ wrapperCode: '0x' }).client }))
       .rejects.toMatchObject({ code: 'untrusted-bytecode' })
