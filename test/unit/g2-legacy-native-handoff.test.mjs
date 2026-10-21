@@ -56,7 +56,7 @@ function mock(o = {}) {
       }
       expect(address).toBe(WRAPPER)
       if (functionName === 'getData') {
-        if (inputs[0] === BigInt(parentNode)) return [member, o.parentFuses ?? CANNOT_UNWRAP,
+        if (inputs[0] === BigInt(parentNode)) return [o.parentHolder ?? member, o.parentFuses ?? CANNOT_UNWRAP,
           o.parentExpiry ?? now + 60n * 86400n]
         expect(inputs[0]).toBe(BigInt(childNode))
         return [o.childHolder ?? member, o.childFuses ?? CANNOT_UNWRAP | PARENT_CANNOT_CONTROL,
@@ -121,6 +121,7 @@ describe('G2 legacy native handoff observations — never sovereign receipt', ()
     for (const options of [
       { registrarExpiry: now - 1n }, { registrarExpiry: now + 3600n },
       { registrarOwner: operator }, { parentRegistryOwner: operator }, { childRegistryOwner: member },
+      { parentHolder: ZERO },
       { parentFuses: 0 }, { childHolder: operator },
       { childFuses: CANNOT_UNWRAP }, { childFuses: PARENT_CANNOT_CONTROL },
       { childExpiry: now - 1n }, { childExpiry: now + 60n * 86400n },
