@@ -64,6 +64,21 @@ function mock(overrides = {}) {
 }
 
 describe('G2.7 unsigned legacy ENSv1 handoff preparation — never a receipt', () => {
+  it('reads all pinned code concurrently at the same finalized block, without lock or state change', async () => {
+    const { client } = mock()
+    const original = client.getBytecode
+    let active = 0
+    let peak = 0
+    client.getBytecode = async (options) => {
+      active++
+      peak = Math.max(peak, active)
+      await Promise.resolve()
+      try { return await original(options) } finally { active-- }
+    }
+    await prepareLegacyEnsV1Handoff({ ...baseArgs, client })
+    expect(peak).toBe(3) // Serializing reads would fail this test.
+  })
+
   it('prepares native NameWrapper calldata without writing or asserting ownership', async () => {
     const { client, calls } = mock()
     const result = await prepareLegacyEnsV1Handoff({ ...baseArgs, client })
