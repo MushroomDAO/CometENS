@@ -139,3 +139,23 @@ export interface ICometENS {
   /** Update a text record */
   setText(req: SetTextRequest): Promise<{ txHash: Hex }>
 }
+
+// G1 typed-message and deployment contract, prepared independently of the legacy SDK class.
+// The V3 SDK implementation is replaced by the following stacked integration PR.
+export interface NetworkProfile {
+  id: string
+  mode: 'managed' | 'selfHosted'
+  protocol: 'v3-readonly' | 'v3' | 'v4'
+  rootName: string
+  l1: { chainId: 1 | 11155111; rpcUrl: string; resolverAddress: Address; expectedCodeHash?: Hex }
+  l2: { chainId: 10 | 11155420; rpcUrl: string; recordsAddress: Address; expectedCodeHash?: Hex }
+  apiBaseUrl?: string
+  gatewayUrls?: readonly string[]
+}
+export interface MutationMeta { nonce: bigint; deadline: bigint }
+export interface RegisterMessage extends MutationMeta { parent: string; label: string; owner: Address }
+export interface SetAddrMessage extends MutationMeta { node: Hex; coinType: bigint; addr: Hex }
+export interface SetTextMessage extends MutationMeta { node: Hex; key: string; value: string }
+export interface SetContenthashMessage extends MutationMeta { node: Hex; hash: Hex }
+export interface AddRegistrarMessage extends MutationMeta { parentNode: Hex; registrar: Address; quota: bigint; expiry: bigint }
+export interface RemoveRegistrarMessage extends MutationMeta { parentNode: Hex; registrar: Address }
