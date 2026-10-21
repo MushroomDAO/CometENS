@@ -11,7 +11,8 @@
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./server": { "types": "./dist/server.d.ts", "import": "./dist/server.js" },
-    "./profiles": { "types": "./dist/profiles.d.ts", "import": "./dist/profiles.js" }
+    "./profiles": { "types": "./dist/profiles.d.ts", "import": "./dist/profiles.js" },
+    "./v4": { "types": "./dist/v4.d.ts", "import": "./dist/v4.js" }
   },
   "files": ["dist", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"],
   "scripts": {
