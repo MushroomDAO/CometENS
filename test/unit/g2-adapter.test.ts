@@ -32,7 +32,7 @@ function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: 
           if (!options.deferOperatorReads) return value
           return new Promise((resolve) => {
             pending.push(() => resolve(value))
-            if (pending.length === 2) pending.forEach((release) => release())
+            if (pending.length === 3) pending.forEach((release) => release())
           })
         }
         default: throw new Error('unexpected read')
@@ -145,7 +145,7 @@ describe('G2 OP application-only V4 adapter', () => {
     const { client, calls } = reader({ deferOperatorReads: true })
     const state = await new V4ControllerAdapter(profile, client).getOperator(operator)
     expect(state.canIssue).toBe(true)
-    expect(calls.slice(-2)).toEqual(['operators', 'operatorActive'])
+    expect(calls.slice(-3)).toEqual(['operators', 'operatorActive', 'operatorActive'])
   })
 
   it('redacts arbitrary provider exceptions', async () => {

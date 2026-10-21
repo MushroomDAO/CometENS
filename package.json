@@ -10,6 +10,7 @@
     "build:sdk": "pnpm --dir sdk build",
     "typecheck:sdk": "pnpm --dir sdk typecheck",
     "check:chain": "node scripts/check-chain.mjs",
+    "controller:v4": "pnpm --dir sdk build && node scripts/v4-controller-cli.mjs",
     "check:approval-sha": "node scripts/check-approval-sha.mjs",
     "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
     "check:deploy-order": "node scripts/check-deploy-order.mjs",
