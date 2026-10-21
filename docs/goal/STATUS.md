@@ -5,7 +5,7 @@
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
 | **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确验收，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED 并合并，merge `813f1e2`） | G1 已解锁 |
-| G1 独立 SDK | `ACCEPTED`（用户于 2026-10-21 对运行中的独立 SDK Demo 明确回复「验收通过了，你继续开发吧」，G1 代码 PR #110–#117/#119 均已审核合并） | G2 已解锁；正式 npm 发布、ENS 全链路主权/主网部署仍有独立阶段门禁 |
+| G1 独立 SDK | `ACCEPTED`（2026-10-21 提供本地 Demo 地址、步骤及 SDK 只读结果后，用户明确回复「验收通过了，你继续开发吧」；G0 #110、G1 代码 #111–#115、交付记录 #116、测试安全 #117/#119 均已审核合并） | G2 已解锁；正式 npm 发布、ENS 全链路主权/主网部署仍有独立阶段门禁 |
 | G2 per-parent owner / 可撤销 operator | `IN_PROGRESS`（2026-10-21 用户 G1 验收后启动；须按 G2.1–G2.9 全部验收） | 实现、独立安全 review、CI 和用户 G2 业务验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
 | G4 开源自部署、demo、UI 安全 | `BLOCKED` | G3 被用户验收 |
