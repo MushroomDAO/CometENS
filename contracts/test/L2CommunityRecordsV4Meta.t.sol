@@ -4,6 +4,23 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/L2CommunityRecordsV4.sol";
 
+/// A deliberately permissive EIP-1271 signer used ONLY in this local test.
+/// It insists the nonce is consumed *before* the checker invokes its callback.
+contract NonceWitness1271 {
+    L2CommunityRecordsV4 private immutable records;
+
+    constructor(L2CommunityRecordsV4 instance) { records = instance; }
+
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
+    function isValidSignature(bytes32, bytes calldata) external view returns (bytes4) {
+        if (records.nonces(address(this)) != 1) return 0xffffffff;
+        return 0x1626ba7e;
+    }
+}
+
 contract L2CommunityRecordsV4MetaTest is Test {
     L2CommunityRecordsV4 private records;
     bytes32 private node;
@@ -46,6 +63,19 @@ contract L2CommunityRecordsV4MetaTest is Test {
         vm.prank(other);
         vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
         records.setAddrBySig(node, member, 0, deadline, sig);
+    }
+
+    function test_1271WalletSeesNonceConsumedBeforeValidation() public {
+        NonceWitness1271 contractMember = new NonceWitness1271(records);
+        bytes32 otherNode = records.issue("contractmember", address(contractMember), address(0));
+        uint256 deadline = block.timestamp + 600;
+        vm.prank(relayer);
+        records.setAddrBySig(otherNode, member, 0, deadline, hex"abcd");
+        assertEq(records.addr(otherNode), member);
+        assertEq(records.nonces(address(contractMember)), 1);
+        vm.prank(other);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.setAddrBySig(otherNode, member, 0, deadline, hex"abcd");
     }
 
     function test_wrongSignerAndWrongChainDomainRejected() public {

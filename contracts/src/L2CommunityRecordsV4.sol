@@ -184,14 +184,17 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         private
     {
         address holder = _ownerOf(uint256(node));
+        uint64 startingEpoch = recordEpoch[node];
         if (holder == address(0)) revert Unauthorized();
         if (nonce != nonces[holder]) revert InvalidNonce();
         if (block.timestamp > deadline) revert SignatureExpired();
         if (deadline > block.timestamp + 1 days) revert InvalidInput();
-        // Chain ID and verifying contract are inside the EIP-712 domain;
-        // current recordEpoch is inside the signed struct for transfer safety.
+        // CEI: consume on OP before the external ERC-1271 validation callback.
+        // If the signature is invalid the EVM reverts this nonce increment.
+        nonces[holder] = nonce + 1;
         if (!SignatureChecker.isValidSignatureNow(holder, _hashTypedDataV4(structHash), signature)) revert Unauthorized();
-        ++nonces[holder]; // one-time consumption in the same OP transaction
+        // No ERC-1271 callback may use changed NFT ownership or record epoch.
+        if (_ownerOf(uint256(node)) != holder || recordEpoch[node] != startingEpoch) revert Unauthorized();
         emit MemberNonceConsumed(holder, node, nonce);
     }
 
