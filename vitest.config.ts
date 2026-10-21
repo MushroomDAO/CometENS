@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
         'src/**/*.test.ts',
         'server/**/*.test.ts',
         'test/**/*.test.ts',
+        'test/**/*.test.mjs',
       ],
       coverage: {
         provider: 'v8',
