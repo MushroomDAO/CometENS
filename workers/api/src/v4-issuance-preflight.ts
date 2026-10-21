@@ -73,7 +73,9 @@ export async function preflightV4SignedIssuance(reader: Reader, pin: V4IssuanceP
   try {
     if (await reader.getChainId() !== OP_SEPOLIA) throw new V4PreflightDenied('identity')
     const block = await reader.getBlock({ blockTag: 'latest' })
-    if (!validBytes32(block.hash ?? '') || typeof block.number !== 'bigint') {
+    if (!validBytes32(block.hash ?? '') || block.hash?.toLowerCase() === `0x${'0'.repeat(64)}` ||
+        typeof block.number !== 'bigint' || block.number < 0n ||
+        typeof block.timestamp !== 'bigint' || block.timestamp < 0n) {
       throw new V4PreflightDenied('rpc-unavailable')
     }
     const blockNumber = block.number

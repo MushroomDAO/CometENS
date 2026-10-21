@@ -18,7 +18,8 @@ OP latest-block number/hash and reads runtime bytecode, parent, controller,
 controller epoch, `issuanceNonce`, `operatorRevision(operator)` and the operator
 grant **at the same block number**. It checks a signed-only `CAP_ISSUE |
 CAP_SIGNED_ISSUE` grant, initial-addr capability, quota, epoch, expiry and
-deadline against that block's timestamp.
+deadline against that block's timestamp. Invalid, negative, or zero-hash RPC
+headers are rejected before reading the contract state.
 
 Next it uses `simulateContract`/`eth_call` for the **actual**
 `issueBySig(label,member,initialAddr,nonce,deadline,signature)` on the pinned

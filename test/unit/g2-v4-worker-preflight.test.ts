@@ -161,6 +161,21 @@ describe('G2.6 Worker V4 chain-authoritative read-only boundary', () => {
     await denied(run(advanced), 'stale')
   })
 
+  it('rejects invalid or zeroed RPC block headers before any code or nonce reads', async () => {
+    for (const mutate of [
+      (rpc: FakeOp) => { rpc.hash = `0x${'0'.repeat(64)}` as Hex },
+      (rpc: FakeOp) => { rpc.hash = '0x12' as Hex },
+      (rpc: FakeOp) => { rpc.latest = -1n },
+      (rpc: FakeOp) => { rpc.timestamp = -1n },
+    ]) {
+      const rpc = new FakeOp()
+      mutate(rpc)
+      await denied(run(rpc), 'rpc-unavailable')
+      expect(rpc.readings).toHaveLength(0)
+      expect(rpc.simulateCalls).toBe(0)
+    }
+  })
+
   it('refuses wrong OP chain, contract codehash, parent, sovereign flag, zero controller and missing code', async () => {
     for (const mutate of [
       (r: FakeOp) => { r.chainId = 10 },
