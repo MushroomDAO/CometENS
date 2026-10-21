@@ -13,8 +13,9 @@ const profile: V4ControllerProfile = {
 }
 const future = () => BigInt(Math.floor(Date.now() / 1000) + 3600)
 
-function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: `0x${string}`; controller?: Address; verified?: boolean; error?: boolean } = {}) {
+function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: `0x${string}`; controller?: Address; verified?: boolean; error?: boolean; deferOperatorReads?: boolean } = {}) {
   const calls: string[] = []
+  const pending: Array<() => void> = []
   const fake = {
     async getChainId() { calls.push('getChainId'); if (options.error) throw new Error('sensitive-provider-url'); return options.chainId ?? 11155420 },
     async getBytecode() { calls.push('getBytecode'); return options.bytecode ?? code },
@@ -24,8 +25,15 @@ function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: 
         case 'parentNode': return options.parent ?? namehash(profile.parentName)
         case 'rootController': return options.controller ?? owner
         case 'l1OwnershipVerified': return options.verified ?? false
-        case 'operators': return [3n, 2n, future(), 1n]
-        case 'operatorActive': return true
+        case 'operators':
+        case 'operatorActive': {
+          const value = functionName === 'operators' ? [3n, 2n, future(), 1n] : true
+          if (!options.deferOperatorReads) return value
+          return new Promise((resolve) => {
+            pending.push(() => resolve(value))
+            if (pending.length === 2) pending.forEach((release) => release())
+          })
+        }
         default: throw new Error('unexpected read')
       }
     },
@@ -101,6 +109,13 @@ describe('G2 OP application-only V4 adapter', () => {
     const adapter = new V4ControllerAdapter(profile, reader().client)
     const status = await adapter.getOperator(operator)
     expect(status).toMatchObject({ operator, controller: owner, permissions: 3n, remainingQuota: 2n, epoch: 1n, canIssue: true, l1OwnershipVerified: false, scope: 'op-application-only' })
+  })
+
+  it('runs independent read-only status RPCs concurrently, without a lock or mutation', async () => {
+    const { client, calls } = reader({ deferOperatorReads: true })
+    const state = await new V4ControllerAdapter(profile, client).getOperator(operator)
+    expect(state.canIssue).toBe(true)
+    expect(calls.slice(-2)).toEqual(['operators', 'operatorActive'])
   })
 
   it('redacts arbitrary provider exceptions', async () => {
