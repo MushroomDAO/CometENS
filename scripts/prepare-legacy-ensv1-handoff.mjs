@@ -9,9 +9,11 @@ export const ENSV1_SEPOLIA_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea
 const ZERO = '0x0000000000000000000000000000000000000000'
 const PIN = /^0x[0-9a-fA-F]{64}$/
 const MIN_VALIDITY_SECONDS = 24n * 60n * 60n
+const CANNOT_CREATE_SUBDOMAIN = 1 << 5
 const legacyRegistryAbi = [{ type: 'function', name: 'owner', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'address' }] }]
 const legacyWrapperAbi = [
   { type: 'function', name: 'getData', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'address' }, { type: 'uint32' }, { type: 'uint64' }] },
+  { type: 'function', name: 'upgradeContract', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'setSubnodeRecord', stateMutability: 'nonpayable',
     inputs: [
       { name: 'parentNode', type: 'bytes32' }, { name: 'label', type: 'string' },
@@ -20,7 +22,11 @@ const legacyWrapperAbi = [
     ], outputs: [{ type: 'bytes32' }],
   },
 ]
-const legacyRegistrarAbi = [{ type: 'function', name: 'nameExpires', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint256' }] }]
+const legacyRegistrarAbi = [
+  { type: 'function', name: 'nameExpires', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'getApproved', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
+]
 
 export class HandoffPreparationError extends Error {
   constructor(code) { super(`ENSv1 unsigned handoff refused: ${code}`); this.name = 'HandoffPreparationError'; this.code = code }
@@ -56,6 +62,7 @@ export async function prepareLegacyEnsV1Handoff({
     const block = await client.getBlock({ blockTag: 'finalized' })
     const now = BigInt(Math.floor(Date.now() / 1000))
     if (typeof block.number !== 'bigint' || typeof block.timestamp !== 'bigint' ||
+        !PIN.test(block.hash ?? '') || /^0x0{64}$/i.test(block.hash) ||
         block.timestamp + 7200n < now || block.timestamp > now + 120n) {
       throw new HandoffPreparationError('stale-finality')
     }
@@ -69,17 +76,31 @@ export async function prepareLegacyEnsV1Handoff({
 
     const parentNode = namehash(parentName)
     const childNode = namehash(`${label}.${parentName}`)
-    const [registryOwner, childRegistryOwner, parentData, registrarExpiry] = await Promise.all([
+    const registrarId = BigInt(keccak256(stringToHex(parentLabel)))
+    const [registryOwner, childRegistryOwner, parentData, childData, registrarExpiry, registrarOwner, registrarApproval, wrapperUpgrade] = await Promise.all([
       client.readContract({ address: ENSV1_SEPOLIA_REGISTRY, abi: legacyRegistryAbi, functionName: 'owner', args: [parentNode], blockNumber }),
       client.readContract({ address: ENSV1_SEPOLIA_REGISTRY, abi: legacyRegistryAbi, functionName: 'owner', args: [childNode], blockNumber }),
       client.readContract({ address: ENSV1_SEPOLIA_WRAPPER, abi: legacyWrapperAbi, functionName: 'getData', args: [BigInt(parentNode)], blockNumber }),
+      client.readContract({ address: ENSV1_SEPOLIA_WRAPPER, abi: legacyWrapperAbi, functionName: 'getData', args: [BigInt(childNode)], blockNumber }),
       client.readContract({ address: ENSV1_SEPOLIA_REGISTRAR, abi: legacyRegistrarAbi,
-        functionName: 'nameExpires', args: [BigInt(keccak256(stringToHex(parentLabel)))], blockNumber }),
+        functionName: 'nameExpires', args: [registrarId], blockNumber }),
+      client.readContract({ address: ENSV1_SEPOLIA_REGISTRAR, abi: legacyRegistrarAbi,
+        functionName: 'ownerOf', args: [registrarId], blockNumber }),
+      client.readContract({ address: ENSV1_SEPOLIA_REGISTRAR, abi: legacyRegistrarAbi,
+        functionName: 'getApproved', args: [registrarId], blockNumber }),
+      client.readContract({ address: ENSV1_SEPOLIA_WRAPPER, abi: legacyWrapperAbi,
+        functionName: 'upgradeContract', blockNumber }),
     ])
     if (!equals(registryOwner, ENSV1_SEPOLIA_WRAPPER) || !equals(childRegistryOwner, ZERO) ||
         !Array.isArray(parentData) || parentData.length !== 3 ||
         !equals(parentData[0], expectedParentOwner) || typeof parentData[1] !== 'number' ||
-        (parentData[1] & CANNOT_UNWRAP) === 0 || typeof parentData[2] !== 'bigint' ||
+        (parentData[1] & CANNOT_UNWRAP) === 0 || (parentData[1] & CANNOT_CREATE_SUBDOMAIN) !== 0 ||
+        typeof parentData[2] !== 'bigint' ||
+        !Array.isArray(childData) || childData.length !== 3 ||
+        !equals(childData[0], ZERO) || childData[1] !== 0 || typeof childData[2] !== 'bigint' ||
+        childData[2] > expiry ||
+        !equals(registrarOwner, ENSV1_SEPOLIA_WRAPPER) || !equals(registrarApproval, ZERO) ||
+        !equals(wrapperUpgrade, ZERO) ||
         typeof registrarExpiry !== 'bigint' || registrarExpiry <= now + MIN_VALIDITY_SECONDS ||
         parentData[2] <= now + MIN_VALIDITY_SECONDS ||
         expiry <= now + MIN_VALIDITY_SECONDS || expiry + MIN_VALIDITY_SECONDS > registrarExpiry ||
@@ -95,9 +116,10 @@ export async function prepareLegacyEnsV1Handoff({
       sovereignReceipt: false, ensV2AuthorityVerified: false, opControllerAuthorityVerified: false,
       chainId: 11155111, from: expectedParentOwner, to: ENSV1_SEPOLIA_WRAPPER,
       value: '0', data, parentName, childName: `${label}.${parentName}`,
-      blockNumber: blockNumber.toString(), blockTimestamp: block.timestamp.toString(),
+      blockNumber: blockNumber.toString(), blockHash: block.hash, blockTimestamp: block.timestamp.toString(),
       registrarExpiry: registrarExpiry.toString(), requestedExpiry: expiry.toString(),
-      wrappedParentHolder: parentData[0], fuses,
+      wrappedParentHolder: parentData[0], previousChildExpiry: childData[2].toString(),
+      registrarNftHolder: registrarOwner, fuses,
       // This is NOT a proof of a resulting owner, fuse, expiry, resolver or transaction inclusion.
       nativeHandoffCompleted: false,
     }
