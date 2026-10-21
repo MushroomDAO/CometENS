@@ -6,6 +6,7 @@ export const v4CommunityAbi = [
   { type: 'function', name: 'parentNode', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'rootController', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'pendingController', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'controllerEpoch', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint64' }] },
   { type: 'function', name: 'l1OwnershipVerified', stateMutability: 'view', inputs: [], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'operators', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }] },
   { type: 'function', name: 'operatorActive', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
@@ -31,7 +32,7 @@ export interface V4ControllerProfile {
   expectedCodeHash: Hex
 }
 
-type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract'>
+type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract'> & Partial<Pick<PublicClient, 'getTransactionReceipt'>>
 
 export interface V4PreparedTx {
   chainId: 11155420
@@ -82,7 +83,7 @@ export class V4ControllerAdapter {
     this.#profile = Object.freeze(p)
   }
 
-  private async contractRead(functionName: 'parentNode' | 'rootController' | 'pendingController' | 'l1OwnershipVerified') {
+  private async contractRead(functionName: 'parentNode' | 'rootController' | 'pendingController' | 'controllerEpoch' | 'l1OwnershipVerified') {
     return this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName })
   }
 
@@ -117,9 +118,52 @@ export class V4ControllerAdapter {
         this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE] }),
       ])
       const [permissions, remainingQuota, expiresAt, epoch] = data as readonly [bigint, bigint, bigint, bigint]
-      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue: active as boolean, l1OwnershipVerified, scope: 'op-application-only' as const }
+      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue: active as boolean,
+        canInitialAddr: Boolean(active) && (permissions & V4_CAP_INITIAL_ADDR) !== 0n,
+        l1OwnershipVerified, scope: 'op-application-only' as const }
     } catch {
       throw new SDKError('rpc-unavailable', 'Unable to read V4 operator state')
+    }
+  }
+
+  /** Independent OP state only. Pending controller and epoch are actual on-chain values. */
+  async getControllerStatus() {
+    const { controller, l1OwnershipVerified } = await this.verify()
+    try {
+      const [pendingController, controllerEpoch] = await Promise.all([
+        this.contractRead('pendingController'), this.contractRead('controllerEpoch'),
+      ])
+      if (typeof pendingController !== 'string' || !isAddress(pendingController) ||
+          typeof controllerEpoch !== 'bigint' || controllerEpoch < 1n) {
+        throw new Error('Invalid controller status')
+      }
+      return { controller, pendingController, controllerEpoch, parentName: this.#profile.parentName,
+        contract: this.#profile.contract, chainId: this.#profile.chainId, l1OwnershipVerified,
+        scope: 'op-application-only' as const }
+    } catch {
+      throw new SDKError('rpc-unavailable', 'Unable to read pinned V4 controller status')
+    }
+  }
+
+  /** Validate a mined OP receipt's destination. Success does not attest ENS authority. */
+  async getReceipt(hash: Hex) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new SDKError('invalid-input', 'Transaction hash must be 32 bytes')
+    await this.verify()
+    if (!this.publicClient.getTransactionReceipt) throw new SDKError('unsupported-protocol', 'Receipt lookup is unavailable on this reader')
+    try {
+      const receipt = await this.publicClient.getTransactionReceipt({ hash })
+      if (receipt.to?.toLowerCase() !== this.#profile.contract.toLowerCase()) {
+        throw new SDKError('invalid-input', 'Receipt destination differs from the pinned V4 contract')
+      }
+      if (await this.publicClient.getChainId() !== this.#profile.chainId) {
+        throw new SDKError('chain-mismatch', 'RPC network changed during receipt read')
+      }
+      return { transactionHash: receipt.transactionHash, blockNumber: receipt.blockNumber,
+        status: receipt.status, from: receipt.from, to: receipt.to, chainId: this.#profile.chainId,
+        scope: 'op-application-only' as const }
+    } catch (error) {
+      if (error instanceof SDKError) throw error
+      throw new SDKError('rpc-unavailable', 'Unable to read V4 transaction receipt')
     }
   }
 

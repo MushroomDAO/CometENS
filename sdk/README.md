@@ -1,5 +1,11 @@
 # @cometens/sdk
 
+### G2.5 partial: read-only OP controller CLI
+
+The source-tree `pnpm controller:v4 -- status --profile ./v4-profile.json --operator 0x...` checks the actual OP Sepolia chain ID, pinned runtime bytecode hash, immutable parent node and `l1OwnershipVerified=false` before querying the controller, pending controller, controller epoch, and an optional operator's granted permissions, remaining quota, expiry, grant epoch and effective issuing rights. The JSON profile contains only `parentName`, `chainId:11155420`, `contract` and `expectedCodeHash`. Supply a trusted OP Sepolia RPC through the `COMETENS_OP_RPC_URL` environment variable; no RPC URL or secret is printed. The `receipt --hash 0x...` command checks that the mined transaction's destination matches this pinned OP contract, then returns block, status and sender. A successful receipt alone does **not** confirm desired permissions: run `status` again.
+
+`prepare-grant`, `prepare-revoke`, `prepare-rotate`, `prepare-propose` and `prepare-accept` prepare unsigned calldata only. Run `pnpm controller:v4 -- --help` for required options. There is no signing, wallet, broadcasting, automatic transaction, L1 authority proof or sovereign exit. Multiple latest-block RPC reads may span blocks. G2.5 here is **partial** and limited to the experimental OP application contract; L1 ENS/NameWrapper binding and G2 acceptance gates remain separate.
+
 ### Experimental G2 OP application controller adapter (not a native ENS release)
 
 The **separate** `@cometens/sdk/v4` entrypoint exposes `V4ControllerAdapter` and the ABI of the independently deployed `L2CommunityRecordsV4` proof-of-concept. It **does not** enable the existing G1 `createCometENSClient({protocol: 'v4'})` path: that remains rejected until G2's entire L1 authority and NameWrapper acceptance is complete. The adapter is restricted to OP Sepolia (`chainId: 11155420`), requires the caller to pin an independently checked deployed runtime bytecode hash, and verifies the immutable community parent and current controller before preparing transaction calldata. It never accepts a private key or sends a transaction.
