@@ -65,6 +65,23 @@ function fake(options = {}) {
 }
 
 describe('G2 legacy ENSv1 Sepolia evidence (read only; never sovereignty)', () => {
+  it('starts concurrent bytecode reads while pinning both to the same finalized block', async () => {
+    const { client } = fake()
+    const readBytecode = client.getBytecode
+    let active = 0
+    let maxActive = 0
+    client.getBytecode = async (options) => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      try { return await readBytecode(options) } finally { active-- }
+    }
+    const evidence = await auditLegacyEnsV1({ ...expected, client })
+    expect(maxActive).toBe(2)
+    expect(evidence.opControllerAuthorityVerified).toBe(false)
+    // The stub implements *only* read APIs; any attempted write would fail.
+  })
+
   it('records finalized same-block owner/fuses/expiry without asserting OP or ENSv2 authority', async () => {
     const { client, calls } = fake()
     const observed = await auditLegacyEnsV1({ ...expected, client })
