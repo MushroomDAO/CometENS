@@ -5,8 +5,8 @@
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
 | **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确验收，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED 并合并，merge `813f1e2`） | G1 已解锁 |
-| G1 独立 SDK | `READY_FOR_ACCEPTANCE`（六个 G0/G1 PR 均获 GitHub APPROVED、CI 绿并合入 main，最终 merge `3390adf`；**用户 G1 验收仍待确认**） | 等用户确认 G1；此前不得进入 G2 |
-| G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
+| G1 独立 SDK | `ACCEPTED`（用户于 2026-10-21 对运行中的独立 SDK Demo 明确回复「验收通过了，你继续开发吧」，G1 代码 PR #110–#117/#119 均已审核合并） | G2 已解锁；正式 npm 发布、ENS 全链路主权/主网部署仍有独立阶段门禁 |
+| G2 per-parent owner / 可撤销 operator | `IN_PROGRESS`（2026-10-21 用户 G1 验收后启动；须按 G2.1–G2.9 全部验收） | 实现、独立安全 review、CI 和用户 G2 业务验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
 | G4 开源自部署、demo、UI 安全 | `BLOCKED` | G3 被用户验收 |
 | G5 Sepolia 全量安全验收 | `BLOCKED` | G4 被用户验收 |
@@ -32,7 +32,7 @@
 - [x] G1 API [#112](https://github.com/MushroomDAO/CometENS/pull/112) 在 main 更新后的 head `4686808` 获重新 APPROVE、cla/test SUCCESS 并合并（`2734474`）
 - [x] Demo [#111](https://github.com/MushroomDAO/CometENS/pull/111) 两项 Medium 已修复，head `afd13ca` 本地 811 测试和 GitHub 完整 test/CLA 通过
 - [x] #113 → #114 → #115 → #111 已逐级按最新 head 审批、完整 GitHub CI 和 mergeable 门禁合入 main；合并提交分别为 `40ee340`、`d5fc687`、`b434750`、`3390adf`
-- [ ] 用户明确 G1 验收（完成后才进入 G2）
+- [x] 用户明确 G1 验收：2026-10-21，在本地独立 SDK Demo 通过只读 G1 验收后回复「验收通过了，你继续开发吧」；其范围不包含仍待 G3/G5 的 L1 ENS/OP 解析一致性及 G6 主网部署
 
 验收证据与例外见 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)，[PROGRESS.md](PROGRESS.md)。
 
@@ -66,4 +66,4 @@
 
 `G0 ACCEPTED / CHANGES_REQUESTED — 日期 — 验收提交 SHA — 意见/阻塞`。
 
-G0 已于 2026-10-20 由用户明确验收通过。G1 现可启动；G1 只有在实现、验证、提交推送 PR 并取得用户下一次明确验收后，才能开启 G2。GitHub review/CI 和用户业务验收是独立门禁。
+G0 已于 2026-10-20 由用户明确验收通过，G1 已于 2026-10-21 获用户业务验收。G2 现已解锁，但必须先完成 G2.1–G2.9、安全与链上验收、独立 PR/CI/review，**在用户 G2 正式验收之前 G3 保持 BLOCKED**。GitHub review/CI 和用户业务验收是独立门禁。
