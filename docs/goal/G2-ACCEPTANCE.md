@@ -2,6 +2,8 @@
 
 > **IN_PROGRESS, not accepted.** G1 was explicitly accepted by the user on 2026-10-21. This is G2's release gate, not proof that G2 capabilities already exist. G3 remains blocked until independent G2 user acceptance.
 
+The [L1-to-OP authority design boundary](../reference/G2-L1-TO-OP-AUTHORITY.md) records why an asynchronously delivered L1 ownership checkpoint can authorize only a bounded `MANAGED` lease, not native ENS `SOVEREIGN` handoff. It is an unimplemented design contract, not new acceptance evidence.
+
 ## Non-negotiable distinctions
 
 - A V3 OP NFT is an **application-layer token**, never evidence that its holder owns an Ethereum L1 ENS Registry / NameWrapper node.
