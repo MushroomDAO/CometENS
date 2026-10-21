@@ -30,13 +30,13 @@ contract G2RootCheckpointInbox {
         uint256 destinationChainId;
         address sourceAdapter;
         address destinationInbox;
-        bytes32 parent;
+        bytes32 parentNode;
         address controller;
-        uint64 epoch;
+        uint64 sourceEpoch;
         uint64 sequence;
-        uint64 validUntil;
+        uint64 leaseUntil;
         uint64 l1ValidUntil;
-        bytes32 version;
+        bytes32 authorityVersion;
     }
 
     error UnauthorizedMessenger();
@@ -66,26 +66,27 @@ contract G2RootCheckpointInbox {
         if (
             block.chainid != OP_SEPOLIA_CHAIN_ID || c.sourceChainId != L1_SEPOLIA_CHAIN_ID
                 || c.destinationChainId != OP_SEPOLIA_CHAIN_ID || c.sourceAdapter != l1AuthorityAdapter
-                || c.destinationInbox != address(this) || c.parent != parentNode || c.version != MESSAGE_VERSION
-                || c.sequence <= sequence || c.epoch == 0 || c.epoch < sourceEpoch
+                || c.destinationInbox != address(this) || c.parentNode != parentNode
+                || c.authorityVersion != MESSAGE_VERSION || c.sequence <= sequence || c.sourceEpoch == 0
+                || c.sourceEpoch < sourceEpoch
         ) revert InvalidCheckpoint();
 
         // A controller change or emergency freeze must advance the source epoch.
-        if (c.controller != rootController && c.epoch <= sourceEpoch) revert InvalidCheckpoint();
+        if (c.controller != rootController && c.sourceEpoch <= sourceEpoch) revert InvalidCheckpoint();
         if (c.controller == address(0)) {
-            if (c.validUntil != 0 || c.l1ValidUntil != 0) revert InvalidCheckpoint();
+            if (c.leaseUntil != 0 || c.l1ValidUntil != 0) revert InvalidCheckpoint();
         } else if (
-            c.validUntil <= block.timestamp || c.validUntil > block.timestamp + MAX_LEASE_SECONDS
-                || c.validUntil > c.l1ValidUntil
+            c.leaseUntil <= block.timestamp || c.leaseUntil > block.timestamp + MAX_LEASE_SECONDS
+                || c.leaseUntil > c.l1ValidUntil
         ) {
             revert InvalidCheckpoint();
         }
 
-        sourceEpoch = c.epoch;
+        sourceEpoch = c.sourceEpoch;
         sequence = c.sequence;
         rootController = c.controller;
-        leaseUntil = c.validUntil;
-        emit CheckpointAccepted(parentNode, c.controller, c.epoch, c.sequence, c.validUntil);
+        leaseUntil = c.leaseUntil;
+        emit CheckpointAccepted(parentNode, c.controller, c.sourceEpoch, c.sequence, c.leaseUntil);
     }
 
     /// @notice Never use this alone as an ENS-native ownership assertion.

@@ -32,13 +32,13 @@ contract G2RootCheckpointInboxTest is Test {
             destinationChainId: 11155420,
             sourceAdapter: adapter,
             destinationInbox: address(inbox),
-            parent: ROOT,
+            parentNode: ROOT,
             controller: holder,
-            epoch: 1,
+            sourceEpoch: 1,
             sequence: 1,
-            validUntil: uint64(block.timestamp + 100),
+            leaseUntil: uint64(block.timestamp + 100),
             l1ValidUntil: uint64(block.timestamp + 200),
-            version: inbox.MESSAGE_VERSION()
+            authorityVersion: inbox.MESSAGE_VERSION()
         });
     }
 
@@ -94,10 +94,10 @@ contract G2RootCheckpointInboxTest is Test {
         c.destinationInbox = stranger;
         _reject(c);
         c = _checkpoint();
-        c.parent = bytes32(uint256(1));
+        c.parentNode = bytes32(uint256(1));
         _reject(c);
         c = _checkpoint();
-        c.version = bytes32(uint256(1));
+        c.authorityVersion = bytes32(uint256(1));
         _reject(c);
         c = _checkpoint();
         vm.chainId(10);
@@ -106,18 +106,39 @@ contract G2RootCheckpointInboxTest is Test {
 
     function test_invalidLeaseAndImpossibleExpiryRejected() public {
         G2RootCheckpointInbox.RootCheckpoint memory c = _checkpoint();
-        c.validUntil = uint64(block.timestamp);
+        c.leaseUntil = uint64(block.timestamp);
         _reject(c);
         c = _checkpoint();
-        c.validUntil = uint64(block.timestamp + 2 hours + 1);
+        c.leaseUntil = uint64(block.timestamp + 2 hours + 1);
         c.l1ValidUntil = uint64(block.timestamp + 1 days);
         _reject(c);
         c = _checkpoint();
-        c.l1ValidUntil = c.validUntil - 1;
+        c.l1ValidUntil = c.leaseUntil - 1;
         _reject(c);
         c = _checkpoint();
         c.controller = address(0);
         _reject(c);
+    }
+
+    function test_exactMaxLeaseAndEqualL1ValidityArePermitted() public {
+        G2RootCheckpointInbox.RootCheckpoint memory c = _checkpoint();
+        c.leaseUntil = uint64(block.timestamp + inbox.MAX_LEASE_SECONDS());
+        c.l1ValidUntil = c.leaseUntil;
+        _deliver(c);
+        assertEq(inbox.leaseUntil(), c.leaseUntil);
+        assertEq(inbox.activeController(), holder);
+    }
+
+    function test_genesisCannotBeConsumedByZeroEpochFreeze() public {
+        G2RootCheckpointInbox.RootCheckpoint memory c = _checkpoint();
+        c.controller = address(0);
+        c.sourceEpoch = 0;
+        c.leaseUntil = 0;
+        c.l1ValidUntil = 0;
+        _reject(c);
+        assertEq(inbox.sequence(), 0); // Cannot consume legitimate future checkpoint.
+        _deliver(_checkpoint());
+        assertEq(inbox.activeController(), holder);
     }
 
     function test_noReplayOutOfOrderOrControllerSwapWithoutEpoch() public {
@@ -125,20 +146,20 @@ contract G2RootCheckpointInboxTest is Test {
         _reject(_checkpoint());
         G2RootCheckpointInbox.RootCheckpoint memory c = _checkpoint();
         c.sequence = 2;
-        c.epoch = 0;
+        c.sourceEpoch = 0;
         _reject(c);
         c = _checkpoint();
         c.sequence = 2;
         c.controller = stranger;
         _reject(c);
-        c.epoch = 2;
+        c.sourceEpoch = 2;
         _deliver(c);
         assertEq(inbox.activeController(), stranger);
         c.sequence = 3;
-        c.epoch = 1;
+        c.sourceEpoch = 1;
         _reject(c);
         c.sequence = 3;
-        c.epoch = 2;
+        c.sourceEpoch = 2;
         c.controller = holder;
         _reject(c);
     }
@@ -147,16 +168,16 @@ contract G2RootCheckpointInboxTest is Test {
         _deliver(_checkpoint());
         G2RootCheckpointInbox.RootCheckpoint memory c = _checkpoint();
         c.controller = address(0);
-        c.validUntil = 0;
+        c.leaseUntil = 0;
         c.l1ValidUntil = 0;
-        c.epoch = 2;
+        c.sourceEpoch = 2;
         c.sequence = 2;
         _deliver(c);
         assertEq(inbox.activeController(), address(0));
         c = _checkpoint();
         c.sequence = 3;
         _reject(c); // old source epoch cannot resurrect controller
-        c.epoch = 3;
+        c.sourceEpoch = 3;
         c.sequence = 3;
         _deliver(c);
         assertEq(inbox.activeController(), holder);
