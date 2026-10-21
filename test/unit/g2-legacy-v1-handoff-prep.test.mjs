@@ -124,14 +124,16 @@ describe('G2.7 unsigned legacy ENSv1 handoff preparation — never a receipt', (
     for (const [changes, code] of [
       [{ chainId: 1 }, 'wrong-chain'],
       [{ timestamp: now - 8000n }, 'stale-finality'],
-      [{ timestamp: now + 121n }, 'stale-finality'],
+      // Avoid the +120s boundary: Date.now() advances between mock and code.
+      [{ timestamp: now + 300n }, 'stale-finality'],
       [{ blockHash: ZERO }, 'stale-finality'],
       [{ blockHash: `0x${'0'.repeat(64)}` }, 'stale-finality'],
       [{ blockHash: '0xdeadbeef' }, 'stale-finality'],
       [{ registrarCode: '0x00' }, 'untrusted-bytecode'],
       [{ wrapperCode: '0x' }, 'untrusted-bytecode'],
       [{ registryCode: '0x6000' }, 'untrusted-bytecode'],
-    ]) await expect(prepareLegacyEnsV1Handoff({ ...baseArgs, client: mock(changes).client }))
+    ]) await expect(prepareLegacyEnsV1Handoff({ ...baseArgs, client: mock(changes).client }),
+      JSON.stringify(changes, (_, value) => typeof value === 'bigint' ? value.toString() : value))
       .rejects.toMatchObject({ code })
   })
 
