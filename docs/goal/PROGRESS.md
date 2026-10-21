@@ -161,6 +161,33 @@ G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁�
 
 针对 #120 独立 reviewer 的不阻塞 Low，明确区分用户在对话中正式业务验收与助手本地启动/HTTP/RPC 探针的可复现事实：已提供只读 Demo 的访问地址和步骤，用户明确回复「啊，验收通过了，你继续开发吧」，但未获取其逐个点击的浏览器遥测，故不再声称观察到了所有浏览器动作；GitHub CI/review 并非代替用户验收。修复 STATUS 里混写 G0/G1/文档/安全 PR 号的措辞，并把「下一次进入项目时」的旧 G1 BLOCKED 操作指令修正为当前状态 G1 ACCEPTED、G2 IN_PROGRESS、G3 BLOCKED。G2.1–G2.3 正在交付，不能因此认定 G2 全部九项完成。
 
+### 2026-10-21 · G2 首轮链上权限与 SDK 交付、L1 证据边界和待验收事项
+
+用户已于今日正式通过 **G1** 并授权进入 G2。今日所有提交在独立 worktree/分支完成，使用普通 Git merge，未 rebase/force、未绕过审核门禁；没有新增实际 L1/OP testnet/mainnet 链上写入，也没有 npm publish。**G2 不等于 ACCEPTED**，本条为可恢复的过程日志。
+
+已通过独立 reviewer 对相应 head 的 APPROVED、`cla-check`/`test` SUCCESS 并合入 main：
+
+- [#120](https://github.com/MushroomDAO/CometENS/pull/120)（`2939ebb`）：保存用户 G1 正式验收，G2 `IN_PROGRESS`，G3 保持 `BLOCKED`，九项 G2 验收矩阵仍全部 PENDING。
+- [#121](https://github.com/MushroomDAO/CometENS/pull/121)（`7241d06`）、[#123](https://github.com/MushroomDAO/CometENS/pull/123)（`89aa41d`）：per-parent V4 OP ERC721/受限 operator 的原型、安全负例与交接修复；`l1OwnershipVerified=false`，不得凭构造函数名称哈希冒充 L1 主权。
+- [#122](https://github.com/MushroomDAO/CometENS/pull/122)（`ba1711e`）：V4 指定 codehash/chain/parent 的独立 SDK adapter，仅准备授权 calldata；不自动签名或广播。
+- [#124](https://github.com/MushroomDAO/CometENS/pull/124)（`436c04e`）：成员 addr/text/contenthash EIP-712 签名、原子链上 nonce、ERC1271 回调前占号和回调后 holder/recordEpoch 复验；签名发号与 Worker V4 消费尚未覆盖。
+- [#125](https://github.com/MushroomDAO/CometENS/pull/125)（`822c7ed`）：G1 验收表述和 G2 恢复指引修复。
+- [#126](https://github.com/MushroomDAO/CometENS/pull/126)（`25e97b7`）：旧版 ENSv1 Sepolia Registry/NameWrapper 只读的最终确认区块观测；返回主权/ENSv2/OP 权威 flag **全部 false**，不把 wrapper 的 90 天 grace 误当成 Registrar 未过期证明。
+- [#128](https://github.com/MushroomDAO/CometENS/pull/128)（`680c212`）：明确 L1→OP 异步消息只能给予短期 `MANAGED` lease，**严格 G2.4 transfer 当下失效保证不因 lease 降级**；需另设计无竞态的原生权限方式，未经用户批准不得引入 L1 escrow。
+- [#127](https://github.com/MushroomDAO/CometENS/pull/127)（`4e0fc49`）：V4 controller 状态、grant/revoke/rotate、cancel pending handoff、交易回执的安全只读 CLI；无签名/广播、无 L1 ownership verification。
+
+正在独立 PR review/CI，**尚未合入 main，不能当成已完成能力**：[#129](https://github.com/MushroomDAO/CometENS/pull/129) authenticated OP bounded checkpoint inbox（实际 L1 source adapter 与 V4 全权限租约门控尚缺）；[#130](https://github.com/MushroomDAO/CometENS/pull/130) 直接成员写入推进共享 nonce、持有人显式取消旧签名（对极大 nonce 造成持久不可写的 Low 正在加固）；[#131](https://github.com/MushroomDAO/CometENS/pull/131) 旧 ENSv1 `.eth` Registrar 到期与 PCC/CU 原生交易**未签名准备**，并非实际 handoff/receipt。ENSv2 EAC 独立角色/权限读路径仍在进行中；不得将这些分支上的草案当作 merged 实现。
+
+**恢复时立即做：** 查询 `gh pr list --state open` 与每个 `reviewDecision` / 最新 `headRefOid` / 全部 CI；过期 base 只能 ordinary-merge 最新 main，之后新 CI/精确 head 复审。不得合并 `CHANGES_REQUESTED`/`REVIEW_REQUIRED`/CI 红的 PR。G2.4 的原生 L1 当前权限、迁移/重注册/转让的无竞态撤销、G2.7 真实 ENSv1/v2 member native handoff、G2.8 upgrade/admin/bridge 审计及独立 `SOVEREIGN` 收据、G2.9 resolver 与不可逆记录锁等仍未验收。完整 G2.1–G2.9 各行继续 `PENDING`；G3 `BLOCKED`。
+
+### 2026-10-21 下午 · G2 reviewed PR 再对账（本会话续接）
+
+重新读取 GitHub 后确认：[#130](https://github.com/MushroomDAO/CometENS/pull/130) 成员 nonce 溢出与旧中继撤销加固，在 exact head `a7d4eb3` APPROVED / CLA + test SUCCESS 后于 `c6389fa` 正常合并；[#129](https://github.com/MushroomDAO/CometENS/pull/129) OP 单根认证 checkpoint inbox，最新 head `5fce059` APPROVED / CLA + test SUCCESS 后于 `f23de91` 正常合并；[#133](https://github.com/MushroomDAO/CometENS/pull/133) ENSv2 Sepolia 动态 EAC 只读风险工具，head `8ee56bc` APPROVED / CLA + test SUCCESS 后于 `5ad2cb2` 正常合并。均通过普通分支同步与 GitHub 合并，未 admin bypass、rebase 或 force；上述只读工具**一律不能发布 SOVEREIGN**。
+
+[#131](https://github.com/MushroomDAO/CometENS/pull/131) 收到 REQUEST_CHANGES：真实 ENSv1 NameWrapper 可能保留 child expiry，造成提交的 PCC/CU 子名实际有效期超过请求值并越过父名注册器 expiry；同时要验证 BaseRegistrar NFT custody/reclaim、父域 CANNOT_CREATE_SUBDOMAIN、子名残留 Wrapper 数据。安全修复在原独立工作树推进中；无新 exact-head APPROVE 不合并。本条记录所在文档 PR [#132](https://github.com/MushroomDAO/CometENS/pull/132) 也须通过新 head 的独立审核和 CI 才可落地。另已按独立 worktree 启动 L1 原生授权事件源和 ENSv1 原生事后只读观察器的研发，尚不可宣称已审查、提交或交付。
+
+安全门槛：异步 L1→OP checkpoint 的两小时 lease **不能**解决 L1 owner 转移瞬间旧 OP 权限仍有效的竞态；`G2.4 PENDING`，全部 G2.1–G2.9 矩阵继续 PENDING，**G3 BLOCKED**。G2 原生 ENS 子名完成、平台无升级夺权路径、成员 resolver 独立控制、不可逆记录锁及第三方 finalized 交权回执尚未全部实现；本轮无真实链上写交易或 npm 发布。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
