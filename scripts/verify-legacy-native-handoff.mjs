@@ -105,6 +105,7 @@ export async function verifyLegacyNativeHandoff({
     const childUnexpired = childData[2] > now + MIN_EXPIRY && childData[2] <= parentData[2] &&
       childData[2] + MIN_EXPIRY <= registrarExpiry
     const nativeHolderConditions = eq(parentRegistryOwner, WRAPPER) && eq(childRegistryOwner, WRAPPER) &&
+      nonzero(parentData[0]) &&
       eq(registrarOwner, WRAPPER) && registrarExpiry > now + MIN_EXPIRY &&
       (parentData[1] & CANNOT_UNWRAP) !== 0 && childUnexpired &&
       eq(childData[0], expectedMember) &&
