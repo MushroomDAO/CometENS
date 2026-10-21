@@ -19,6 +19,7 @@ export const v4CommunityAbi = [
 
 export const V4_CAP_ISSUE = 1n
 export const V4_CAP_INITIAL_ADDR = 2n
+export const V4_CAP_SIGNED_ISSUE = 4n
 const MAX_U64 = (1n << 64n) - 1n
 const ZERO = '0x0000000000000000000000000000000000000000'
 
@@ -53,7 +54,7 @@ function requiredAddress(value: string) {
 }
 
 function validateGrant(permissions: bigint, quota: bigint, expiresAt: bigint) {
-  if ((permissions & V4_CAP_ISSUE) === 0n || (permissions & ~3n) !== 0n || quota <= 0n ||
+  if ((permissions & V4_CAP_ISSUE) === 0n || (permissions & ~7n) !== 0n || quota <= 0n ||
       quota > MAX_U64 || expiresAt <= BigInt(Math.floor(Date.now() / 1000)) || expiresAt > MAX_U64) {
     throw new SDKError('invalid-input', 'Invalid scoped V4 operator permissions, quota or expiry')
   }
@@ -120,8 +121,13 @@ export class V4ControllerAdapter {
       ])
       const [permissions, remainingQuota, expiresAt, epoch] = data as readonly [bigint, bigint, bigint, bigint]
       if (typeof canIssue !== 'boolean' || typeof canInitialAddr !== 'boolean') throw new Error('Invalid operator status')
+      // operatorActive(CAP_ISSUE) includes signed-only grants: it is NOT
+      // authorization to call the unsigned issue() entrypoint.
+      const requiresControllerSignature = (permissions & V4_CAP_SIGNED_ISSUE) !== 0n
       return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue,
-        canInitialAddr,
+        canIssueUnsigned: canIssue && !requiresControllerSignature,
+        requiresControllerSignature,
+        canInitialAddr, canInitialAddrUnsigned: canInitialAddr && !requiresControllerSignature,
         l1OwnershipVerified, scope: 'op-application-only' as const }
     } catch {
       throw new SDKError('rpc-unavailable', 'Unable to read V4 operator state')

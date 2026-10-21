@@ -28,11 +28,12 @@ Nothing in this change updates the V3 Worker/KV or exposes a new SDK mint flow.
 - **Operator status/read API caveat:** `operatorActive(operator, CAP_ISSUE)`
   returns `true` for a currently active `CAP_SIGNED_ISSUE` grant because it
   checks granted bits, quota, epoch and expiry. It does **not** mean unsigned
-  `issue()` can execute. The existing SDK `getOperator().canIssue` simply
-  reports this active issuance right, not `canIssueUnsigned`. Read the raw
-  `permissions & CAP_SIGNED_ISSUE` bit before presenting unsigned issuance.
-  The current SDK `prepareGrant/prepareRotate` reject permission bit `4`;
-  signed-only issuance has **no SDK rollout** in this PR.
+  `issue()` can execute. SDK `getOperator().canIssue` reports this active
+  issuance grant, while `canIssueUnsigned` explicitly excludes signed-only
+  operators. Inspect `requiresControllerSignature` before requesting a mint.
+  The subsequent SDK adapter accepts permission combinations including bit `4`
+  when paired with `CAP_ISSUE`, and explicitly reports `canIssueUnsigned=false`
+  for signed-only operators. It still has no permit-signing/broadcast path.
 
 ## Typed permit and on-chain replay policy
 

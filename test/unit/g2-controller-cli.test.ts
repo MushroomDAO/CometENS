@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decodeFunctionData, keccak256, namehash, type Address, type Hex, type PublicClient } from 'viem'
-import { V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
+import { V4_CAP_SIGNED_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
 import { parseV4Args, runV4Cli } from '../../scripts/v4-controller-cli.mjs'
 
 const controller = '0x1111111111111111111111111111111111111111' as const
@@ -96,6 +96,31 @@ describe('G2.5 V4 controller status, receipt and CLI safety', () => {
     expect(independent.requestedCapabilities).toEqual([1n, 3n])
   })
 
+  it('allows signed-only grants but never labels them as unsigned issuance authorization', async () => {
+    const signedOnly = new V4ControllerAdapter(profile, mockReader({ permissions: 5n }).reader)
+    expect(V4_CAP_SIGNED_ISSUE).toBe(4n)
+    expect(await signedOnly.getOperator(operator)).toMatchObject({
+      permissions: 5n, canIssue: true, canIssueUnsigned: false, requiresControllerSignature: true,
+      canInitialAddr: false, canInitialAddrUnsigned: false, scope: 'op-application-only',
+    })
+    const signedWithInitialAddr = new V4ControllerAdapter(profile, mockReader({ permissions: 7n }).reader)
+    expect(await signedWithInitialAddr.getOperator(operator)).toMatchObject({
+      canIssue: true, canIssueUnsigned: false, canInitialAddr: true,
+      canInitialAddrUnsigned: false, requiresControllerSignature: true,
+    })
+    for (const p of [5n, 7n]) {
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 600)
+      const grant = await signedOnly.prepareGrant(controller, operator, p, 2n, expiry)
+      expect(decodeFunctionData({ abi: v4CommunityAbi, data: grant.data }))
+        .toMatchObject({ functionName: 'grantOperator', args: [operator, p, 2n, expiry] })
+      const rotate = await signedOnly.prepareRotate(controller, operator, pending, p, 2n, expiry)
+      expect(decodeFunctionData({ abi: v4CommunityAbi, data: rotate.data }))
+        .toMatchObject({ functionName: 'rotateOperator', args: [operator, pending, p, 2n, expiry] })
+    }
+    const stale = await new V4ControllerAdapter(profile, mockReader({ permissions: 5n, operatorEpoch: 3n }).reader).getOperator(operator)
+    expect(stale).toMatchObject({ canIssue: false, canIssueUnsigned: false, requiresControllerSignature: true })
+  })
+
   it('preserves zero pending address and rejects invalid pending/epoch RPC values', async () => {
     const none = new V4ControllerAdapter(profile, mockReader({ pending: ZERO }).reader)
     expect((await none.getControllerStatus()).pendingController).toBe(ZERO)
@@ -181,6 +206,12 @@ describe('G2.5 V4 controller status, receipt and CLI safety', () => {
       expect(status.result.controller).toMatchObject({ controller, pendingController: pending, controllerEpoch: '4', l1OwnershipVerified: false })
       expect(status.result.operator).toMatchObject({ operator, remainingQuota: '12', canIssue: true })
       expect(status.broadcast).toBe(false)
+      const signedStatus = JSON.parse(await runV4Cli(['status', '--profile', path, '--operator', operator],
+        { ...options, client: mockReader({ permissions: 5n }).reader }))
+      expect(signedStatus.result.operator).toMatchObject({
+        canIssue: true, canIssueUnsigned: false, requiresControllerSignature: true,
+      })
+      expect(signedStatus.broadcast).toBe(false)
       const prepared = JSON.parse(await runV4Cli(['prepare-revoke', '--profile', path,
         '--from', controller, '--operator', operator], options))
       expect(prepared).toMatchObject({ kind: 'prepare-revoke', signed: false, broadcast: false,

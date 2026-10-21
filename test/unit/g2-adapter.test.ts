@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeFunctionData, keccak256, namehash, type Address, type PublicClient } from 'viem'
 import { SDKError } from '../../sdk/profiles'
-import { V4_CAP_INITIAL_ADDR, V4_CAP_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
+import { V4_CAP_INITIAL_ADDR, V4_CAP_ISSUE, V4_CAP_SIGNED_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
 
 const owner = '0x1111111111111111111111111111111111111111' as const
 const operator = '0x2222222222222222222222222222222222222222' as const
@@ -91,7 +91,8 @@ describe('G2 OP application-only V4 adapter', () => {
     await expect(adapter.prepareGrant(other, operator, 1n, 5n, future())).rejects.toMatchObject({ kind: 'unauthorized' })
     await expect(adapter.prepareGrant(owner, operator, 2n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 4n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
-    await expect(adapter.prepareGrant(owner, operator, 5n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 8n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 9n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, owner, 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, '0x0000000000000000000000000000000000000000', 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 1n, 0n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
@@ -138,7 +139,9 @@ describe('G2 OP application-only V4 adapter', () => {
   it('reads operator state with explicit non-sovereign provenance', async () => {
     const adapter = new V4ControllerAdapter(profile, reader().client)
     const status = await adapter.getOperator(operator)
-    expect(status).toMatchObject({ operator, controller: owner, permissions: 3n, remainingQuota: 2n, epoch: 1n, canIssue: true, l1OwnershipVerified: false, scope: 'op-application-only' })
+    expect(status).toMatchObject({ operator, controller: owner, permissions: 3n, remainingQuota: 2n, epoch: 1n,
+      canIssue: true, canIssueUnsigned: true, canInitialAddrUnsigned: true,
+      requiresControllerSignature: false, l1OwnershipVerified: false, scope: 'op-application-only' })
   })
 
   it('runs independent read-only status RPCs concurrently, without a lock or mutation', async () => {
