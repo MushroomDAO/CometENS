@@ -188,6 +188,16 @@ G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁�
 
 安全门槛：异步 L1→OP checkpoint 的两小时 lease **不能**解决 L1 owner 转移瞬间旧 OP 权限仍有效的竞态；`G2.4 PENDING`，全部 G2.1–G2.9 矩阵继续 PENDING，**G3 BLOCKED**。G2 原生 ENS 子名完成、平台无升级夺权路径、成员 resolver 独立控制、不可逆记录锁及第三方 finalized 交权回执尚未全部实现；本轮无真实链上写交易或 npm 发布。
 
+### 2026-10-21 晚间 · G2 PR 恢复核验、native ENS 证据分层合并
+
+恢复前先查询真实 GitHub 与各 worktree；起始 `main=cd55d5c`。今天复查到 [#134](https://github.com/MushroomDAO/CometENS/pull/134)（legacy ENSv1 finalized *read-only* handoff 检查）对 `a61b654` 已独立 APPROVED、`cla-check`/`test` 均 SUCCESS、`mergeState=CLEAN`，按规则正常合并到 `main` **`9e118fb`**（无 force/rebase/admin），主线本地干净。[#136](https://github.com/MushroomDAO/CometENS/pull/136) 原 stacked 在 #134 上的 member resolver unsigned draft 已普通合入最新 `origin/main` 并将 PR base 改为 `main`，推送 `c1dd998` 后 51 个 unit suite / 863 tests 通过、root TypeScript typecheck 通过，CLA/test 复跑中、独立新 head 审核门尚未解除，不能擅自合并。
+
+[#135](https://github.com/MushroomDAO/CometENS/pull/135) legacy ENSv1 L1 native checkpoint event source 在 `be8be81` GitHub CI 已绿，但 formal `CHANGES_REQUESTED` 要求可变异验证「原生 ERC1155 owner 换人但未 observeLoss、同 controller 重绑定必须增加 sourceEpoch」。该 Medium 已交回原作者在其独立 worktree 增加测试、修正其他 review Lows，须在更新 head、复跑完整 CI 并得到新 APPROVED 后才能合并。**即使此源合并，仍没有真实 L1→OP relay**；两小时 OP lease 无法原子撤销 L1 转让瞬间旧 OP 权限，G2.4 的冻结严要求继续 PENDING。
+
+另 [#131](https://github.com/MushroomDAO/CometENS/pull/131) 经 Medium/Low 修复后在 `657865c` 正式 APPROVED / CI 双绿，安全地合并成 `cd55d5c`：legacy NameWrapper child 残留 expiry、父域 CANNOT_CREATE_SUBDOMAIN、Registrar ERC721 custody/单笔 approval/Wrapper upgrade 检查已进入未签名原生 handoff calldata 前置流程。**没有创建任何真实子域、未执行签名或链上写入**，不能把 calldata 当 native ENS handoff。#134 额外修复 P1：区分 owner/fuse snapshot 与完整安全主权，未能穷尽授权的场景一律不生成 SOVEREIGN 证明；增加 finalized header 二次核对、已知权限路径和 resolver 能力标志。
+
+重要恢复点：G0/G1 已用户验收；G2 的合约 OP ERC721 权限、跨链 MANAGED 组件、legacy native ENS1/ENSv2 的独立只读检查和 unsigned draft 均为不同层次的**局部交付**。G2.1–G2.9 必须逐项检查真实负例、finalized state、成员权限和后门，整张 [G2 验收表](G2-ACCEPTANCE.md)仍 PENDING。绝不将 `approvalInventoryExhaustive:false`、`independentConsensusProofVerified:false` 的数据升格为 SOVEREIGN/LOCKED_RECORD。G3、npm 发布、主网部署继续 BLOCKED。下一轮优先核对 #135/#136 的最新 head 审批/CI，并完成 onchain signed issuance/Worker V4 权威接入与实际跨链权限失效方案；任何真实测试网写入需独立授权。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
