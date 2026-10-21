@@ -12,6 +12,9 @@ import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 contract L2CommunityRecordsV4 is ERC721, EIP712 {
     uint256 public constant CAP_ISSUE = 1;
     uint256 public constant CAP_INITIAL_ADDR = 2;
+    uint256 public constant MAX_NONCE_SKIP = 1 << 64;
+    // Keep substantial headroom below uint256 overflow for all nonce paths.
+    uint256 public constant MAX_MEMBER_NONCE = type(uint256).max - (1 << 128);
     bytes32 public immutable parentNode;
     bool public constant l1OwnershipVerified = false;
     address public rootController;
@@ -25,7 +28,9 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         uint64 epoch;
     }
     mapping(address => Operator) public operators;
-    // One OP-state nonce per actual member owner, shared across record types.
+    // One OP-state nonce per actual member owner, shared across ALL nodes and
+    // record types. Direct member writes also advance it, cancelling the next
+    // relay authorization without altering other nodes' record contents.
     mapping(address => uint256) public nonces;
     bytes32 public constant SET_ADDR_TYPEHASH = keccak256("SetAddr(bytes32 node,address value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
     bytes32 public constant SET_TEXT_TYPEHASH = keccak256("SetText(bytes32 node,string key,string value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
@@ -57,6 +62,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     event TextSet(bytes32 indexed node, string key, string value);
     event ContenthashSet(bytes32 indexed node, bytes value);
     event MemberNonceConsumed(address indexed holder, bytes32 indexed node, uint256 nonce);
+    event MemberNonceAdvanced(address indexed holder, bytes32 indexed node, uint256 previousNonce, uint256 newNonce);
 
     modifier onlyController() {
         if (msg.sender != rootController) revert Unauthorized();
@@ -174,8 +180,35 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
 
     function setAddr(bytes32 node, address value) external {
         _requireMember(node);
+        _advanceDirectMemberNonce(node);
         _addresses[node] = AddressRecord(value, recordEpoch[node]);
         emit AddrSet(node, value);
+    }
+
+    /// @notice Cancel outstanding signed relays by moving the holder's shared
+    /// nonce forward. `node` proves CURRENT NFT ownership; this invalidates
+    /// signatures for all nodes held by msg.sender and all three record types.
+    /// It cannot revoke signatures using future nonces >= newNonce or a relay
+    /// already executed earlier in the chain's transaction order.
+    function invalidateNonce(bytes32 node, uint256 newNonce) external {
+        _requireMember(node);
+        _advanceMemberNonce(node, newNonce);
+    }
+
+    function _advanceDirectMemberNonce(bytes32 node) private {
+        uint256 previousNonce = nonces[msg.sender];
+        if (previousNonce >= MAX_MEMBER_NONCE) revert InvalidNonce();
+        _advanceMemberNonce(node, previousNonce + 1);
+    }
+
+    function _advanceMemberNonce(bytes32 node, uint256 nextNonce) private {
+        uint256 previousNonce = nonces[msg.sender];
+        // Subtraction after ordering avoids overflowing previousNonce + maxSkip.
+        if (nextNonce <= previousNonce || nextNonce > MAX_MEMBER_NONCE || nextNonce - previousNonce > MAX_NONCE_SKIP) {
+            revert InvalidNonce();
+        }
+        nonces[msg.sender] = nextNonce;
+        emit MemberNonceAdvanced(msg.sender, node, previousNonce, nextNonce);
     }
 
     function domainSeparator() external view returns (bytes32) { return _domainSeparatorV4(); }
@@ -187,13 +220,15 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         uint64 startingEpoch = recordEpoch[node];
         if (holder == address(0)) revert Unauthorized();
         if (nonce != nonces[holder]) revert InvalidNonce();
+        if (nonce >= MAX_MEMBER_NONCE) revert InvalidNonce();
         if (block.timestamp > deadline) revert SignatureExpired();
         if (deadline > block.timestamp + 1 days) revert InvalidInput();
         // CEI: consume on OP before the external ERC-1271 validation callback.
         // If the signature is invalid the EVM reverts this nonce increment.
         nonces[holder] = nonce + 1;
         if (!SignatureChecker.isValidSignatureNow(holder, _hashTypedDataV4(structHash), signature)) revert Unauthorized();
-        // No ERC-1271 callback may use changed NFT ownership or record epoch.
+        // SignatureChecker uses staticcall for ERC-1271, preventing wallet
+        // callbacks from changing NFT ownership or record epoch. Extra guard.
         if (_ownerOf(uint256(node)) != holder || recordEpoch[node] != startingEpoch) revert Unauthorized();
         emit MemberNonceConsumed(holder, node, nonce);
     }
@@ -239,6 +274,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setText(bytes32 node, string calldata key, string calldata value) external {
         _requireMember(node);
         if (bytes(key).length == 0 || bytes(key).length > 256 || bytes(value).length > 4096) revert InvalidInput();
+        _advanceDirectMemberNonce(node);
         _texts[node][key] = TextRecord(value, recordEpoch[node]);
         emit TextSet(node, key, value);
     }
@@ -251,6 +287,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setContenthash(bytes32 node, bytes calldata value) external {
         _requireMember(node);
         if (value.length > 512) revert InvalidInput();
+        _advanceDirectMemberNonce(node);
         _contenthashes[node] = ContentRecord(value, recordEpoch[node]);
         emit ContenthashSet(node, value);
     }
