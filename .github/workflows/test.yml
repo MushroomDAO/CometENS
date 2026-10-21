@@ -21,7 +21,7 @@ name: Tests
 
 on:
   pull_request:
-    branches: [preview, main]
+    branches: [preview, main, 'goal/**']
   push:
     branches: [preview, main]
 
