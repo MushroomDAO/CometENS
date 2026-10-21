@@ -204,3 +204,16 @@ G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁�
 2. G0 已于 2026-10-20、G1 于 2026-10-21 获用户业务验收；检查当前 G2.1–G2.9 的 PR、review、CI 与可复现安全证据。**G2 IN_PROGRESS，用户明确验收 G2 之前 G3 保持 BLOCKED**。
 3. 每个 Goal 先固定 API/ABI、权限与可重跑验收；实现后附 unit + Foundry + Sepolia 链上交易和独立验证证据。主网广播只属于完成 G5 且用户明确批准的 G6。
 4. 每完成一次审计、设计、修复、提交或阻塞，**追加**此文件的时间、结果、证据、失败、下一步；最后更新 STATUS，避免依赖聊天上下文。
+
+### 2026-10-21 晚间 · G2 #139–#142 正式落地后的恢复检查点（截至 main `4654ed7`）
+
+本条是对上方各时刻在审 PR 状态的**追加更新**，不改写先前的过程记录。已核对 GitHub merged PR 的真实 `mergeCommit`：以下四项均于 2026-10-21 合入 `main`，落地的是彼此独立的局部安全原语，**并非 G2 九项业务验收通过**。本批交付和本次文档记录没有向公共 L1/OP Sepolia 或主网广播真实写交易，也没有 npm 发布。
+
+- [#142](https://github.com/MushroomDAO/CometENS/pull/142) → **`9a30c88`**：新增独立 L1 Sepolia `G2LegacyL1CheckpointRelay`，检查 legacy L1 来源的现时权限、nonce/epoch、租约、chain/parent/inbox/version 与部署代码身份，调用 L1 CrossDomainMessenger 将检查点送往 OP `G2RootCheckpointInbox`；消息的 `sourceAdapter` 是 **relay 合约地址**，与 OP `xDomainMessageSender` 对齐。Messenger 的真实部署身份、升级实现及跨链最终性尚未独立完成验收；L1 入队不等于 OP finalized 交付，严格限于 **MANAGED**。[设计边界](../reference/G2-LEGACY-L1-MANAGED-RELAY.md)。
+- [#141](https://github.com/MushroomDAO/CometENS/pull/141) → **`374ffb4`**：legacy ENSv1 成员自愿进行**一次性** addr/contenthash/text 数据锁的独立合约原语，核验真实 NameWrapper/Registrar 持有人、fuse、到期和代码身份；本地存储不可再修改，但**不会自动设置或锁定 ENS Registry/NameWrapper 的实际 resolver 指针**，也未取得 `nativeResolverPointerLockedVerified` 的正向证据。不能宣称 `LOCKED_RECORD`、完整 G2.9 或 native `SOVEREIGN`。[边界说明](../reference/G2-LEGACY-MEMBER-RECORD-LOCK.md)。
+- [#139](https://github.com/MushroomDAO/CometENS/pull/139) → **`17e21b2`**：V4 per-parent `CAP_SIGNED_ISSUE` 可选签名发行，当前 controller EIP-712/EOA/ERC-1271、链上发行 nonce、operator grant revision、controller epoch、quota/expiry 和转移记录失效均有安全负例；包括同 epoch grant-over-grant 旧 permit 失效回归。旧的 `CAP_ISSUE` 授权仍可允许无签名 `issue()`；`operatorActive`/SDK `canIssue` 也不能当成无签名发行权。**尚未把此路径接到生产 Worker V4 交易消费、签名/权限与状态最终性流程**，现有 Worker V3/KV 不因此获得链上原子权威，G2.6 未验收。[签名发行说明](../V4-SIGNED-ISSUANCE.md)。
+- [#140](https://github.com/MushroomDAO/CometENS/pull/140) → **`4654ed7eb86afa90f5ff8d4818f368cce9af5149`**（本检查点 `main`）：新 `G2ManagedLeaseIssuer` 仅在旧 V4 controller 已提名、OP inbox 的**当前授权 controller**于有效 `MANAGED` 租约内接受控制后才成为 V4 root；旧 V4 operator grant 随 controller epoch 切换失效。adapter 的有限配额/权限/独立到期的 delegation 每次发行都复核 OP lease、source epoch、代码身份和 V4 控制权；过期或 freeze 后只保留按限定 grantor/当前 controller 的削权撤销，不能转移成员 ERC721 或编辑成员私有记录。该 issuer **不提供 V4 direct grant 或签名转发路径**，#139 的旧 epoch permit 不可借用 issuer 绕过租约。它仍是 OP 应用层 **MANAGED** 发行组件，而非 L1 native title 证明。
+
+**未解除的 G2 阻塞：** [#138](https://github.com/MushroomDAO/CometENS/issues/138) 仍为 `OPEN`：L1 owner 发生转移/过期/迁移时，先前通过 OP 的 controller/operator 在冻结跨链到达或最多两小时 lease 结束前仍可能扩张发行权；`observeLoss()`、relay 和已认证 OP 消息**不提供转移瞬间原子撤销**。不可把「最终冻结」降格当作 G2.4 的严格验收，也不可声称已经解决 ENSv2 迁移、L1/OP consensus/finality 或 messenger proxy upgrade。仍需 G2.6 的 Worker 端真实 V4 签名/nonce/授权链路、G2.7/2.8 的原生 ENS member handoff 与可独立重放的**双链 finalized、权限/升级路径**收据、G2.9 的成员 resolver 实际指针控制与原生不可变指针证明；#141 的一次性数据锁不足以替代这些证据。
+
+恢复时以最新 `origin/main`、`gh pr`/issue 实际状态为准；此处 SHA 是**本检查点的历史快照**。全部 [G2.1–G2.9 验收矩阵](G2-ACCEPTANCE.md)继续 **PENDING**，**G2 IN_PROGRESS / G3 BLOCKED**，直到独立安全/CI、真实链上经授权验收与用户明确单独接受 G2；不得自行执行公共链写入、主网部署或 npm publish。
