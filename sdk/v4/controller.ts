@@ -32,7 +32,7 @@ export interface V4ControllerProfile {
   expectedCodeHash: Hex
 }
 
-type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract'> & Partial<Pick<PublicClient, 'getTransactionReceipt'>>
+type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract'>
 
 export interface V4PreparedTx {
   chainId: 11155420
@@ -149,9 +149,10 @@ export class V4ControllerAdapter {
   async getReceipt(hash: Hex) {
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new SDKError('invalid-input', 'Transaction hash must be 32 bytes')
     await this.verify()
-    if (!this.publicClient.getTransactionReceipt) throw new SDKError('unsupported-protocol', 'Receipt lookup is unavailable on this reader')
+    const receiptReader = this.publicClient as V4Reader & { getTransactionReceipt?: PublicClient['getTransactionReceipt'] }
+    if (!receiptReader.getTransactionReceipt) throw new SDKError('unsupported-protocol', 'Receipt lookup is unavailable on this reader')
     try {
-      const receipt = await this.publicClient.getTransactionReceipt({ hash })
+      const receipt = await receiptReader.getTransactionReceipt({ hash })
       if (receipt.to?.toLowerCase() !== this.#profile.contract.toLowerCase()) {
         throw new SDKError('invalid-input', 'Receipt destination differs from the pinned V4 contract')
       }
