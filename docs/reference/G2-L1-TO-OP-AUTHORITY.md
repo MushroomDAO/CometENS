@@ -10,13 +10,27 @@ Do **not** silently rewrite this limitation as “instant on L1 transfer” or �
 
 The stronger alternative—escrowing native parent ownership and requiring OP freeze acknowledgement before parent transfer—would materially constrain the community's independent ownership and cannot be enabled without a separate user design decision. G2 defaults to *no escrow*.
 
+**Acceptance reconciliation:** the frozen [G2.4 requirement](../goal/G2-ACCEPTANCE.md) that an L1 transfer cannot expand stale OP privileges is **NOT met by the managed-lease design**. We will not weaken that requirement to make a test pass. In particular, a real transfer during a two-hour lease can leave the former root controller with residual OP write authority until a freeze is delivered or the lease expires. Package A–D can only be marked *implemented as a bounded MANAGED prototype*, **not G2.4 ACCEPTED**. Before closing G2.4, require a genuinely race-excluding design (for example a user-approved L1 custody/freeze-before-transfer protocol) or remove the stale OP controller's privileged issuance path by making native L1 issuance the only authoritative issuance; independently prove which assurance applies. This stronger restriction is a separate product/security decision, not implied user approval of escrow.
+
 ## G2.4 proposed protocol, `MANAGED` only
 
 1. **L1 native authority adapter (immutable, pinned):** determine the live authority of `parentNode` on the selected chain at the time of the binding transaction, rather than trusting a constructor argument, Worker signature or hot EOA. ENSv1 Registry owner and NameWrapper wrapped holder/fuses/expiry are distinct; for `.eth`, registrar expiry and grace matter too. ENSv2 uses its actual hierarchical registry and EAC permissions, **not** ENSv1 namehash ownership/fuse shortcuts. Pin chainId, native contract addresses and runtime implementation identity. An L1 smart-account/multisig controller must be supported.
-2. **Explicit owner-authorized bind/renew/rotate:** the native L1 owner signs an actual L1 operation, or calls directly from its smart account. The adapter emits a monotonically sequenced checkpoint containing source/version, parent identity, controller, epoch, L1 validity horizon, short OP lease horizon, block context and destination. Third parties may permissionlessly trigger safe expiry/freeze refreshes; no keeper can extend authority by assertion alone.
+2. **Explicit owner-authorized bind/renew/rotate:** the native L1 owner signs an actual L1 operation, or calls directly from its smart account. The adapter emits a monotonically sequenced checkpoint containing source/version, parent identity, controller, epoch, L1 validity horizon, short OP lease horizon, block context and destination. Third parties may permissionlessly *request a read/refresh*; the adapter only emits a state-changing freeze checkpoint after independently detecting lost/expired native authority. A harmless read does not increment `sequence`, consume sequence slots, or grant authority. Gas for the requested L1 refresh and message belongs to the submitting caller; no keeper can extend authority by assertion alone.
 3. **Canonical messenger only:** fix and verify L1 sender adapter and L2 inbox. The inbox requires `msg.sender == pinned L2CrossDomainMessenger` *and* `xDomainMessageSender() == pinned L1 adapter`, along with exact source/destination chain IDs, contract identity, parent identity, version, sequence and epoch. Never accept an arbitrary relayer's JSON/signature as equivalent proof. The OP messenger itself is an upgradeable dependency; disclose that systemic trust rather than hiding it.
-4. **OP isolation/lease enforcement:** store per-parent `sourceVersion`, `epoch`, `sequence`, `rootController`, `leaseUntil` and validity limit onchain. Reject stale/out-of-order, duplicate, future-version and wrong-parent messages. On new epoch, invalidate old operators, pending handoff, grants and signed authorizations. **Every** privileged operation—including direct controller `issue`, grant, rotate, controller proposal/acceptance and delegated issue—must check live OP lease. An expired/unknown/undelivered checkpoint freezes new privilege expansions, even if Worker KV or gateways report success. A current lease is still only a snapshot: expiry bounds staleness; it does not prevent pre-expiry L1 transfers.
+4. **OP isolation/lease enforcement:** use **one new V4 successor per parent** (not a shared multi-root storage map), each with separate `sourceVersion`, L1 `sourceEpoch`, L1 global-per-parent `sequence`, OP `controllerEpoch`, `rootController`, `leaseUntil` and L1 validity limit. `sourceEpoch` changes for native L1 owner/controller authority events (including migration); it never resets the monotone `sequence`. OP `controllerEpoch` must increment on *every accepted increase in sourceEpoch*, even when the controller address stays identical, invalidating old operators, pending handoff, grants and controller-signed authorizations. Member-only `recordEpoch` remains reserved for each NFT transfer, **not** L1 checkpoint rotation. Reject any `sequence <= storedSequence`, any `sourceEpoch < storedSourceEpoch`, and a controller change without a sourceEpoch increase. An expired/unknown/undelivered lease prevents **new privilege expansions**, even if Worker KV or gateways report success. It must never block actions that only *reduce* OP privilege. A current lease is still only a snapshot: expiry bounds staleness; it does not prevent pre-expiry L1 transfers.
 5. **No member clawback:** freezing a parent or rotating its controller cannot transfer existing issued member NFTs or overwrite member-owned records. Do not reuse V3 global-owner semantics. Native L1 expiry and re-registration may independently end ownership of the name; report that explicitly.
+
+**Lease bounds (OP Sepolia prototype):** `MAX_LEASE = 2 hours` is a hard onchain ceiling; `leaseUntil > block.timestamp`, `leaseUntil <= block.timestamp + MAX_LEASE`, and `leaseUntil <= l1ValidUntil`, where the L1 adapter sets `l1ValidUntil` at or before actual parent `.eth` registration expiry **minus a 24-hour safety margin** (not inside registrar grace). Only the L1-native holder/authorized smart account at L1 execution can request a positive new controller or renewal; the fixed authenticated L1 adapter is the only source of these messages. An operator or Worker cannot choose the lease horizon. Operational renewal attempts should start at least 15 minutes before lease end, but there is **no fallback privilege if they are late**; do not mistake scheduling for an onchain safety guarantee. These short bounds are risk containment, **not** satisfaction of G2.4 transfer-time safety.
+
+| Action after OP lease expiry | Decision | Reason |
+| --- | --- | --- |
+| Direct controller / delegated `issue`; signed `issue` | **Reject** | Expands issuance privileges |
+| `grantOperator`; `rotateOperator` (grants next) | **Reject** | Creates new privilege even if old operator is removed |
+| `proposeController(nonzero)` / `acceptController` | **Reject** | New controller authority must come from fresh L1 proof |
+| `revokeOperator`; `proposeController(address(0))` | **Allow** | Can only reduce existing/pending OP rights |
+| Member's own records, token transfer, signed-record nonce invalidation | **Allow** | Must remain member-controlled; cannot enlarge root authority |
+
+**Finality classification:** canonical L1 deposits may first be executed on an unsafe OP head and before the source L1 transaction is finalized. This is not a proof of finality. A provisional inbox checkpoint may enforce only a *MANAGED* lease. The independent receipt verifier must observe the originating L1 checkpoint in a finalized Ethereum block **and** the corresponding OP execution in a finalized OP block before reporting verified delivery; reorged, unsafe or unproven inclusions must never count toward G2.4 acceptance. A messenger without a verified finalized-source guarantee cannot be elevated by merely waiting an arbitrary number of minutes.
 
 Suggested versioned message shape (ABI to be frozen and tested before implementation):
 
@@ -38,6 +52,21 @@ struct RootCheckpoint {
 
 **Fail-closed tests:** spoof `xDomainMessageSender`; generic relayer call; wrong chain, inbox, parent, epoch or source version; duplicate/out-of-order checkpoint; failed relay; lease expires before next checkpoint; old controller directly issues; rotation leaves operator/pending owner active; L1 transfer during unexpired lease; ENSv1→ENSv2 migration while old v1 message is delayed; `.eth` expiration, grace and re-registration; OP reorg/unsafe inclusion. The **L1 transfer during lease must demonstrate the limitation honestly**, not be marked protected by tests that only inspect OP.
 
+Required concrete checkpoint examples (OP Sepolia messenger `0x4200000000000000000000000000000000000007`, L1 source chainId `11155111`, OP destination `11155420`, same pinned adapter/inbox/root/version throughout):
+
+| Stored `(sourceEpoch,sequence,controller)` | Incoming | Expected |
+| --- | --- | --- |
+| `(0,0,zero)` | `(1,1,A)` with `leaseUntil=now+3600`, `l1ValidUntil=now+7200` | Accept `MANAGED` (not G2.4 acceptance) |
+| `(1,1,A)` | `(1,1,A)` | Reject duplicate |
+| `(1,1,A)` | `(1,2,B)` | Reject controller change without epoch increase |
+| `(1,1,A)` | `(2,2,B)` | Accept and increment OP controllerEpoch, revoke old A grants |
+| `(2,2,B)` | `(1,3,A)` | Reject stale L1 epoch even with higher sequence |
+| `(2,2,B)` | `(3,3,zero)` freeze | Accept; no new issues; member records intact |
+| `(3,3,zero)` | `(4,4,B)` `leaseUntil=now+7201` | Reject over MAX_LEASE |
+| `(3,3,zero)` | `(4,4,B)` `leaseUntil > l1ValidUntil` | Reject beyond native parent validity |
+
+Test both post-expiry `revokeOperator` and `proposeController(0)` **succeed**, while `issue`, grant, nonzero propose and accept all fail. This does not change the frozen G2.4 requirement for immediate transfer safety.
+
 ## Native G2.7–G2.9 acceptance is separate
 
 **ENSv1 legacy path:** member's actual L1 subname must be registered under the native Registry/NameWrapper, held by the member in the canonical NameWrapper and, as appropriate, have parent `CANNOT_UNWRAP` plus child `CANNOT_UNWRAP | PARENT_CANNOT_CONTROL`. Check holder approvals (`getApproved` / `isApprovedForAll`), current unexpired parent/child, `.eth` registrar lifecycle, renewal limits, resolver control and upgrade/admin paths. PCC/CU is not perpetual ownership: expiry and ENS protocol governance remain external risks. Default to **member-changeable resolver**; irreversible resolver lock is an explicit optional decision with recovery consequences.
@@ -53,7 +82,7 @@ struct RootCheckpoint {
 | A | Pinned live L1 authority readers and expiry/grace negative tests | 2.4 |
 | B | L1 smart-account-capable onchain checkpoint producer | 2.4 |
 | C | Versioned canonical messenger and authenticated OP inbox | 2.4 |
-| D | Fresh lease-gated OP V4 successor, including controller bypass negatives | 2.1, 2.2, 2.4 |
+| D | Fresh lease-gated OP V4 successor; prove rotation cannot move member NFT/records and controller direct-issue gate | 2.1, 2.2, 2.3, 2.4 |
 | E | SDK/CLI status, grant/revoke receipt and relayer nonce tests | 2.5, 2.6 |
 | F | ENSv1 native subname calldata and L1 member-handoff verifier | 2.7, 2.8 |
 | G | Pinned ENSv2 EAC inspector and migration invalidation | 2.4, 2.7, 2.8 |
