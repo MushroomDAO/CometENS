@@ -169,6 +169,36 @@ contract G2ManagedLeaseIssuerTest is Test {
         issuer.issue("freshroot", member, address(0));
     }
 
+    function test_authenticatedFreezeStillAllowsOriginalGrantorToRevoke() public {
+        _grant(issuer.CAP_ISSUE(), 2, uint64(block.timestamp + 1000));
+        assertEq(issuer.grantorOf(delegated), owner);
+        _checkpoint(2, 2, address(0), 0);
+        vm.prank(hostile);
+        vm.expectRevert(G2ManagedLeaseIssuer.Unauthorized.selector);
+        issuer.revoke(delegated);
+        vm.prank(owner);
+        issuer.revoke(delegated);
+        assertEq(issuer.grantorOf(delegated), address(0));
+        (, uint64 quota,,) = issuer.grants(delegated);
+        assertEq(quota, 0);
+        vm.prank(owner);
+        vm.expectRevert(G2ManagedLeaseIssuer.LeaseInactive.selector);
+        issuer.issue("frozen", member, address(0));
+    }
+
+    function test_oldGrantorCannotRevokeNewControllerRegrant() public {
+        _grant(issuer.CAP_ISSUE(), 3, uint64(block.timestamp + 1000));
+        _checkpoint(2, 2, rotatedOwner, 3600);
+        vm.prank(rotatedOwner);
+        issuer.grant(delegated, 1, 1, uint64(block.timestamp + 1000));
+        assertEq(issuer.grantorOf(delegated), rotatedOwner);
+        vm.prank(owner);
+        vm.expectRevert(G2ManagedLeaseIssuer.Unauthorized.selector);
+        issuer.revoke(delegated);
+        vm.prank(delegated);
+        issuer.issue("freshgrant", member, address(0));
+    }
+
     function test_rotatedControllerCannotBeOverriddenByOldOwner() public {
         _checkpoint(2, 2, rotatedOwner, 3600);
         vm.prank(owner);

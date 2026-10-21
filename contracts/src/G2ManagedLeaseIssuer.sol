@@ -44,6 +44,7 @@ contract G2ManagedLeaseIssuer {
     }
 
     mapping(address => Grant) public grants;
+    mapping(address => address) public grantorOf;
 
     error IdentityMismatch();
     error Unauthorized();
@@ -126,19 +127,21 @@ contract G2ManagedLeaseIssuer {
                 || expiresAt <= block.timestamp || expiresAt > IG2RootInbox(inbox).leaseUntil()
         ) revert InvalidGrant();
         grants[operator] = Grant(permissions, quota, expiresAt, epoch);
+        grantorOf[operator] = msg.sender;
         emit ManagedGrant(operator, permissions, quota, expiresAt, epoch);
     }
 
     function revoke(address operator) external {
-        // Reduction-only actions remain available to the last authenticated
-        // controller even after the lease lapses (no new privileges granted).
+        // Reduction-only actions remain available to the original grantor
+        // through freeze/lease expiry; no new privileges can be granted.
         _verifyIdentity();
         if (
-            msg.sender != IG2RootInbox(inbox).rootController() || msg.sender == address(0)
-                || IG2CommunityV4(records).rootController() != address(this)
+            IG2CommunityV4(records).rootController() != address(this)
+                || (msg.sender != IG2RootInbox(inbox).rootController() && msg.sender != grantorOf[operator])
         ) revert Unauthorized();
         uint64 epoch = IG2RootInbox(inbox).sourceEpoch();
         delete grants[operator];
+        delete grantorOf[operator];
         emit ManagedRevoke(operator, epoch);
     }
 
