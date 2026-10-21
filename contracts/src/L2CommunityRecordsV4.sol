@@ -25,7 +25,9 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         uint64 epoch;
     }
     mapping(address => Operator) public operators;
-    // One OP-state nonce per actual member owner, shared across record types.
+    // One OP-state nonce per actual member owner, shared across ALL nodes and
+    // record types. Direct member writes also advance it, cancelling the next
+    // relay authorization without altering other nodes' record contents.
     mapping(address => uint256) public nonces;
     bytes32 public constant SET_ADDR_TYPEHASH = keccak256("SetAddr(bytes32 node,address value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
     bytes32 public constant SET_TEXT_TYPEHASH = keccak256("SetText(bytes32 node,string key,string value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
@@ -57,6 +59,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     event TextSet(bytes32 indexed node, string key, string value);
     event ContenthashSet(bytes32 indexed node, bytes value);
     event MemberNonceConsumed(address indexed holder, bytes32 indexed node, uint256 nonce);
+    event MemberNonceAdvanced(address indexed holder, bytes32 indexed node, uint256 previousNonce, uint256 newNonce);
 
     modifier onlyController() {
         if (msg.sender != rootController) revert Unauthorized();
@@ -174,8 +177,27 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
 
     function setAddr(bytes32 node, address value) external {
         _requireMember(node);
+        _advanceMemberNonce(node, nonces[msg.sender] + 1);
         _addresses[node] = AddressRecord(value, recordEpoch[node]);
         emit AddrSet(node, value);
+    }
+
+    /// @notice Cancel outstanding signed relays by moving the holder's shared
+    /// nonce forward. `node` proves CURRENT NFT ownership; this invalidates
+    /// signatures for all nodes held by msg.sender and all three record types.
+    /// It cannot revoke signatures using future nonces >= newNonce or a relay
+    /// already executed earlier in the chain's transaction order.
+    function invalidateNonce(bytes32 node, uint256 newNonce) external {
+        _requireMember(node);
+        _advanceMemberNonce(node, newNonce);
+    }
+
+    function _advanceMemberNonce(bytes32 node, uint256 nextNonce) private {
+        uint256 previousNonce = nonces[msg.sender];
+        // Disallow an explicit jump to the terminal uint256 nonce value.
+        if (nextNonce <= previousNonce || nextNonce == type(uint256).max) revert InvalidNonce();
+        nonces[msg.sender] = nextNonce;
+        emit MemberNonceAdvanced(msg.sender, node, previousNonce, nextNonce);
     }
 
     function domainSeparator() external view returns (bytes32) { return _domainSeparatorV4(); }
@@ -193,7 +215,8 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         // If the signature is invalid the EVM reverts this nonce increment.
         nonces[holder] = nonce + 1;
         if (!SignatureChecker.isValidSignatureNow(holder, _hashTypedDataV4(structHash), signature)) revert Unauthorized();
-        // No ERC-1271 callback may use changed NFT ownership or record epoch.
+        // SignatureChecker uses staticcall for ERC-1271, preventing wallet
+        // callbacks from changing NFT ownership or record epoch. Extra guard.
         if (_ownerOf(uint256(node)) != holder || recordEpoch[node] != startingEpoch) revert Unauthorized();
         emit MemberNonceConsumed(holder, node, nonce);
     }
@@ -239,6 +262,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setText(bytes32 node, string calldata key, string calldata value) external {
         _requireMember(node);
         if (bytes(key).length == 0 || bytes(key).length > 256 || bytes(value).length > 4096) revert InvalidInput();
+        _advanceMemberNonce(node, nonces[msg.sender] + 1);
         _texts[node][key] = TextRecord(value, recordEpoch[node]);
         emit TextSet(node, key, value);
     }
@@ -251,6 +275,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setContenthash(bytes32 node, bytes calldata value) external {
         _requireMember(node);
         if (value.length > 512) revert InvalidInput();
+        _advanceMemberNonce(node, nonces[msg.sender] + 1);
         _contenthashes[node] = ContentRecord(value, recordEpoch[node]);
         emit ContenthashSet(node, value);
     }
