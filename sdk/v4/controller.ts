@@ -6,6 +6,7 @@ export const v4CommunityAbi = [
   { type: 'function', name: 'parentNode', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'rootController', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'pendingController', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'controllerEpoch', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint64' }] },
   { type: 'function', name: 'l1OwnershipVerified', stateMutability: 'view', inputs: [], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'operators', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }] },
   { type: 'function', name: 'operatorActive', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
@@ -82,7 +83,7 @@ export class V4ControllerAdapter {
     this.#profile = Object.freeze(p)
   }
 
-  private async contractRead(functionName: 'parentNode' | 'rootController' | 'pendingController' | 'l1OwnershipVerified') {
+  private async contractRead(functionName: 'parentNode' | 'rootController' | 'pendingController' | 'controllerEpoch' | 'l1OwnershipVerified') {
     return this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName })
   }
 
@@ -112,14 +113,60 @@ export class V4ControllerAdapter {
     requiredAddress(operator)
     const { controller, l1OwnershipVerified } = await this.verify()
     try {
-      const [data, active] = await Promise.all([
+      const [data, canIssue, canInitialAddr] = await Promise.all([
         this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operators', args: [operator] }),
         this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE] }),
+        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE | V4_CAP_INITIAL_ADDR] }),
       ])
       const [permissions, remainingQuota, expiresAt, epoch] = data as readonly [bigint, bigint, bigint, bigint]
-      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue: active as boolean, l1OwnershipVerified, scope: 'op-application-only' as const }
+      if (typeof canIssue !== 'boolean' || typeof canInitialAddr !== 'boolean') throw new Error('Invalid operator status')
+      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue,
+        canInitialAddr,
+        l1OwnershipVerified, scope: 'op-application-only' as const }
     } catch {
       throw new SDKError('rpc-unavailable', 'Unable to read V4 operator state')
+    }
+  }
+
+  /** Independent OP state only. Pending controller and epoch are actual on-chain values. */
+  async getControllerStatus() {
+    const { controller, l1OwnershipVerified } = await this.verify()
+    try {
+      const [pendingController, controllerEpoch] = await Promise.all([
+        this.contractRead('pendingController'), this.contractRead('controllerEpoch'),
+      ])
+      if (typeof pendingController !== 'string' || !isAddress(pendingController) ||
+          typeof controllerEpoch !== 'bigint' || controllerEpoch < 1n) {
+        throw new Error('Invalid controller status')
+      }
+      return { controller, pendingController, controllerEpoch, parentName: this.#profile.parentName,
+        contract: this.#profile.contract, chainId: this.#profile.chainId, l1OwnershipVerified,
+        scope: 'op-application-only' as const }
+    } catch {
+      throw new SDKError('rpc-unavailable', 'Unable to read pinned V4 controller status')
+    }
+  }
+
+  /** Validate a mined OP receipt's destination. Success does not attest ENS authority. */
+  async getReceipt(hash: Hex) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new SDKError('invalid-input', 'Transaction hash must be 32 bytes')
+    await this.verify()
+    const receiptReader = this.publicClient as V4Reader & { getTransactionReceipt?: PublicClient['getTransactionReceipt'] }
+    if (!receiptReader.getTransactionReceipt) throw new SDKError('unsupported-protocol', 'Receipt lookup is unavailable on this reader')
+    try {
+      const receipt = await receiptReader.getTransactionReceipt({ hash })
+      if (receipt.to?.toLowerCase() !== this.#profile.contract.toLowerCase()) {
+        throw new SDKError('invalid-input', 'Receipt destination differs from the pinned V4 contract')
+      }
+      if (await this.publicClient.getChainId() !== this.#profile.chainId) {
+        throw new SDKError('chain-mismatch', 'RPC network changed during receipt read')
+      }
+      return { transactionHash: receipt.transactionHash, blockNumber: receipt.blockNumber,
+        status: receipt.status, from: receipt.from, to: receipt.to, chainId: this.#profile.chainId,
+        scope: 'op-application-only' as const }
+    } catch (error) {
+      if (error instanceof SDKError) throw error
+      throw new SDKError('rpc-unavailable', 'Unable to read V4 transaction receipt')
     }
   }
 
@@ -156,6 +203,21 @@ export class V4ControllerAdapter {
     requiredAddress(nextController)
     if (nextController.toLowerCase() === (await this.verify()).controller.toLowerCase()) throw new SDKError('invalid-input', 'Already the current controller')
     return this.controllerTx(from, encodeFunctionData({ abi: v4CommunityAbi, functionName: 'proposeController', args: [nextController] }))
+  }
+
+  /** Cancel a pending nomination by preparing proposeController(address(0)). */
+  async prepareCancelHandoff(from: Address): Promise<V4PreparedTx> {
+    requiredAddress(from)
+    const status = await this.getControllerStatus()
+    if (from.toLowerCase() !== status.controller.toLowerCase()) {
+      throw new SDKError('unauthorized', 'Only the current controller may cancel a handoff')
+    }
+    if (status.pendingController.toLowerCase() === ZERO) {
+      throw new SDKError('invalid-input', 'No pending controller handoff to cancel')
+    }
+    return this.controllerTx(from, encodeFunctionData({
+      abi: v4CommunityAbi, functionName: 'proposeController', args: [ZERO],
+    }))
   }
 
   /** Only the nominated next controller signs the second handoff transaction. */
