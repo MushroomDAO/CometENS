@@ -21,9 +21,18 @@ Nothing in this change updates the V3 Worker/KV or exposes a new SDK mint flow.
   records after the NFT is minted. Existing `_safeMint` receiver callback and
   NFT-holder-only record/transfer permissions are unchanged.
 - `operatorRevision(operator)` increments for grants, revocations and rotations.
-  A previously signed request cannot survive a revoke/re-grant under the same
-  controller. Controller transfer bumps `controllerEpoch` and invalidates every
-  old grant/signature, including after a grant to the same operator.
+  A new `grantOperator` over an existing grant in the **same controller epoch**
+  invalidates old permits even without first calling `revokeOperator`; an
+  explicit revoke/re-grant also invalidates them. Controller transfer bumps
+  `controllerEpoch` and invalidates every old grant/signature.
+- **Operator status/read API caveat:** `operatorActive(operator, CAP_ISSUE)`
+  returns `true` for a currently active `CAP_SIGNED_ISSUE` grant because it
+  checks granted bits, quota, epoch and expiry. It does **not** mean unsigned
+  `issue()` can execute. The existing SDK `getOperator().canIssue` simply
+  reports this active issuance right, not `canIssueUnsigned`. Read the raw
+  `permissions & CAP_SIGNED_ISSUE` bit before presenting unsigned issuance.
+  The current SDK `prepareGrant/prepareRotate` reject permission bit `4`;
+  signed-only issuance has **no SDK rollout** in this PR.
 
 ## Typed permit and on-chain replay policy
 
@@ -54,6 +63,10 @@ permits by increasing the nonce, subject to a bounded skip and ceiling.
 
 The contract checks `block.timestamp <= deadline <= block.timestamp + 1 day`
 when submitted (execution cutoff, not evidence of when it was signed).
+An intent with a distant signed deadline can become valid when execution moves
+into its final 24-hour window if it still matches the current on-chain nonce,
+controller epoch and operator revision. A caller who needs cancellation must
+advance `issuanceNonce` or revoke/replace the grant. No `issuedAt` field exists.
 Operators must request a new signature after grant revision, controller epoch,
 nonce, or deadline changes. The EIP-712 domain prevents cross-chain and
 cross-contract replay. Validation consumes nonce/quota before an external
@@ -76,8 +89,9 @@ ERC-1271 **staticcall**; the callback cannot mutate on-chain state.
   `forge build --sizes --optimize` measurement is below EIP-170's 24,576-byte
   runtime ceiling. No new deployment or testnet write is authorized here.
 
-The Foundry suite covers EOA/ERC-1271 signatures, on-chain replay, operator
-revocation/re-grant, expiry/quota, controller epoch transfer, other chain and
-contract, and holder record invalidation on ERC-721 transfer. G2.6 and the
+The Foundry suite covers EOA/ERC-1271 signatures, on-chain replay, same-epoch
+grant-over-grant permit invalidation, expiry/quota, maximum execution deadline,
+monotonic bounded nonce invalidation, independent EIP-712 JSON vector, controller
+epoch transfer, other chain/contract, and holder record invalidation on ERC-721 transfer. G2.6 and the
 overall G2 acceptance matrix remain **PENDING** until integration, review,
 and independent acceptance.

@@ -106,6 +106,8 @@ contract L2CommunityRecordsV4IssuanceTest is Test {
     }
 
     function test_signedOnlyGrantCannotIssueUnsignedAndConsumesNonceQuota() public {
+        // CAP_ISSUE means an active grant, NOT permission to use unsigned issue().
+        assertTrue(records.operatorActive(operator, records.CAP_ISSUE()));
         vm.prank(operator);
         vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
         records.issue("alice", member, address(0));
@@ -192,6 +194,121 @@ contract L2CommunityRecordsV4IssuanceTest is Test {
         vm.prank(operator);
         vm.expectRevert(L2CommunityRecordsV4.QuotaExceeded.selector);
         records.issueBySig("bob", member, address(0), 1, deadline, secondPermit);
+    }
+
+    function test_sameEpochGrantOverGrantInvalidatesPreviouslySignedPermit() public {
+        uint256 deadline = block.timestamp + 600;
+        uint64 epochBefore = records.controllerEpoch();
+        uint256 revisionBefore = records.operatorRevision(operator);
+        bytes memory stalePermit = _permit("alice", member, 0, deadline);
+
+        // No revoke or controller change: _grant's revision advance is the
+        // ONLY guard that invalidates an already-authorized unused permit.
+        _grant(operator, records.CAP_ISSUE() | records.CAP_SIGNED_ISSUE(), 2, 900);
+        assertEq(records.controllerEpoch(), epochBefore);
+        assertEq(records.operatorRevision(operator), revisionBefore + 1);
+        vm.prank(operator);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        records.issueBySig("alice", member, address(0), 0, deadline, stalePermit);
+        assertEq(records.issuanceNonce(), 0);
+        (, uint64 remaining,,) = records.operators(operator);
+        assertEq(remaining, 2);
+        assertEq(records.subnodeOwner(records.nodeOf("alice")), address(0));
+
+        bytes memory currentPermit = _permit("alice", member, 0, deadline);
+        vm.prank(operator);
+        records.issueBySig("alice", member, address(0), 0, deadline, currentPermit);
+        assertEq(records.issuanceNonce(), 1);
+        assertEq(records.subnodeOwner(records.nodeOf("alice")), member);
+    }
+
+    function test_deadlineHorizonIsExecutionWindowNotSigningAge() public {
+        uint256 farDeadline = block.timestamp + 1 days + 1;
+        bytes memory permit = _permit("alice", member, 0, farDeadline);
+        vm.prank(operator);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        records.issueBySig("alice", member, address(0), 0, farDeadline, permit);
+        assertEq(records.issuanceNonce(), 0);
+        (, uint64 remaining,,) = records.operators(operator);
+        assertEq(remaining, 4);
+        // Same signed permit becomes executable once the deadline is within
+        // 1 day: the signed payload has no issuedAt and is not age-limited.
+        vm.warp(block.timestamp + 1);
+        vm.prank(operator);
+        records.issueBySig("alice", member, address(0), 0, farDeadline, permit);
+        assertEq(records.issuanceNonce(), 1);
+    }
+
+    function test_invalidateIssuanceNonceControllerOnlyMonotonicAndBounded() public {
+        uint256 maxSkip = records.MAX_NONCE_SKIP();
+        vm.prank(operator);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        records.invalidateIssuanceNonce(1);
+        vm.startPrank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(0);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(maxSkip + 1);
+        records.invalidateIssuanceNonce(7);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(7);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(6);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(7 + maxSkip + 1);
+        records.invalidateIssuanceNonce(7 + maxSkip);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateIssuanceNonce(type(uint256).max);
+        vm.stopPrank();
+        assertEq(records.issuanceNonce(), 7 + maxSkip);
+    }
+
+    function test_independentJsonEip712IssuanceVector() public {
+        // Independently defined JSON schema; no ISSUE_TYPEHASH, abi.encode,
+        // or contract domainSeparator in the digest used to sign the permit.
+        L2CommunityRecordsV4 fresh = new L2CommunityRecordsV4(PARENT, controller);
+        uint256 caps = fresh.CAP_ISSUE() | fresh.CAP_SIGNED_ISSUE() | fresh.CAP_INITIAL_ADDR();
+        vm.prank(controller);
+        fresh.grantOperator(operator, caps, 2, uint64(block.timestamp + 1000));
+        vm.prank(controller);
+        fresh.invalidateIssuanceNonce(3);
+        vm.chainId(10);
+        uint256 deadline = block.timestamp + 600;
+
+        string memory json = string.concat(
+            '{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},',
+            '{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"}],',
+            '"Issue":[{"name":"label","type":"string"},{"name":"member","type":"address"},',
+            '{"name":"initialAddr","type":"address"},{"name":"operator","type":"address"},',
+            '{"name":"controllerEpoch","type":"uint64"},{"name":"operatorRevision","type":"uint256"},',
+            '{"name":"nonce","type":"uint256"},{"name":"deadline","type":"uint256"}]},',
+            '"primaryType":"Issue","domain":{"name":"CometENS Community V4","version":"1","chainId":10,"verifyingContract":"',
+            vm.toString(address(fresh)),
+            '"},"message":{"label":"alice","member":"',
+            vm.toString(member),
+            '","initialAddr":"',
+            vm.toString(newMember),
+            '","operator":"',
+            vm.toString(operator),
+            '","controllerEpoch":"1","operatorRevision":"1","nonce":"3","deadline":"',
+            vm.toString(deadline),
+            '"}}'
+        );
+        bytes32 independentlyHashed = vm.eip712HashTypedData(json);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(controllerKey, independentlyHashed);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        vm.prank(operator);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        fresh.issueBySig("bob", member, newMember, 3, deadline, signature);
+        vm.prank(operator);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        fresh.issueBySig("alice", member, member, 3, deadline, signature);
+        assertEq(fresh.issuanceNonce(), 3);
+        vm.prank(operator);
+        bytes32 node = fresh.issueBySig("alice", member, newMember, 3, deadline, signature);
+        assertEq(fresh.ownerOf(uint256(node)), member);
+        assertEq(fresh.addr(node), newMember);
+        assertEq(fresh.issuanceNonce(), 4);
     }
 
     function test_ownerCancelsAndDeadlineBlocksReplay() public {
