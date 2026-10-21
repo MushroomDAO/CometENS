@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeFunctionData, keccak256, namehash, type Address, type PublicClient } from 'viem'
 import { SDKError } from '../../sdk/profiles'
-import { V4_CAP_INITIAL_ADDR, V4_CAP_ISSUE, V4_CAP_SIGNED_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
+import { V4_CAP_INITIAL_ADDR, V4_CAP_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
 
 const owner = '0x1111111111111111111111111111111111111111' as const
 const operator = '0x2222222222222222222222222222222222222222' as const
