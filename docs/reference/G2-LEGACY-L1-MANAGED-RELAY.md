@@ -64,6 +64,12 @@ neither the event payload nor a Worker assertion is passed through verbatim.
   revert atomically. This is **L1 submission** replay protection; the inbox
   separately rejects duplicate/stale deliveries and invalid OP leases.
 
+If L1 `sendMessage` succeeds but the OP execution fails (bad effective gas,
+expired lease, messenger fault or chain reorg), this adapter will **not resend
+the same source sequence**. Recovery requires the native holder to create a
+fresh source sequence or an independently reviewed safe replay procedure. The
+adapter does not infer that an L1 queued message was executed on OP.
+
 The old state may be reactivated only by a fresh native holder operation on the
 L1 source, which advances sequence and epoch as required. A valid checkpoint
 has no privileged path to transfer an existing member ERC721 or edit private
