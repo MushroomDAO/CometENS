@@ -34,6 +34,9 @@ describe('G2.9 legacy member resolver draft (no native write)', () => {
       inputs: [{ type: 'bytes32' }, { type: 'address' }], outputs: [] }]
     expect(decodeFunctionData({ abi: independentAbi, data: prepared.data }))
       .toEqual({ functionName: 'setResolver', args: [node, nextResolver] })
+    // Independently pinned 4-byte selector from ENSv1 NameWrapper source ABI;
+    // do not let a matching mirrored test ABI hide the wrong target method.
+    expect(prepared.data.slice(0, 10)).toBe('0x1896f70a')
     expect(verifyLegacyNativeHandoff).toHaveBeenCalledExactlyOnceWith(input)
   })
 
