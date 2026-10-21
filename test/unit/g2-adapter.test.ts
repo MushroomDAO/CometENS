@@ -13,7 +13,7 @@ const profile: V4ControllerProfile = {
 }
 const future = () => BigInt(Math.floor(Date.now() / 1000) + 3600)
 
-function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: `0x${string}`; controller?: Address; verified?: boolean; error?: boolean; deferOperatorReads?: boolean } = {}) {
+function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: `0x${string}`; controller?: Address; pending?: Address; verified?: boolean; error?: boolean; deferOperatorReads?: boolean } = {}) {
   const calls: string[] = []
   const pending: Array<() => void> = []
   const fake = {
@@ -24,6 +24,7 @@ function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: 
       switch (functionName) {
         case 'parentNode': return options.parent ?? namehash(profile.parentName)
         case 'rootController': return options.controller ?? owner
+        case 'pendingController': return options.pending ?? other
         case 'l1OwnershipVerified': return options.verified ?? false
         case 'operators':
         case 'operatorActive': {
@@ -90,9 +91,13 @@ describe('G2 OP application-only V4 adapter', () => {
     await expect(adapter.prepareGrant(other, operator, 1n, 5n, future())).rejects.toMatchObject({ kind: 'unauthorized' })
     await expect(adapter.prepareGrant(owner, operator, 2n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 4n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 5n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, owner, 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, '0x0000000000000000000000000000000000000000', 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 1n, 0n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 1n, 1n, 1n)).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 1n, (1n << 64n), future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 1n, 1n, (1n << 64n))).rejects.toMatchObject({ kind: 'invalid-input' })
   })
 
   it('prepares typed revoke, rotate and two-step owner handoff without sending a transaction', async () => {
@@ -100,9 +105,34 @@ describe('G2 OP application-only V4 adapter', () => {
     const revoke = await adapter.prepareRevoke(owner, operator)
     expect(decodeFunctionData({ abi: v4CommunityAbi, data: revoke.data }).functionName).toBe('revokeOperator')
     const rotate = await adapter.prepareRotate(owner, operator, other, V4_CAP_ISSUE, 2n, future())
-    expect(decodeFunctionData({ abi: v4CommunityAbi, data: rotate.data }).functionName).toBe('rotateOperator')
+    const rotateCall = decodeFunctionData({ abi: v4CommunityAbi, data: rotate.data })
+    expect(rotateCall.functionName).toBe('rotateOperator')
+    expect(rotateCall.args?.[0]).toBe(operator)
+    expect(rotateCall.args?.[1]).toBe(other)
     const change = await adapter.prepareControllerHandoff(owner, other)
     expect(decodeFunctionData({ abi: v4CommunityAbi, data: change.data }).functionName).toBe('proposeController')
+    expect(decodeFunctionData({ abi: v4CommunityAbi, data: change.data }).args?.[0]).toBe(other)
+    const accept = await adapter.prepareAcceptController(other)
+    expect(accept.from).toBe(other)
+    expect(decodeFunctionData({ abi: v4CommunityAbi, data: accept.data }).functionName).toBe('acceptController')
+    await expect(adapter.prepareRotate(owner, operator, operator, 1n, 1n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareRotate(owner, operator, owner, 1n, 1n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareControllerHandoff(owner, owner)).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareAcceptController(operator)).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(adapter.prepareAcceptController('0x0000000000000000000000000000000000000000')).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(new V4ControllerAdapter(profile, reader({ pending: '0x0000000000000000000000000000000000000000' }).client).prepareAcceptController(other)).rejects.toMatchObject({ kind: 'unauthorized' })
+  })
+
+  it('snapshots getter-based profiles and cannot be retargeted while an RPC is pending', async () => {
+    let reads = 0
+    const adversarial = { ...profile, get chainId() { return ++reads === 1 ? 11155420 as const : 10 as 11155420 } }
+    const adapter = new V4ControllerAdapter(adversarial, reader().client)
+    expect(reads).toBe(1)
+    expect(adapter.profile.chainId).toBe(11155420)
+    expect(() => { (adapter as unknown as { profile: V4ControllerProfile }).profile = { ...profile, chainId: 10 as 11155420 } }).toThrow()
+    const tx = await adapter.prepareRevoke(owner, operator)
+    expect(tx.chainId).toBe(11155420)
+    expect(tx.to).toBe(profile.contract)
   })
 
   it('reads operator state with explicit non-sovereign provenance', async () => {
