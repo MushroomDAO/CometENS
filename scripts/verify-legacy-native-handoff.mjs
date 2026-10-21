@@ -5,6 +5,8 @@ import { ENSV1_SEPOLIA_REGISTRY as REGISTRY, ENSV1_SEPOLIA_WRAPPER as WRAPPER,
 
 export const LEGACY_SEPOLIA_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85'
 export const CANNOT_SET_RESOLVER = 1 << 3
+export const CANNOT_TRANSFER = 1 << 2
+export const CAN_EXTEND_EXPIRY = 1 << 18
 const ZERO = '0x0000000000000000000000000000000000000000'
 const HEX32 = /^0x[0-9a-fA-F]{64}$/
 const MIN_EXPIRY = 86400n
@@ -58,7 +60,9 @@ export async function verifyLegacyNativeHandoff({
     const block = await client.getBlock({ blockTag: 'finalized' })
     const now = BigInt(Math.floor(Date.now() / 1000))
     if (typeof block.number !== 'bigint' || typeof block.timestamp !== 'bigint' ||
-        !HEX32.test(block.hash ?? '')) throw new LegacyHandoffEvidenceError('missing-finalized-block')
+        !HEX32.test(block.hash ?? '') || /^0x0{64}$/i.test(block.hash)) {
+      throw new LegacyHandoffEvidenceError('missing-finalized-block')
+    }
     if (block.timestamp > now + 120n || block.timestamp + 7200n < now) {
       throw new LegacyHandoffEvidenceError('stale-finality')
     }
@@ -102,19 +106,29 @@ export async function verifyLegacyNativeHandoff({
     })))
     if (!approvals.every((v) => typeof v.wrapperApproved === 'boolean' &&
         typeof v.registrarApproved === 'boolean')) throw new LegacyHandoffEvidenceError('invalid-approvals')
+    // Detect RPC mid-read reorg/instability, without pretending one RPC is an
+    // independent consensus or state-proof verifier.
+    const sameBlock = await client.getBlock({ blockNumber })
+    if (!sameBlock || !eq(sameBlock.hash, block.hash)) {
+      throw new LegacyHandoffEvidenceError('changed-finalized-block')
+    }
     const childUnexpired = childData[2] > now + MIN_EXPIRY && childData[2] <= parentData[2] &&
       childData[2] + MIN_EXPIRY <= registrarExpiry
-    const nativeHolderConditions = eq(parentRegistryOwner, WRAPPER) && eq(childRegistryOwner, WRAPPER) &&
+    // This checks an ownership/fuse SNAPSHOT, not safe native handoff: approved
+    // operators and upstream governance can bypass these sampled title fields.
+    const nativeTitleSnapshotMatches = eq(parentRegistryOwner, WRAPPER) && eq(childRegistryOwner, WRAPPER) &&
       nonzero(parentData[0]) &&
       eq(registrarOwner, WRAPPER) && registrarExpiry > now + MIN_EXPIRY &&
       (parentData[1] & CANNOT_UNWRAP) !== 0 && childUnexpired &&
       eq(childData[0], expectedMember) &&
       (childData[1] & (CANNOT_UNWRAP | PARENT_CANNOT_CONTROL)) ===
         (CANNOT_UNWRAP | PARENT_CANNOT_CONTROL)
-    const memberResolverAutonomyObserved = nativeHolderConditions && eq(resolver, expectedResolver) &&
-      (childData[1] & CANNOT_SET_RESOLVER) === 0 && eq(childApproved, ZERO) &&
-      eq(registrarApproved, ZERO) && eq(upgradeContract, ZERO) &&
-      !approvals.some((a) => a.wrapperApproved || a.registrarApproved)
+    const knownPrivilegePathObserved = nonzero(childApproved) || nonzero(registrarApproved) ||
+      nonzero(upgradeContract) || approvals.some((a) => a.wrapperApproved || a.registrarApproved)
+    // Even with a known hostile operator, the current NFT holder may itself be
+    // able to call setResolver. This is capability, NOT EXCLUSIVE AUTONOMY.
+    const memberCanSetResolverObserved = nativeTitleSnapshotMatches && eq(resolver, expectedResolver) &&
+      (childData[1] & CANNOT_SET_RESOLVER) === 0
     return {
       mode: 'LEGACY_ENSV1_FINALIZED_OBSERVATIONS_NOT_SOVEREIGN', chainId: 11155111,
       finalizedBlockNumber: blockNumber.toString(), finalizedBlockHash: block.hash,
@@ -129,8 +143,17 @@ export async function verifyLegacyNativeHandoff({
       upstreamWrapperUpgradeContractConfigured: nonzero(upgradeContract),
       sampledOperatorApprovals: approvals,
       approvalInventoryExhaustive: false,
-      nativeLegacyHandoffConditionsObserved: nativeHolderConditions,
-      memberResolverAutonomyObserved,
+      nativeTitleSnapshotMatches,
+      knownPrivilegePathObserved,
+      memberCanSetResolverObserved,
+      memberCanTransferObserved: nativeTitleSnapshotMatches && (childData[1] & CANNOT_TRANSFER) === 0,
+      memberCanSelfExtendExpiryObserved: nativeTitleSnapshotMatches &&
+        (childData[1] & CAN_EXTEND_EXPIRY) !== 0,
+      // Full safe handoff/autonomy requires EXHAUSTIVE admin/approval proofs,
+      // which current ENSv1 public APIs and these sampled queries cannot give.
+      nativeLegacyHandoffConditionsObserved: false,
+      nativeHandoffSafetyObserved: false,
+      memberResolverAutonomyObserved: false,
       sovereignReceipt: false, ensV2AuthorityVerified: false,
       opControllerAuthorityVerified: false, independentConsensusProofVerified: false,
     }

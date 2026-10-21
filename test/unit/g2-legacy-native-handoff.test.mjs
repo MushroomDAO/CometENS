@@ -24,9 +24,13 @@ function mock(o = {}) {
   const client = {
     async getChainId() { calls.push('chain'); return o.chainId ?? 11155111 },
     async getBlock(input) {
-      expect(input).toEqual({ blockTag: 'finalized' }); calls.push('block')
+      if ('blockNumber' in input) {
+        expect(input).toEqual({ blockNumber: 555n }); calls.push('recheck')
+      } else {
+        expect(input).toEqual({ blockTag: 'finalized' }); calls.push('block')
+      }
       return { number: 555n, timestamp: o.timestamp ?? now - 60n,
-        hash: o.blockHash ?? `0x${'4'.repeat(64)}` }
+        hash: ('blockNumber' in input ? o.followupBlockHash : o.blockHash) ?? `0x${'4'.repeat(64)}` }
     },
     async getBytecode({ address, blockNumber }) {
       expect(blockNumber).toBe(555n)
@@ -89,6 +93,21 @@ describe('G2 legacy native handoff observations — never sovereign receipt', ()
     expect(result.sovereignReceipt).toBe(false)
   })
 
+  it('runs contract state observations concurrently at the pinned finalized block', async () => {
+    const { client } = mock()
+    const original = client.readContract
+    let active = 0
+    let maxActive = 0
+    client.readContract = async (options) => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      try { return await original(options) } finally { active-- }
+    }
+    await verifyLegacyNativeHandoff({ ...args, client })
+    expect(maxActive).toBe(10)
+  })
+
   it('observes member and PCC/CU in one finalized pinned chain snapshot', async () => {
     const { client, calls } = mock()
     const result = await verifyLegacyNativeHandoff({ ...args, client })
@@ -96,12 +115,16 @@ describe('G2 legacy native handoff observations — never sovereign receipt', ()
       mode: 'LEGACY_ENSV1_FINALIZED_OBSERVATIONS_NOT_SOVEREIGN',
       finalizedBlockNumber: '555', finalizedBlockHash: `0x${'4'.repeat(64)}`,
       registrarNFTCustodyMatchesWrapper: true,
-      nativeLegacyHandoffConditionsObserved: true, memberResolverAutonomyObserved: true,
+      nativeTitleSnapshotMatches: true, memberCanSetResolverObserved: true,
+      nativeLegacyHandoffConditionsObserved: false, nativeHandoffSafetyObserved: false,
+      memberResolverAutonomyObserved: false, knownPrivilegePathObserved: false,
+      memberCanTransferObserved: true, memberCanSelfExtendExpiryObserved: false,
       approvalInventoryExhaustive: false, sovereignReceipt: false,
       ensV2AuthorityVerified: false, opControllerAuthorityVerified: false,
       independentConsensusProofVerified: false,
     })
     expect(calls.filter((v) => v === 'block')).toHaveLength(1)
+    expect(calls.filter((v) => v === 'recheck')).toHaveLength(1)
     expect(calls.filter((v) => v.startsWith('bytecode:'))).toHaveLength(3)
     expect(calls.filter((v) => v.startsWith('getData:'))).toHaveLength(2)
   })
@@ -111,6 +134,8 @@ describe('G2 legacy native handoff observations — never sovereign receipt', ()
       [{ chainId: 10 }, 'wrong-chain'],
       [{ timestamp: now - 9000n }, 'stale-finality'],
       [{ blockHash: '0x0' }, 'missing-finalized-block'],
+      [{ blockHash: `0x${'0'.repeat(64)}` }, 'missing-finalized-block'],
+      [{ followupBlockHash: `0x${'5'.repeat(64)}` }, 'changed-finalized-block'],
       [{ wrapperCode: '0x' }, 'untrusted-code'],
       [{ registrarCode: '0x6000' }, 'untrusted-code'],
     ]) await expect(verifyLegacyNativeHandoff({ ...args, client: mock(option).client }))
@@ -127,24 +152,44 @@ describe('G2 legacy native handoff observations — never sovereign receipt', ()
       { childExpiry: now - 1n }, { childExpiry: now + 60n * 86400n },
     ]) {
       const r = await verifyLegacyNativeHandoff({ ...args, client: mock(options).client })
-      expect(r.nativeLegacyHandoffConditionsObserved, JSON.stringify(options, (_, v) => typeof v === 'bigint' ? String(v) : v)).toBe(false)
+      expect(r.nativeTitleSnapshotMatches, JSON.stringify(options, (_, v) => typeof v === 'bigint' ? String(v) : v)).toBe(false)
       expect(r.sovereignReceipt).toBe(false)
     }
   })
 
-  it('exposes user resolver locks and sampled approval risks without claiming they are exhaustive', async () => {
-    for (const o of [{ resolver: member }, { childFuses: CANNOT_UNWRAP | PARENT_CANNOT_CONTROL | 8 },
-      { operatorApproved: true }, { childApproved: operator }, { registrarApproved: operator },
-      { registrarOperatorApproved: true }, { upgradeContract: operator }]) {
+  it('distinguishes member resolver capability from unproven exclusive authority', async () => {
+    for (const o of [{ resolver: member }, { childFuses: CANNOT_UNWRAP | PARENT_CANNOT_CONTROL | 8 }]) {
       const r = await verifyLegacyNativeHandoff({ ...args, client: mock(o).client })
-      expect(r.memberResolverAutonomyObserved).toBe(false)
+      expect(r.memberCanSetResolverObserved).toBe(false)
       expect(r.sovereignReceipt).toBe(false)
+    }
+    // An attacker with Registrar reclaim rights can leave name/wrapper owner
+    // + PCC/CU looking valid; only the raw snapshot matches, not safe handoff.
+    for (const o of [{ operatorApproved: true }, { childApproved: operator },
+      { registrarApproved: operator }, { registrarOperatorApproved: true },
+      { upgradeContract: operator }]) {
+      const r = await verifyLegacyNativeHandoff({ ...args, client: mock(o).client })
+      expect(r.nativeTitleSnapshotMatches).toBe(true)
+      expect(r.knownPrivilegePathObserved).toBe(true)
+      expect(r.nativeLegacyHandoffConditionsObserved).toBe(false)
+      expect(r.nativeHandoffSafetyObserved).toBe(false)
+      expect(r.memberResolverAutonomyObserved).toBe(false)
+      expect(r.memberCanSetResolverObserved).toBe(true) // nonexclusive ability
     }
     const r = await verifyLegacyNativeHandoff({ ...args, client: mock({ registrarApproved: operator,
       upgradeContract: operator }).client })
     expect(r.registrarNFTApprovalObserved).toBe(true)
     expect(r.upstreamWrapperUpgradeContractConfigured).toBe(true)
     expect(r.approvalInventoryExhaustive).toBe(false)
+  })
+
+  it('reports transfer and member self-renewal fuse capabilities without treating either as sovereignty', async () => {
+    const locked = await verifyLegacyNativeHandoff({ ...args, client: mock({
+      childFuses: CANNOT_UNWRAP | PARENT_CANNOT_CONTROL | (1 << 2) | (1 << 18),
+    }).client })
+    expect(locked.memberCanTransferObserved).toBe(false)
+    expect(locked.memberCanSelfExtendExpiryObserved).toBe(true)
+    expect(locked.nativeHandoffSafetyObserved).toBe(false)
   })
 
   it('rejects bad scope, label normalization and pins before RPC reads', async () => {
