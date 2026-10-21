@@ -113,13 +113,15 @@ export class V4ControllerAdapter {
     requiredAddress(operator)
     const { controller, l1OwnershipVerified } = await this.verify()
     try {
-      const [data, active] = await Promise.all([
+      const [data, canIssue, canInitialAddr] = await Promise.all([
         this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operators', args: [operator] }),
         this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE] }),
+        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE | V4_CAP_INITIAL_ADDR] }),
       ])
       const [permissions, remainingQuota, expiresAt, epoch] = data as readonly [bigint, bigint, bigint, bigint]
-      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue: active as boolean,
-        canInitialAddr: Boolean(active) && (permissions & V4_CAP_INITIAL_ADDR) !== 0n,
+      if (typeof canIssue !== 'boolean' || typeof canInitialAddr !== 'boolean') throw new Error('Invalid operator status')
+      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue,
+        canInitialAddr,
         l1OwnershipVerified, scope: 'op-application-only' as const }
     } catch {
       throw new SDKError('rpc-unavailable', 'Unable to read V4 operator state')
@@ -201,6 +203,21 @@ export class V4ControllerAdapter {
     requiredAddress(nextController)
     if (nextController.toLowerCase() === (await this.verify()).controller.toLowerCase()) throw new SDKError('invalid-input', 'Already the current controller')
     return this.controllerTx(from, encodeFunctionData({ abi: v4CommunityAbi, functionName: 'proposeController', args: [nextController] }))
+  }
+
+  /** Cancel a pending nomination by preparing proposeController(address(0)). */
+  async prepareCancelHandoff(from: Address): Promise<V4PreparedTx> {
+    requiredAddress(from)
+    const status = await this.getControllerStatus()
+    if (from.toLowerCase() !== status.controller.toLowerCase()) {
+      throw new SDKError('unauthorized', 'Only the current controller may cancel a handoff')
+    }
+    if (status.pendingController.toLowerCase() === ZERO) {
+      throw new SDKError('invalid-input', 'No pending controller handoff to cancel')
+    }
+    return this.controllerTx(from, encodeFunctionData({
+      abi: v4CommunityAbi, functionName: 'proposeController', args: [ZERO],
+    }))
   }
 
   /** Only the nominated next controller signs the second handoff transaction. */

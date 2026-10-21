@@ -13,6 +13,7 @@ Commands:
   prepare-revoke --from 0xCONTROLLER --operator 0xADDRESS
   prepare-rotate --from 0xCONTROLLER --operator 0xOLD --next 0xNEW --permissions 1|3 --quota N --expires-at UNIX
   prepare-propose --from 0xCONTROLLER --next 0xNEW
+  prepare-cancel-handoff --from 0xCONTROLLER
   prepare-accept --from 0xPENDING
 Provide OP Sepolia RPC using COMETENS_OP_RPC_URL (environment only, never echoed).
 Profile JSON: {"parentName":"community.eth","chainId":11155420,"contract":"0x...","expectedCodeHash":"0x..."}
@@ -24,6 +25,7 @@ const COMMAND_FLAGS = {
   'prepare-revoke': ['from', 'operator'],
   'prepare-rotate': ['from', 'operator', 'next', 'permissions', 'quota', 'expires-at'],
   'prepare-propose': ['from', 'next'],
+  'prepare-cancel-handoff': ['from'],
   'prepare-accept': ['from'],
 }
 
@@ -93,6 +95,9 @@ export async function runV4Cli(args, options = {}) {
       break
     case 'prepare-propose':
       result = await adapter.prepareControllerHandoff(from, flags.next)
+      break
+    case 'prepare-cancel-handoff':
+      result = await adapter.prepareCancelHandoff(from)
       break
     case 'prepare-accept':
       result = await adapter.prepareAcceptController(from)
