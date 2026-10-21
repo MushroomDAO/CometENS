@@ -151,15 +151,19 @@ Demo #111 原 head 8d8d1be 被要求修改两项 Medium：`.env.example` 被 `.g
 
 ### 2026-10-21 · 用户正式验收 G1，G2 启动授权（已确认）
 
-用户在已提供运行地址的本地 SDK Vanilla Demo（`http://127.0.0.1:5188/`，仅绑定 127.0.0.1）完成 G1 业务验收，明确回复：「啊，验收通过了，你继续开发吧。」因此 **G1 ACCEPTED**（此前仅 READY_FOR_ACCEPTANCE）；此授权以 G1 已冻结范围为准：可独立安装的 TS SDK、V3 安全 Worker 与 EIP-712 API、公开 Sepolia 配置的 OP L2Records 只读与 Demo。验收**不表示** L1 ENS 原生产权移交、L1/OP 解析一致、Worker KV 原子 nonce、主网部署或 npm 发布完成；相关交付属于 G2–G6 独立门禁。
+助手启动并提供本地 SDK Vanilla Demo（`http://127.0.0.1:5188/`，仅绑定 127.0.0.1）、操作步骤和只读探针结果后，用户明确回复（本记录来自与用户的会话，不额外声称逐项观察到其浏览器操作）：「啊，验收通过了，你继续开发吧。」因此 **G1 ACCEPTED**（此前仅 READY_FOR_ACCEPTANCE）；此授权以 G1 已冻结范围为准：可独立安装的 TS SDK、V3 安全 Worker 与 EIP-712 API、公开 Sepolia 配置的 OP L2Records 只读与 Demo。验收**不表示** L1 ENS 原生产权移交、L1/OP 解析一致、Worker KV 原子 nonce、主网部署或 npm 发布完成；相关交付属于 G2–G6 独立门禁。
 
-G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁已经 APPROVED/CI 绿并合入 main `33e1954`；PR #119 独立 AST 接线保护已于 2026-10-21 同样 APPROVED/CI 绿合并为 main `478a74de955e1af3f679a048cc93351ddb64ff4d`。日常回归不再凭本地 RPC/私钥自动启用 live Sepolia 读写；[#118](https://github.com/MushroomDAO/CometENS/issues/118) 持续追踪历史解析/签名 proof 测试网配置偏差。G1 本地浏览器验证：HTTP 200，SDK 在公共 Ethereum Sepolia / OP Sepolia 成功校验合约、`aastar.eth` 直接 OP 记录返回非空地址；L1 ENS 为 null，属于已披露差异，不得宣称 `SOVEREIGN`。
+G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁已经 APPROVED/CI 绿并合入 main `33e1954`；PR #119 独立 AST 接线保护已于 2026-10-21 同样 APPROVED/CI 绿合并为 main `478a74de955e1af3f679a048cc93351ddb64ff4d`。日常回归不再凭本地 RPC/私钥自动启用 live Sepolia 读写；[#118](https://github.com/MushroomDAO/CometENS/issues/118) 持续追踪历史解析/签名 proof 测试网配置偏差。G1 本地服务及 SDK 探针验证：HTTP 200，SDK 在公共 Ethereum Sepolia / OP Sepolia 成功校验合约、`aastar.eth` 直接 OP 记录返回非空地址；L1 ENS 为 null，属于已披露差异，不得宣称 `SOVEREIGN`。
 
 依据用户批准启动 **G2 IN_PROGRESS**，按 [G2-ACCEPTANCE.md](G2-ACCEPTANCE.md) 九项安全关卡执行：先独立 V4 per-parent 核心与 revocable operator；后跟 SDK、L1 authority、ENS NameWrapper 原生交权、nonce/迁移和第三方 handoff proof。所有工作独立 worktree/分支、≤300 行生产 PR 目标、commit/push/PR、GitHub CI + review 双绿后方可合并。**G2 未全部完成并获用户再验收之前不得解锁 G3**；不得擅自链上写入、发布 npm 或做主网部署。
+
+### 2026-10-21 · G1 验收记录措辞对账及 G2 恢复指引收口
+
+针对 #120 独立 reviewer 的不阻塞 Low，明确区分用户在对话中正式业务验收与助手本地启动/HTTP/RPC 探针的可复现事实：已提供只读 Demo 的访问地址和步骤，用户明确回复「啊，验收通过了，你继续开发吧」，但未获取其逐个点击的浏览器遥测，故不再声称观察到了所有浏览器动作；GitHub CI/review 并非代替用户验收。修复 STATUS 里混写 G0/G1/文档/安全 PR 号的措辞，并把「下一次进入项目时」的旧 G1 BLOCKED 操作指令修正为当前状态 G1 ACCEPTED、G2 IN_PROGRESS、G3 BLOCKED。G2.1–G2.3 正在交付，不能因此认定 G2 全部九项完成。
 
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
-2. G0 已于 2026-10-20 获用户验收，G1 实施已启动。继续检查 G0 GitHub review/CI 及 G1 独立 PR 的执行和业务验收状态；**G1 用户验收前 G2 保持 BLOCKED**。
+2. G0 已于 2026-10-20、G1 于 2026-10-21 获用户业务验收；检查当前 G2.1–G2.9 的 PR、review、CI 与可复现安全证据。**G2 IN_PROGRESS，用户明确验收 G2 之前 G3 保持 BLOCKED**。
 3. 每个 Goal 先固定 API/ABI、权限与可重跑验收；实现后附 unit + Foundry + Sepolia 链上交易和独立验证证据。主网广播只属于完成 G5 且用户明确批准的 G6。
 4. 每完成一次审计、设计、修复、提交或阻塞，**追加**此文件的时间、结果、证据、失败、下一步；最后更新 STATUS，避免依赖聊天上下文。
