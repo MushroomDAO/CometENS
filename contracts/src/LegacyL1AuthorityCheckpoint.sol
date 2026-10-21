@@ -23,7 +23,8 @@ contract LegacyL1AuthorityCheckpoint {
     uint256 public constant DESTINATION_CHAIN_ID = 11155420;
     uint64 public constant MAX_LEASE = 2 hours;
     uint64 public constant EXPIRY_MARGIN = 24 hours;
-    bytes32 public constant AUTHORITY_VERSION = keccak256("CometENS.LEGACY_ENSV1_MANAGED_V1");
+    // Shape/version matches the separately reviewed OP inbox; NO relay is implemented here.
+    bytes32 public constant AUTHORITY_VERSION = keccak256("COMETENS_G2_ROOT_CHECKPOINT_V1");
     bytes32 private constant ETH_NODE = 0x93cdeb708b7545dc668eb9280176169d4e3fc8d4018eea69e45fdc04d3da4a3d;
 
     address public constant ENS_REGISTRY = 0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e;
