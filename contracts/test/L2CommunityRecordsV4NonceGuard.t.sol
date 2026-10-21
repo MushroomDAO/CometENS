@@ -35,6 +35,7 @@ contract DirectMember1271 {
 }
 
 contract L2CommunityRecordsV4NonceGuardTest is Test {
+    using stdStorage for StdStorage;
     event MemberNonceAdvanced(address indexed holder, bytes32 indexed node, uint256 previousNonce, uint256 newNonce);
     event MemberNonceConsumed(address indexed holder, bytes32 indexed node, uint256 nonce);
     L2CommunityRecordsV4 private records;
@@ -143,6 +144,10 @@ contract L2CommunityRecordsV4NonceGuardTest is Test {
         records.invalidateNonce(node, type(uint256).max);
 
         vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, type(uint256).max - 1);
+
+        vm.prank(member);
         records.transferFrom(member, other, uint256(node));
         vm.prank(member);
         vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
@@ -151,6 +156,60 @@ contract L2CommunityRecordsV4NonceGuardTest is Test {
         records.invalidateNonce(node, 2);
         assertEq(records.nonces(other), 2);
         assertEq(records.nonces(member), 10);
+    }
+
+    function test_hugeSkipCannotExhaustMemberNonceAndNormalSkipAllowsDirectWrite() public {
+        uint256 maxSkip = records.MAX_NONCE_SKIP();
+        uint256 safeCeiling = records.MAX_MEMBER_NONCE();
+
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, maxSkip + 1);
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, safeCeiling);
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, type(uint256).max - 1);
+        assertEq(records.nonces(member), 0);
+
+        vm.prank(member);
+        records.invalidateNonce(node, maxSkip); // Upper skip bound is usable.
+        vm.prank(member);
+        records.setAddr(node, member); // Following direct writes remain possible.
+        assertEq(records.nonces(member), maxSkip + 1);
+        assertEq(records.addr(node), member);
+
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, maxSkip + 1 + maxSkip + 1);
+        vm.prank(member);
+        records.setText(node, "safe", "still writable");
+        assertEq(records.nonces(member), maxSkip + 2);
+    }
+
+    function test_nonceCeilingFailsWithCustomErrorRatherThanOverflow() public {
+        // Simulate an astronomically far-future counter, unreachable via a
+        // single invalidateNonce call, to pin arithmetic in every write path.
+        uint256 slot = stdstore.target(address(records)).sig("nonces(address)").with_key(member).find();
+        vm.store(address(records), bytes32(slot), bytes32(records.MAX_MEMBER_NONCE()));
+        assertEq(records.nonces(member), records.MAX_MEMBER_NONCE());
+
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.invalidateNonce(node, type(uint256).max - 1);
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.setAddr(node, member);
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.setText(node, "k", "v");
+        vm.prank(member);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.setContenthash(node, hex"1234");
+        uint256 terminalNonce = records.MAX_MEMBER_NONCE();
+        vm.expectRevert(L2CommunityRecordsV4.InvalidNonce.selector);
+        records.setAddrBySig(node, member, terminalNonce, block.timestamp + 600, hex"01");
     }
 
     function test_nonceSkipRejectsSignedFutureMessageAndAllowsNewCurrentNonce() public {

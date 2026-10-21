@@ -12,6 +12,9 @@ import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 contract L2CommunityRecordsV4 is ERC721, EIP712 {
     uint256 public constant CAP_ISSUE = 1;
     uint256 public constant CAP_INITIAL_ADDR = 2;
+    uint256 public constant MAX_NONCE_SKIP = 1 << 64;
+    // Keep substantial headroom below uint256 overflow for all nonce paths.
+    uint256 public constant MAX_MEMBER_NONCE = type(uint256).max - (1 << 128);
     bytes32 public immutable parentNode;
     bool public constant l1OwnershipVerified = false;
     address public rootController;
@@ -177,7 +180,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
 
     function setAddr(bytes32 node, address value) external {
         _requireMember(node);
-        _advanceMemberNonce(node, nonces[msg.sender] + 1);
+        _advanceDirectMemberNonce(node);
         _addresses[node] = AddressRecord(value, recordEpoch[node]);
         emit AddrSet(node, value);
     }
@@ -192,10 +195,18 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         _advanceMemberNonce(node, newNonce);
     }
 
+    function _advanceDirectMemberNonce(bytes32 node) private {
+        uint256 previousNonce = nonces[msg.sender];
+        if (previousNonce >= MAX_MEMBER_NONCE) revert InvalidNonce();
+        _advanceMemberNonce(node, previousNonce + 1);
+    }
+
     function _advanceMemberNonce(bytes32 node, uint256 nextNonce) private {
         uint256 previousNonce = nonces[msg.sender];
-        // Disallow an explicit jump to the terminal uint256 nonce value.
-        if (nextNonce <= previousNonce || nextNonce == type(uint256).max) revert InvalidNonce();
+        // Subtraction after ordering avoids overflowing previousNonce + maxSkip.
+        if (nextNonce <= previousNonce || nextNonce > MAX_MEMBER_NONCE || nextNonce - previousNonce > MAX_NONCE_SKIP) {
+            revert InvalidNonce();
+        }
         nonces[msg.sender] = nextNonce;
         emit MemberNonceAdvanced(msg.sender, node, previousNonce, nextNonce);
     }
@@ -209,6 +220,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         uint64 startingEpoch = recordEpoch[node];
         if (holder == address(0)) revert Unauthorized();
         if (nonce != nonces[holder]) revert InvalidNonce();
+        if (nonce >= MAX_MEMBER_NONCE) revert InvalidNonce();
         if (block.timestamp > deadline) revert SignatureExpired();
         if (deadline > block.timestamp + 1 days) revert InvalidInput();
         // CEI: consume on OP before the external ERC-1271 validation callback.
@@ -262,7 +274,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setText(bytes32 node, string calldata key, string calldata value) external {
         _requireMember(node);
         if (bytes(key).length == 0 || bytes(key).length > 256 || bytes(value).length > 4096) revert InvalidInput();
-        _advanceMemberNonce(node, nonces[msg.sender] + 1);
+        _advanceDirectMemberNonce(node);
         _texts[node][key] = TextRecord(value, recordEpoch[node]);
         emit TextSet(node, key, value);
     }
@@ -275,7 +287,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function setContenthash(bytes32 node, bytes calldata value) external {
         _requireMember(node);
         if (value.length > 512) revert InvalidInput();
-        _advanceMemberNonce(node, nonces[msg.sender] + 1);
+        _advanceDirectMemberNonce(node);
         _contenthashes[node] = ContentRecord(value, recordEpoch[node]);
         emit ContenthashSet(node, value);
     }

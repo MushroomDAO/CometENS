@@ -19,10 +19,16 @@ they do **not** attest L1 ENS/NameWrapper ownership or create a sovereign name.
   the same member owns; existing records at those other nodes remain intact.
 - `invalidateNonce(node, newNonce)` requires `msg.sender` to own that specific
   V4 token **now**, and `newNonce > nonces(msg.sender)`. It skips directly to
-  the requested nonce (excluding `uint256.max` to avoid exhaustion). Useful
-  when a member loses access to a relayer or has signed multiple consecutive
-  requests and wants to reject all known older nonce values. Both direct
-  actions and invalidation emit `MemberNonceAdvanced(holder,node,old,new)`;
+  the requested nonce, provided `newNonce - currentNonce <= 2**64` and
+  `newNonce <= MAX_MEMBER_NONCE` (`uint256.max - 2**128`). The bounds reject
+  extreme single-call skips, including `uint256.max - 1`; near the hard
+  ceiling, direct and relayed writes reject with `InvalidNonce` instead of
+  triggering arithmetic overflow. The remaining nonce space is vast but
+  finite: no monotonically increasing uint256 nonce can promise infinite
+  writes, and repeated valid skips could theoretically reach the ceiling.
+  Useful when a member loses access to a relayer or has signed multiple
+  consecutive requests and wants to reject known older nonce values. Both
+  direct actions and invalidation emit `MemberNonceAdvanced(holder,node,old,new)`;
   relayed writes additionally emit `MemberNonceConsumed(holder,node,nonce)`.
 - A nonce update cannot undo a relay already executed in an earlier
   transaction, and cannot preempt a signature preauthorized at a **future nonce
