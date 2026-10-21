@@ -88,6 +88,11 @@ contract L2CommunityRecordsV4Test is Test {
         a.grantOperator(operator, 2, 1, uint64(block.timestamp + 1));
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
         a.grantOperator(operator, 4, 1, uint64(block.timestamp + 1));
+        // Unknown bits must fail even if the issuer bit is ALSO present.
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.grantOperator(operator, 5, 1, uint64(block.timestamp + 1));
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.grantOperator(controller, 1, 1, uint64(block.timestamp + 1));
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
         a.grantOperator(operator, 1, 0, uint64(block.timestamp + 1));
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
@@ -180,6 +185,21 @@ contract L2CommunityRecordsV4Test is Test {
         assertEq(a.subnodeOwner(a.nodeOf("bob")), bob);
     }
 
+    function test_controllerCanCancelPendingHandoffAndCannotSelfPropose() public {
+        vm.startPrank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.proposeController(controller);
+        a.proposeController(controllerB);
+        assertEq(a.pendingController(), controllerB);
+        a.proposeController(address(0));
+        vm.stopPrank();
+        assertEq(a.pendingController(), address(0));
+        vm.prank(controllerB);
+        vm.expectRevert(L2CommunityRecordsV4.Unauthorized.selector);
+        a.acceptController();
+        assertEq(a.rootController(), controller);
+    }
+
     function test_rotateOperatorAtomic() public {
         grant(a.CAP_ISSUE(), 1, uint64(block.timestamp + 100));
         vm.prank(controller);
@@ -191,6 +211,13 @@ contract L2CommunityRecordsV4Test is Test {
         a.issue("alice", alice, address(0));
         vm.prank(newOperator);
         a.issue("alice", alice, address(0));
+    }
+
+    function test_rotateToSameOperatorFails() public {
+        grant(a.CAP_ISSUE(), 1, uint64(block.timestamp + 100));
+        vm.prank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.rotateOperator(operator, operator, 1, 2, uint64(block.timestamp + 100));
     }
 
     function test_memberTokenCannotBeSeizedByControllerOrOperator() public {
@@ -256,10 +283,33 @@ contract L2CommunityRecordsV4Test is Test {
         vm.prank(controller);
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
         a.issue("-alice", alice, address(0));
+        vm.prank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.issue("ab--c", alice, address(0));
+        vm.prank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.issue("xn--abc", alice, address(0));
+        vm.prank(controller);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.issue("abcdefghijklmnopqrstuvwxyabcdefghijklmnopqrstuvwxyabcdefghijklmn", alice, address(0));
         issuedAlice();
         vm.prank(controller);
         vm.expectRevert(L2CommunityRecordsV4.AlreadyIssued.selector);
         a.issue("alice", bob, address(0));
+    }
+
+    function test_recordLimitsAreEnforcedByMember() public {
+        bytes32 node = issuedAlice();
+        vm.startPrank(alice);
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.setText(node, "", "ok");
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.setText(node, string(new bytes(257)), "ok");
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.setText(node, "url", string(new bytes(4097)));
+        vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
+        a.setContenthash(node, new bytes(513));
+        vm.stopPrank();
     }
 
     function test_memberReceiverReentrancyCannotBeOverwrittenByIssuer() public {
