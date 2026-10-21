@@ -180,6 +180,14 @@ G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁�
 
 **恢复时立即做：** 查询 `gh pr list --state open` 与每个 `reviewDecision` / 最新 `headRefOid` / 全部 CI；过期 base 只能 ordinary-merge 最新 main，之后新 CI/精确 head 复审。不得合并 `CHANGES_REQUESTED`/`REVIEW_REQUIRED`/CI 红的 PR。G2.4 的原生 L1 当前权限、迁移/重注册/转让的无竞态撤销、G2.7 真实 ENSv1/v2 member native handoff、G2.8 upgrade/admin/bridge 审计及独立 `SOVEREIGN` 收据、G2.9 resolver 与不可逆记录锁等仍未验收。完整 G2.1–G2.9 各行继续 `PENDING`；G3 `BLOCKED`。
 
+### 2026-10-21 下午 · G2 reviewed PR 再对账（本会话续接）
+
+重新读取 GitHub 后确认：[#130](https://github.com/MushroomDAO/CometENS/pull/130) 成员 nonce 溢出与旧中继撤销加固，在 exact head `a7d4eb3` APPROVED / CLA + test SUCCESS 后于 `c6389fa` 正常合并；[#129](https://github.com/MushroomDAO/CometENS/pull/129) OP 单根认证 checkpoint inbox，最新 head `5fce059` APPROVED / CLA + test SUCCESS 后于 `f23de91` 正常合并；[#133](https://github.com/MushroomDAO/CometENS/pull/133) ENSv2 Sepolia 动态 EAC 只读风险工具，head `8ee56bc` APPROVED / CLA + test SUCCESS 后于 `5ad2cb2` 正常合并。均通过普通分支同步与 GitHub 合并，未 admin bypass、rebase 或 force；上述只读工具**一律不能发布 SOVEREIGN**。
+
+[#131](https://github.com/MushroomDAO/CometENS/pull/131) 收到 REQUEST_CHANGES：真实 ENSv1 NameWrapper 可能保留 child expiry，造成提交的 PCC/CU 子名实际有效期超过请求值并越过父名注册器 expiry；同时要验证 BaseRegistrar NFT custody/reclaim、父域 CANNOT_CREATE_SUBDOMAIN、子名残留 Wrapper 数据。安全修复在原独立工作树推进中；无新 exact-head APPROVE 不合并。本条记录所在文档 PR [#132](https://github.com/MushroomDAO/CometENS/pull/132) 也须通过新 head 的独立审核和 CI 才可落地。另已按独立 worktree 启动 L1 原生授权事件源和 ENSv1 原生事后只读观察器的研发，尚不可宣称已审查、提交或交付。
+
+安全门槛：异步 L1→OP checkpoint 的两小时 lease **不能**解决 L1 owner 转移瞬间旧 OP 权限仍有效的竞态；`G2.4 PENDING`，全部 G2.1–G2.9 矩阵继续 PENDING，**G3 BLOCKED**。G2 原生 ENS 子名完成、平台无升级夺权路径、成员 resolver 独立控制、不可逆记录锁及第三方 finalized 交权回执尚未全部实现；本轮无真实链上写交易或 npm 发布。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
