@@ -19,10 +19,10 @@
  */
 import { execFileSync } from 'node:child_process'
 
-const BUDGET = 6
+const BUDGET = 5
 
 /**
- * The remaining errors are ONE design decision, not six unrelated bugs: how to annotate a
+ * The remaining errors are ONE design decision, not five unrelated bugs: how to annotate a
  * chain-bound viem client. `let x: ReturnType<typeof createPublicClient>` is the
  * UNPARAMETERISED return type, while the real client carries chain generics, so the two are
  * unrelated types rather than super/subtype. Casting each site away would remove the errors
@@ -30,7 +30,6 @@ const BUDGET = 6
  * next person does not rediscover it.
  */
 const KNOWN = [
-  'sdk/CometENS.ts',
   'server/gateway/index.ts',
   'test/e2e/register-multi-root.test.ts',
   'test/e2e/transfer-subnode.test.ts',

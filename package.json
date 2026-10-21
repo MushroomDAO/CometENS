@@ -7,6 +7,8 @@
     "abi:sync": "node scripts/sync-abi.mjs",
     "bootstrap:community": "node scripts/bootstrap-community.mjs",
     "build": "vite build",
+    "build:sdk": "pnpm --dir sdk build",
+    "typecheck:sdk": "pnpm --dir sdk typecheck",
     "check:chain": "node scripts/check-chain.mjs",
     "check:approval-sha": "node scripts/check-approval-sha.mjs",
     "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
