@@ -2,12 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 /// @notice An isolated OP application record store for ONE community root.
 /// This does NOT verify Ethereum L1 ENS ownership or create native ENS subnames.
 /// It is not a Sovereign / NameWrapper implementation; G2.4/G2.7 are separate.
 /// No proxy, global owner, platform rescue, or privileged NFT-transfer path.
-contract L2CommunityRecordsV4 is ERC721 {
+contract L2CommunityRecordsV4 is ERC721, EIP712 {
     uint256 public constant CAP_ISSUE = 1;
     uint256 public constant CAP_INITIAL_ADDR = 2;
     bytes32 public immutable parentNode;
@@ -23,6 +25,11 @@ contract L2CommunityRecordsV4 is ERC721 {
         uint64 epoch;
     }
     mapping(address => Operator) public operators;
+    // One OP-state nonce per actual member owner, shared across record types.
+    mapping(address => uint256) public nonces;
+    bytes32 public constant SET_ADDR_TYPEHASH = keccak256("SetAddr(bytes32 node,address value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
+    bytes32 public constant SET_TEXT_TYPEHASH = keccak256("SetText(bytes32 node,string key,string value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
+    bytes32 public constant SET_CONTENTHASH_TYPEHASH = keccak256("SetContenthash(bytes32 node,bytes value,uint64 recordEpoch,uint256 nonce,uint256 deadline)");
 
     struct AddressRecord { address value; uint64 epoch; }
     struct TextRecord { string value; uint64 epoch; }
@@ -37,6 +44,8 @@ contract L2CommunityRecordsV4 is ERC721 {
     error Expired();
     error QuotaExceeded();
     error AlreadyIssued();
+    error InvalidNonce();
+    error SignatureExpired();
 
     event ControllerProposed(address indexed previous, address indexed pending);
     event ControllerAccepted(address indexed previous, address indexed current, uint64 epoch);
@@ -47,13 +56,17 @@ contract L2CommunityRecordsV4 is ERC721 {
     event AddrSet(bytes32 indexed node, address value);
     event TextSet(bytes32 indexed node, string key, string value);
     event ContenthashSet(bytes32 indexed node, bytes value);
+    event MemberNonceConsumed(address indexed holder, bytes32 indexed node, uint256 nonce);
 
     modifier onlyController() {
         if (msg.sender != rootController) revert Unauthorized();
         _;
     }
 
-    constructor(bytes32 parent, address controller) ERC721("CometENS Community V4", "CEV4") {
+    constructor(bytes32 parent, address controller)
+        ERC721("CometENS Community V4", "CEV4")
+        EIP712("CometENS Community V4", "1")
+    {
         if (parent == bytes32(0) || controller == address(0)) revert InvalidInput();
         parentNode = parent;
         rootController = controller;
@@ -163,6 +176,55 @@ contract L2CommunityRecordsV4 is ERC721 {
         _requireMember(node);
         _addresses[node] = AddressRecord(value, recordEpoch[node]);
         emit AddrSet(node, value);
+    }
+
+    function domainSeparator() external view returns (bytes32) { return _domainSeparatorV4(); }
+
+    function _consumeMemberSignature(bytes32 node, uint256 nonce, uint256 deadline, bytes32 structHash, bytes calldata signature)
+        private
+    {
+        address holder = _ownerOf(uint256(node));
+        if (holder == address(0)) revert Unauthorized();
+        if (nonce != nonces[holder]) revert InvalidNonce();
+        if (block.timestamp > deadline) revert SignatureExpired();
+        if (deadline > block.timestamp + 1 days) revert InvalidInput();
+        // Chain ID and verifying contract are inside the EIP-712 domain;
+        // current recordEpoch is inside the signed struct for transfer safety.
+        if (!SignatureChecker.isValidSignatureNow(holder, _hashTypedDataV4(structHash), signature)) revert Unauthorized();
+        ++nonces[holder]; // one-time consumption in the same OP transaction
+        emit MemberNonceConsumed(holder, node, nonce);
+    }
+
+    /// @notice Anyone may relay, but ONLY the current NFT holder can sign.
+    function setAddrBySig(bytes32 node, address value, uint256 nonce, uint256 deadline, bytes calldata signature) external {
+        bytes32 digest = keccak256(abi.encode(SET_ADDR_TYPEHASH, node, value, recordEpoch[node], nonce, deadline));
+        _consumeMemberSignature(node, nonce, deadline, digest, signature);
+        _addresses[node] = AddressRecord(value, recordEpoch[node]);
+        emit AddrSet(node, value);
+    }
+
+    function setTextBySig(bytes32 node, string calldata key, string calldata value, uint256 nonce, uint256 deadline, bytes calldata signature)
+        external
+    {
+        if (bytes(key).length == 0 || bytes(key).length > 256 || bytes(value).length > 4096) revert InvalidInput();
+        bytes32 digest = keccak256(abi.encode(
+            SET_TEXT_TYPEHASH, node, keccak256(bytes(key)), keccak256(bytes(value)), recordEpoch[node], nonce, deadline
+        ));
+        _consumeMemberSignature(node, nonce, deadline, digest, signature);
+        _texts[node][key] = TextRecord(value, recordEpoch[node]);
+        emit TextSet(node, key, value);
+    }
+
+    function setContenthashBySig(bytes32 node, bytes calldata value, uint256 nonce, uint256 deadline, bytes calldata signature)
+        external
+    {
+        if (value.length > 512) revert InvalidInput();
+        bytes32 digest = keccak256(abi.encode(
+            SET_CONTENTHASH_TYPEHASH, node, keccak256(value), recordEpoch[node], nonce, deadline
+        ));
+        _consumeMemberSignature(node, nonce, deadline, digest, signature);
+        _contenthashes[node] = ContentRecord(value, recordEpoch[node]);
+        emit ContenthashSet(node, value);
     }
 
     function addr(bytes32 node) external view returns (address) {
