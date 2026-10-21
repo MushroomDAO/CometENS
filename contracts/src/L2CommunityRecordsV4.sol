@@ -12,9 +12,11 @@ import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 contract L2CommunityRecordsV4 is ERC721, EIP712 {
     uint256 public constant CAP_ISSUE = 1;
     uint256 public constant CAP_INITIAL_ADDR = 2;
+    uint256 public constant CAP_SIGNED_ISSUE = 4;
     uint256 public constant MAX_NONCE_SKIP = 1 << 64;
     // Keep substantial headroom below uint256 overflow for all nonce paths.
     uint256 public constant MAX_MEMBER_NONCE = type(uint256).max - (1 << 128);
+    uint256 public constant MAX_ISSUANCE_NONCE = type(uint256).max - (1 << 128);
     bytes32 public immutable parentNode;
     bool public constant l1OwnershipVerified = false;
     address public rootController;
@@ -28,6 +30,13 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         uint64 epoch;
     }
     mapping(address => Operator) public operators;
+    // New grants, including re-grants in the same controller epoch, invalidate
+    // older issuance permits for that operator.
+    mapping(address => uint256) public operatorRevision;
+    uint256 public issuanceNonce;
+    bytes32 public constant ISSUE_TYPEHASH = keccak256(
+        "Issue(string label,address member,address initialAddr,address operator,uint64 controllerEpoch,uint256 operatorRevision,uint256 nonce,uint256 deadline)"
+    );
     // One OP-state nonce per actual member owner, shared across ALL nodes and
     // record types. Direct member writes also advance it, cancelling the next
     // relay authorization without altering other nodes' record contents.
@@ -63,6 +72,8 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     event ContenthashSet(bytes32 indexed node, bytes value);
     event MemberNonceConsumed(address indexed holder, bytes32 indexed node, uint256 nonce);
     event MemberNonceAdvanced(address indexed holder, bytes32 indexed node, uint256 previousNonce, uint256 newNonce);
+    event IssuanceNonceConsumed(address indexed operator, uint256 nonce, bytes32 indexed node);
+    event IssuanceNonceAdvanced(uint256 previousNonce, uint256 newNonce);
 
     modifier onlyController() {
         if (msg.sender != rootController) revert Unauthorized();
@@ -106,13 +117,15 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function _grant(address operator, uint256 permissions, uint64 quota, uint64 expiresAt) internal {
         if (operator == address(0) || operator == rootController || quota == 0 ||
             expiresAt <= block.timestamp || (permissions & CAP_ISSUE) == 0 ||
-            (permissions & ~(CAP_ISSUE | CAP_INITIAL_ADDR)) != 0) revert InvalidInput();
+            (permissions & ~(CAP_ISSUE | CAP_INITIAL_ADDR | CAP_SIGNED_ISSUE)) != 0) revert InvalidInput();
+        ++operatorRevision[operator];
         operators[operator] = Operator(permissions, quota, expiresAt, controllerEpoch);
         emit OperatorGranted(operator, permissions, quota, expiresAt, controllerEpoch);
     }
 
     function revokeOperator(address operator) external onlyController {
         delete operators[operator];
+        ++operatorRevision[operator];
         emit OperatorRevoked(operator, controllerEpoch);
     }
 
@@ -123,6 +136,7 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
         if (oldOperator == next) revert InvalidInput();
         _grant(next, permissions, quota, expiresAt);
         delete operators[oldOperator];
+        ++operatorRevision[oldOperator];
         emit OperatorRevoked(oldOperator, controllerEpoch);
     }
 
@@ -149,13 +163,58 @@ contract L2CommunityRecordsV4 is ERC721, EIP712 {
     function issue(string calldata label, address member, address initialAddr) external returns (bytes32 node) {
         if (member == address(0)) revert InvalidInput();
         if (msg.sender != rootController) {
-            Operator storage op = operators[msg.sender];
-            if (op.epoch != controllerEpoch || (op.permissions & CAP_ISSUE) == 0) revert Unauthorized();
-            if (op.expiresAt <= block.timestamp) revert Expired();
-            if (op.remainingQuota == 0) revert QuotaExceeded();
-            if (initialAddr != address(0) && (op.permissions & CAP_INITIAL_ADDR) == 0) revert Unauthorized();
-            --op.remainingQuota; // successful tx commits quota and mint atomically
+            _consumeOperator(msg.sender, initialAddr, false);
         }
+        return _issue(label, member, initialAddr);
+    }
+
+    /// @notice Each permit is authorized by the CURRENT parent controller
+    /// (EOA or ERC-1271 wallet) and executed by its named, active operator.
+    /// CAP_SIGNED_ISSUE makes this the ONLY issuance route for that operator.
+    function issueBySig(
+        string calldata label, address member, address initialAddr,
+        uint256 nonce, uint256 deadline, bytes calldata signature
+    ) external returns (bytes32 node) {
+        if (member == address(0)) revert InvalidInput();
+        _consumeOperator(msg.sender, initialAddr, true);
+        if (nonce != issuanceNonce || nonce >= MAX_ISSUANCE_NONCE) revert InvalidNonce();
+        if (block.timestamp > deadline) revert SignatureExpired();
+        if (deadline > block.timestamp + 1 days) revert InvalidInput();
+        bytes32 structHash = keccak256(abi.encode(
+            ISSUE_TYPEHASH, keccak256(bytes(label)), member, initialAddr, msg.sender,
+            controllerEpoch, operatorRevision[msg.sender], nonce, deadline
+        ));
+        // CEI: consume the nonce (and quota) before any ERC-1271 staticcall.
+        // A failed verification reverts both; a callback cannot mutate state.
+        issuanceNonce = nonce + 1;
+        if (!SignatureChecker.isValidSignatureNow(rootController, _hashTypedDataV4(structHash), signature)) {
+            revert Unauthorized();
+        }
+        node = _issue(label, member, initialAddr);
+        emit IssuanceNonceConsumed(msg.sender, nonce, node);
+    }
+
+    /// @notice Controller can cancel unexecuted permits without issuing a name.
+    function invalidateIssuanceNonce(uint256 nextNonce) external onlyController {
+        uint256 oldNonce = issuanceNonce;
+        if (nextNonce <= oldNonce || nextNonce > MAX_ISSUANCE_NONCE || nextNonce - oldNonce > MAX_NONCE_SKIP) {
+            revert InvalidNonce();
+        }
+        issuanceNonce = nextNonce;
+        emit IssuanceNonceAdvanced(oldNonce, nextNonce);
+    }
+
+    function _consumeOperator(address operator, address initialAddr, bool signed) private {
+        Operator storage op = operators[operator];
+        if (op.epoch != controllerEpoch || (op.permissions & CAP_ISSUE) == 0 ||
+            (!signed && (op.permissions & CAP_SIGNED_ISSUE) != 0)) revert Unauthorized();
+        if (op.expiresAt <= block.timestamp) revert Expired();
+        if (op.remainingQuota == 0) revert QuotaExceeded();
+        if (initialAddr != address(0) && (op.permissions & CAP_INITIAL_ADDR) == 0) revert Unauthorized();
+        --op.remainingQuota;
+    }
+
+    function _issue(string calldata label, address member, address initialAddr) private returns (bytes32 node) {
         node = nodeOf(label);
         if (_ownerOf(uint256(node)) != address(0)) revert AlreadyIssued();
         if (initialAddr != address(0)) {
