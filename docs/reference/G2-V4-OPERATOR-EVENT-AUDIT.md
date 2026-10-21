@@ -1,84 +1,28 @@
-# G2.5 experimental V4 operator history: read-only indexed log audit
+# G2.5 experimental V4 indexed operator history (read-only)
 
-Run against an **independently pinned, already deployed** per-community OP Sepolia
-V4 application contract. The script never signs, broadcasts, loads a wallet,
-consults Worker KV or infers L1 native ENS ownership. G2.5 and G2.4 remain
-`PENDING`. This component does **not** issue a `SOVEREIGN` receipt.
+This component audits an **independently pinned, per-community OP Sepolia V4 application**. It never signs, broadcasts, uses private keys/Worker KV, infers native L1 ENS ownership or generates `SOVEREIGN`. G2.5 and G2.4 remain **PENDING**.
 
 ```bash
 export COMETENS_OP_RPC_URL=https://your-independently-selected-op-sepolia-rpc
-node scripts/audit-v4-operator-events.mjs \
-  --profile ./v4-profile.json --from-block 123400 --to-block 123431 \
+node scripts/audit-v4-operator-events.mjs --profile ./v4-profile.json \
+  --from-block 123400 --to-block 123431 \
   --operator 0x2222222222222222222222222222222222222222
 ```
 
-Profile (same keys as existing V4 controller CLI):
+Profile uses the exact existing controller CLI fields (values **illustrative**, not deployed identities):
 
 ```json
-{
-  "parentName": "community.eth",
-  "chainId": 11155420,
-  "contract": "0x1111111111111111111111111111111111111111",
-  "expectedCodeHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-}
+{"parentName":"community.eth","chainId":11155420,"contract":"0x1111111111111111111111111111111111111111","expectedCodeHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 ```
 
-The addresses/hash/block numbers above are **illustrative**, not deployments.
-Determine V4 address, parent and expected **runtime** bytecode hash by an
-independent deployment inventory, not from an unsigned website or gateway.
-The command checks `namehash(parentName) == parentNode()` and runtime codehash
-at **every queried block**, requires RPC chain ID `11155420`, and rejects
-absent/replaced code. The program snapshots the four allowed plain profile
-fields before any network await; programmatic getter-based and mid-request
-mutable input substitution cannot redirect an in-flight scan. A proxy's shell codehash alone cannot certify its
-implementation and this is not a general upgradeable-runtime verifier.
+Pin V4 contract address, expected **runtime** bytecode hash and parent independently from deployment evidence; never derive them from unsigned JSON or gateway KV. Each scanned block checks OP chain ID `11155420`, `keccak256(getCode) == expectedCodeHash` and `parentNode() == namehash(parentName)`. Four plain profile fields are copied before any network await; getter-based retargeting is rejected. A proxy shell codehash cannot establish implementation identity.
 
-The query window is at most **64 blocks**, beginning at block >=1, with its
-upper endpoint at/below the RPC's reported `finalized` head. Each block must
-have at most 512 transactions and 512 contract logs, and the entire request at
-most 4,096 receipt logs; otherwise it fails closed. This is a bounded window,
-not an all-history inventory. To cover more history, explicitly request
-successive disjoint windows and independently ensure no gap. The RPC must
-support complete `eth_getBlockReceipts` and `eth_getLogs`; a missing method is
-an error, not permission to silently skip provenance checks. Per-block receipts
-must match the block transaction hash inventory and query logs exactly in
-address, topic/data, transaction/hash/index, block hash/height and event shape.
-This detects injected entries, omitted logs and partial pages when the two RPC
-responses disagree. Both responses can still be fabricated by the **same RPC**;
-these checks are corroboration, **not independently verified Ethereum/OP
-consensus or finalized receipts**. Compare against a second independently
-operated node or consensus proof before escalating assurance.
+Only **1–64 blocks** per request, starting >=1, with `toBlock` at/below the RPC-reported **finalized** height. At most 512 transactions, 512 V4 contract logs per block and 4096 receipt logs per request; any excess aborts. Explicitly query disjoint sequential windows for wider history. Each block's full `eth_getBlockReceipts` set must exactly match its transaction hashes; V4 receipts' logs must exactly match `eth_getLogs` by address, topics/data, tx hash/index, log index, block number/hash, and success. Missing methods, truncated pages, conflicting logs, injected receipts or malformed ABI are errors. No silent fallback or pagination claiming completeness.
 
-Events decoded from the contract's actual Solidity ABI:
+RPC responses are **single-provider corroboration**, not independent consensus/finality evidence: one malicious RPC can fabricate mutually consistent block, receipts and logs. Compare with independently operated providers/verified consensus evidence before elevating historical provenance claims. No proof of absent post-range events or a full contract history is made.
 
-| Event | Operator filtering / significance |
-| --- | --- |
-| `OperatorGranted(operator, permissions, quota, expiresAt, epoch)` | Indexed **operator**; `rotateOperator` grants the next operator |
-| `OperatorRevoked(operator, epoch)` | Indexed **operator**; `rotateOperator` revokes the old operator |
-| `ControllerAccepted(previous, current, epoch)` | Always shown, including with operator filter; controller epoch invalidates old grants |
-| `SubnodeIssued(parent, node, holder, issuer)` | Filter by **issuer**, non-indexed field; issuer may be controller or operator |
-| `IssuanceNonceConsumed(operator, nonce, node)` | Filter by indexed **operator**, evidences signed issuance consumption |
+The actual Solidity V4 events decoded are `OperatorGranted(operator,permissions,quota,expiresAt,epoch)`, `OperatorRevoked(operator,epoch)`, `ControllerAccepted(previous,current,epoch)`, `SubnodeIssued(parent,node,holder,issuer)` and `IssuanceNonceConsumed(operator,nonce,node)`. The optional operator filter applies to both **grant and revoke** (including `rotateOperator`'s separate events), signed issuance's indexed `operator` and the subnode event's non-indexed `issuer`. All `ControllerAccepted` events remain visible even under a filter to expose epoch rotation, and each `SubnodeIssued.parent` must match the pinned community. Output includes block/hash, transaction/hash/index, logIndex and original decoded arguments.
 
-The indexed-topic filters are implemented by decoding the **complete** bounded
-V4 receipt and log set then matching each operator, so revoke/rotation cannot
-be missed by querying only `OperatorGranted`. `ControllerAccepted` is always
-included for the relevant parent because epoch rotation invalidates older
-grants. `SubnodeIssued` also checks its indexed `parent` matches the pinned
-community. The report includes block number/hash, transaction hash/index and
-log index, plus scanned range, contract/runtime pin and parent. It is an
-**event audit trail only**. Historical grant/revoke/mint events do **not** prove
-today's `operators`, `operatorRevision`, `controllerEpoch`, `operatorActive`,
-current quota, live expiration or whether a transaction was reverted after a
-reorg. Read those present-tense values independently with a **pinned V4 status
-read at a specific verified OP block**. No public status or `SOVEREIGN` flag
-can derive from logs alone.
+**Crucial distinction:** event history is **not CURRENT authorization**. A former grant may be expired, quota exhausted, revoked, invalidated by `controllerEpoch`, superseded by a later grant, or belong to an unobserved block. Query pinned current OP `operators`, `operatorRevision`, `controllerEpoch`, and `operatorActive` separately at a verified block for present-tense permissions. Historical logs neither prove L1 NameWrapper/ENSv2 ownership nor certify native member names.
 
-Tests in `test/unit/g2-v4-operator-audit.test.mjs` construct ABI-encoded V4
-grant/revoke/controller/signed-issuance/subnode events and exercise the operator
-filter. Mutation-sensitive negatives cover wrong chain, bytecode hash, parent,
-unfinalized range, malformed profile, injected or truncated log page, changed
-block hash, wrong transaction hash, removed flag, wrong event parent and
-missing block receipts. This tool remains separate from SDK/CLI write-prep
-changes and Worker preflight integration, and uses read RPC methods only.
-The tests also mutate supplied profile fields during pending RPC calls and
-reject alternating getter input, protecting the single immutable scan target.
+`test/unit/g2-v4-operator-audit.test.mjs` exercises real ABI encoding for grant/revoke/rotation and both issuance events, correct filtering, and negative mutation-sensitive scenarios for wrong chain/hash/parent, unfinalized ranges, injected/truncated logs, receipts, tx/block mismatch, removed flags, spoofed topics, and profile changes during asynchronous execution. This tool is kept separate from #144 controller SDK and Worker V4 preflight writes.
