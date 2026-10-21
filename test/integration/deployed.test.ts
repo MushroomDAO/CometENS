@@ -5,9 +5,12 @@
  *   - .env.local with OP_SEPOLIA_RPC_URL, OP_L2_RECORDS_ADDRESS,
  *     PRIVATE_KEY_JASON, SEPOLIA_RPC_URL, L1_OFFCHAIN_RESOLVER_ADDRESS
  *
- * Run: npm test -- test/integration-deployed.test.ts
+ * Run: pnpm vitest run test/integration/deployed.test.ts
  *
- * These tests skip gracefully if env vars are not set.
+ * Credential presence never opts in. Live reads additionally require
+ * COMETENS_LIVE_READ_TESTS=1; live writes ALSO require
+ * COMETENS_LIVE_WRITE_TESTS=1. Writes mutate OP Sepolia ENS records and
+ * consume testnet ETH. See test/integration/README.md before enabling them.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import {
@@ -27,6 +30,7 @@ import {
 } from 'viem'
 import { optimismSepolia, sepolia } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
+import { liveTestOptIn } from './live-opt-in'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -38,7 +42,8 @@ const L1_OP_RESOLVER = (process.env.L1_OP_RESOLVER_ADDRESS ?? '') as Address
 const PRIVATE_KEY = (process.env.PRIVATE_KEY_JASON ?? '') as Hex
 const SIGNER_PK   = (process.env.PRIVATE_KEY_SUPPLIER ?? PRIVATE_KEY) as Hex
 
-const SKIP = !OP_RPC || !L2_ADDR || (L2_ADDR as string) === '' || !PRIVATE_KEY
+const { reads: LIVE_READS, writes: LIVE_WRITES } = liveTestOptIn()
+const SKIP = !LIVE_WRITES || !OP_RPC || !L2_ADDR || (L2_ADDR as string) === '' || !PRIVATE_KEY
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +138,7 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
   }, 120_000)
 })
 
-describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia', () => {
+describe.skipIf(!LIVE_READS || !L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia', () => {
   let l1Pub: ReturnType<typeof createPublicClient>
 
   beforeAll(() => {
@@ -205,7 +210,7 @@ describe.skipIf(!L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia',
 const ENS_NAME = 'aastar.eth'
 const ENS_NODE = namehash(ENS_NAME) as Hex
 
-const SKIP_E2E = !L1_RPC || !L1_ADDR || !OP_RPC || !L2_ADDR || !SIGNER_PK
+const SKIP_E2E = !LIVE_WRITES || !L1_RPC || !L1_ADDR || !OP_RPC || !L2_ADDR || !SIGNER_PK
 
 const L2_WRITE_ABI = [
   { type: 'function', name: 'setAddr', stateMutability: 'nonpayable',
@@ -309,7 +314,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
 
 // ─── D6: forest.aastar.eth setup ─────────────────────────────────────────────
 
-describe.skipIf(!L1_RPC || !L1_OP_RESOLVER)('Integration: forest.aastar.eth setup', () => {
+describe.skipIf(!LIVE_READS || !L1_RPC || !L1_OP_RESOLVER)('Integration: forest.aastar.eth setup', () => {
   let l1Pub: ReturnType<typeof createPublicClient>
 
   beforeAll(() => {
