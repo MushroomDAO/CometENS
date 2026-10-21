@@ -9,9 +9,9 @@ const USAGE = `Usage: pnpm controller:v4 -- <command> --profile ./v4-profile.jso
 Commands:
   status [--operator 0xADDRESS]
   receipt --hash 0xTXHASH
-  prepare-grant --from 0xCONTROLLER --operator 0xADDRESS --permissions 1|3 --quota N --expires-at UNIX
+  prepare-grant --from 0xCONTROLLER --operator 0xADDRESS --permissions 1|3|5|7 --quota N --expires-at UNIX
   prepare-revoke --from 0xCONTROLLER --operator 0xADDRESS
-  prepare-rotate --from 0xCONTROLLER --operator 0xOLD --next 0xNEW --permissions 1|3 --quota N --expires-at UNIX
+  prepare-rotate --from 0xCONTROLLER --operator 0xOLD --next 0xNEW --permissions 1|3|5|7 --quota N --expires-at UNIX
   prepare-propose --from 0xCONTROLLER --next 0xNEW
   prepare-cancel-handoff --from 0xCONTROLLER
   prepare-accept --from 0xPENDING
