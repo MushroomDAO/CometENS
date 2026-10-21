@@ -1,6 +1,6 @@
 # G1 — SDK independent consumer acceptance
 
-> Status: **ACCEPTED by user on 2026-10-21** after inspecting the local independent read-only SDK Demo. G0 was accepted 2026-10-20. G1 acceptance does **not** certify native ENS L1 title, global ENS resolver parity, testnet transaction safety or mainnet readiness.
+> Status: **ACCEPTED by user on 2026-10-21** after the assistant started the read-only SDK Demo and provided its URL, test steps and evidence; the user explicitly accepted, without an assertion that each browser interaction was observed. G0 was accepted 2026-10-20. G1 acceptance does **not** certify native ENS L1 title, global ENS resolver parity, testnet transaction safety or mainnet readiness.
 
 ## Scope and compatibility contract
 
