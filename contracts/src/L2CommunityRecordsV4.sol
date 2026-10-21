@@ -61,7 +61,8 @@ contract L2CommunityRecordsV4 is ERC721 {
 
     /// @notice Two-step root rotation atomically invalidates EVERY old operator grant.
     function proposeController(address next) external onlyController {
-        if (next == address(0) || next == rootController) revert InvalidInput();
+        // A zero address cancels a pending handoff; it can never accept.
+        if (next == rootController) revert InvalidInput();
         pendingController = next;
         emit ControllerProposed(rootController, next);
     }
@@ -116,6 +117,9 @@ contract L2CommunityRecordsV4 is ERC721 {
         bytes memory b = bytes(label);
         if (b.length == 0 || b.length > 63) revert InvalidInput();
         if (b[0] == '-' || b[b.length - 1] == '-') revert InvalidInput();
+        // Strict lowercase ASCII-LDH subset only, NOT a full ENSIP-15
+        // Unicode normalizer. Avoid labels with disallowed 3rd/4th hyphens.
+        if (b.length >= 4 && b[2] == '-' && b[3] == '-') revert InvalidInput();
         for (uint256 i; i < b.length; ++i) {
             bytes1 c = b[i];
             if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) revert InvalidInput();
