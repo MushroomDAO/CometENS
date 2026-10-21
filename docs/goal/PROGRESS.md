@@ -149,6 +149,14 @@ Demo #111 原 head 8d8d1be 被要求修改两项 Medium：`.env.example` 被 `.g
 
 **当前恢复结论**：G0 已被用户验收且合并；G1 独立 SDK、API/CCIP 安全、EIP-712、Vanilla Demo、自部署文档和 CI 均已 GitHub 落地。此前完整本地验证 `811 PASS / 9 预设在线部署测试跳过`，GitHub 最终 head `848b71c` 的工作流整体绿。没有执行 npm publish 或主网部署。G1 **业务验收仍未收到**，STATUS 保持 `READY_FOR_ACCEPTANCE`；G2 继续 `BLOCKED`。独立工作树已逐个检查：合并的 G1 部分工作树移除，子模块 worktree 在确认子模块均干净后才安全强制移除；当前 main 工作树更新到 `3390adf`。本条为合并后的额外文档 checkpoint，不能当作用户验收 G1。
 
+### 2026-10-21 · 用户正式验收 G1，G2 启动授权（已确认）
+
+用户在已提供运行地址的本地 SDK Vanilla Demo（`http://127.0.0.1:5188/`，仅绑定 127.0.0.1）完成 G1 业务验收，明确回复：「啊，验收通过了，你继续开发吧。」因此 **G1 ACCEPTED**（此前仅 READY_FOR_ACCEPTANCE）；此授权以 G1 已冻结范围为准：可独立安装的 TS SDK、V3 安全 Worker 与 EIP-712 API、公开 Sepolia 配置的 OP L2Records 只读与 Demo。验收**不表示** L1 ENS 原生产权移交、L1/OP 解析一致、Worker KV 原子 nonce、主网部署或 npm 发布完成；相关交付属于 G2–G6 独立门禁。
+
+G1 正式验收前，独立 PR #117 的测试网默认禁止广播安全补丁已经 APPROVED/CI 绿并合入 main `33e1954`；PR #119 独立 AST 接线保护已于 2026-10-21 同样 APPROVED/CI 绿合并为 main `478a74de955e1af3f679a048cc93351ddb64ff4d`。日常回归不再凭本地 RPC/私钥自动启用 live Sepolia 读写；[#118](https://github.com/MushroomDAO/CometENS/issues/118) 持续追踪历史解析/签名 proof 测试网配置偏差。G1 本地浏览器验证：HTTP 200，SDK 在公共 Ethereum Sepolia / OP Sepolia 成功校验合约、`aastar.eth` 直接 OP 记录返回非空地址；L1 ENS 为 null，属于已披露差异，不得宣称 `SOVEREIGN`。
+
+依据用户批准启动 **G2 IN_PROGRESS**，按 [G2-ACCEPTANCE.md](G2-ACCEPTANCE.md) 九项安全关卡执行：先独立 V4 per-parent 核心与 revocable operator；后跟 SDK、L1 authority、ENS NameWrapper 原生交权、nonce/迁移和第三方 handoff proof。所有工作独立 worktree/分支、≤300 行生产 PR 目标、commit/push/PR、GitHub CI + review 双绿后方可合并。**G2 未全部完成并获用户再验收之前不得解锁 G3**；不得擅自链上写入、发布 npm 或做主网部署。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。

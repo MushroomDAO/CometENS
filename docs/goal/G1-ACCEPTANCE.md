@@ -1,6 +1,6 @@
 # G1 — SDK independent consumer acceptance
 
-> Status: READY_FOR_ACCEPTANCE, **not yet user accepted**. G0 was accepted 2026-10-20. This is a reproducible evidence ledger for G1 scope and the basis for the user's G1 review.
+> Status: **ACCEPTED by user on 2026-10-21** after inspecting the local independent read-only SDK Demo. G0 was accepted 2026-10-20. G1 acceptance does **not** certify native ENS L1 title, global ENS resolver parity, testnet transaction safety or mainnet readiness.
 
 ## Scope and compatibility contract
 
@@ -32,7 +32,7 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 | GitHub full CI evidence | [PR #115](https://github.com/MushroomDAO/CometENS/pull/115) `test` + `cla-check` SUCCESS; [PR #111](https://github.com/MushroomDAO/CometENS/pull/111) `test` + `cla-check` SUCCESS at head `9306f21` ([Actions run 39413890122](https://github.com/MushroomDAO/CometENS/actions/runs/39413890122)). Later doc-only head revisions need their own fresh GitHub check before acceptance or merge |
 | Latest reviewer-fix evidence | #111 head `afd13ca` fixes tracked `.env.example`, demo startup validation, and self-host/mainnet documentation; `test` and `cla-check` SUCCESS ([run 39458665006](https://github.com/MushroomDAO/CometENS/actions/runs/39458665006)). #110 merged to main as `813f1e2`, #112 merged to main as `2734474`; #113 updated to new `main` as `4416b10`, full CI SUCCESS, fresh review requested |
 | GitHub completed landing, 2026-10-21 | G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) `813f1e2`; API [#112](https://github.com/MushroomDAO/CometENS/pull/112) `2734474`; EIP-712 [#113](https://github.com/MushroomDAO/CometENS/pull/113) `40ee340`; SDK package [#114](https://github.com/MushroomDAO/CometENS/pull/114) `d5fc687`; CI [#115](https://github.com/MushroomDAO/CometENS/pull/115) `b434750`; Demo/acceptance [#111](https://github.com/MushroomDAO/CometENS/pull/111) `3390adf`. All PRs APPROVED and CI green at their final reviewed heads before merge. [Final #111 test run 39535343002](https://github.com/MushroomDAO/CometENS/actions/runs/39535343002) SUCCESS at head `848b71c` |
-| User G1 acceptance | PENDING — G2 blocked |
+| User G1 acceptance | **ACCEPTED 2026-10-21** — user explicitly replied 「验收通过了，你继续开发吧」 following local Demo setup and browser acceptance instructions; G2 is unlocked, G3 remains blocked |
 
 ## Live testnet read-only evidence, 2026-10-20
 
@@ -46,4 +46,4 @@ CI tests using mocks and local Foundry are not independent confirmation of an ac
 
 ## Audit and dependencies
 
-G0 and all G1 implementation PRs have merged into main with GitHub approval and tests. **This is technical delivery, not a user acceptance event.** G1 remains `READY_FOR_ACCEPTANCE`; G2 may start only after this document records confirmed G1 acceptance by the user.
+G0 and all G1 implementation PRs have merged into main with GitHub approval and tests, and **G1 now has a separate user acceptance event on 2026-10-21**. G1 acceptance applies to the standalone SDK, typed Worker APIs, testnet direct-L2 read and independent Demo; it does not override known G2–G5 security, native L1 ENS ownership or resolver-continuity requirements. G2 may start. G3 remains blocked pending G2 completion and user acceptance.
