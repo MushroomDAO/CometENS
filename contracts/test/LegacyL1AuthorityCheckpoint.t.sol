@@ -108,17 +108,32 @@ contract LegacyL1AuthorityCheckpointTest is Test {
     function test_constructorBindsNativeLabelAndPinnedIdentity() public view {
         assertEq(
             source.parentNode(),
-            keccak256(
-                abi.encodePacked(
-                    bytes32(0x93cdeb708b7545dc668eb9280176169d4e3fc8d4018eea69e45fdc04d3da4a3d), keccak256("community")
-                )
-            )
+            // Independent viem known vector for namehash("community.eth").
+            bytes32(0x220302cfbfda77f912157d62bd2a0d4553d6d73e677960d357c09235621436f8)
         );
         assertEq(source.labelId(), uint256(keccak256("community")));
         assertEq(source.destinationInbox(), INBOX);
         assertEq(source.SOURCE_CHAIN_ID(), 11155111);
         assertEq(source.DESTINATION_CHAIN_ID(), 11155420);
         assertEq(source.MAX_LEASE(), 7200);
+    }
+
+    function test_aastarEthUsesIndependentNamehashVector() public {
+        LegacyL1AuthorityCheckpoint sample =
+            new LegacyL1AuthorityCheckpoint("aastar", INBOX, ENS.codehash, WRAPPER.codehash, REGISTRAR.codehash);
+        // Known viem namehash("aastar.eth"), not derived from the contract's ETH_NODE.
+        assertEq(sample.parentNode(), bytes32(0x6324952ff31e5618d20dc500efab398581fa7e3370a6ee50fb8ac7c72f32722d));
+    }
+
+    function test_maxRegistrarExpiryStaysInsideUint64Validity() public {
+        LegacyRegistrarFixture(REGISTRAR).setExpiry(type(uint256).max);
+        LegacyWrapperFixture(WRAPPER).setExpiry(type(uint64).max);
+        (address actualHolder, uint64 validity) = source.currentAuthority();
+        assertEq(actualHolder, holder);
+        assertEq(validity, type(uint64).max - source.EXPIRY_MARGIN());
+        bind(holder, controller, source.MAX_LEASE());
+        (,,,,, uint64 checkpointValidity) = source.state();
+        assertEq(checkpointValidity, validity);
     }
 
     function test_currentHolderMustAuthorizeAtExecutionNotByPayloadOrWorker() public {

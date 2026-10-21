@@ -25,7 +25,8 @@ contract LegacyL1AuthorityCheckpoint {
     uint64 public constant EXPIRY_MARGIN = 24 hours;
     // Shape/version matches the separately reviewed OP inbox; NO relay is implemented here.
     bytes32 public constant AUTHORITY_VERSION = keccak256("COMETENS_G2_ROOT_CHECKPOINT_V1");
-    bytes32 private constant ETH_NODE = 0x93cdeb708b7545dc668eb9280176169d4e3fc8d4018eea69e45fdc04d3da4a3d;
+    // Exact ENS namehash("eth"), independently verified against viem and ENS.
+    bytes32 private constant ETH_NODE = 0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae;
 
     address public constant ENS_REGISTRY = 0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e;
     address public constant NAME_WRAPPER = 0x0635513f179D50A207757E05759CbD106d7dFcE8;
@@ -139,6 +140,7 @@ contract LegacyL1AuthorityCheckpoint {
             return (address(0), 0);
         }
         uint256 safeExpiry = expiry < wrappedExpiry ? expiry : wrappedExpiry;
+        if (safeExpiry > type(uint64).max) revert InvalidNativeAuthority();
         validUntil = uint64(safeExpiry - EXPIRY_MARGIN);
     }
 
