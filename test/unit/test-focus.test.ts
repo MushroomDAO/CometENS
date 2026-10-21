@@ -23,7 +23,7 @@ const REPO = join(__dirname, '..', '..')
 function testSources(): string[] {
   return execFileSync('git', ['ls-files', '-z', 'test', 'src', 'server', 'sdk'], { cwd: REPO, encoding: 'utf8' })
     .split('\0')
-    .filter((f) => f.endsWith('.test.ts') && !f.endsWith('test-focus.test.ts'))
+    .filter((f) => (f.endsWith('.test.ts') || f.endsWith('.test.mjs')) && !f.endsWith('test-focus.test.ts'))
 }
 
 /**
