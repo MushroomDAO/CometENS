@@ -18,9 +18,13 @@ function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: 
   const pending: Array<() => void> = []
   const fake = {
     async getChainId() { calls.push('getChainId'); if (options.error) throw new Error('sensitive-provider-url'); return options.chainId ?? 11155420 },
+    async getBlockNumber() { calls.push('getBlockNumber'); return 867n },
     async getBytecode() { calls.push('getBytecode'); return options.bytecode ?? code },
-    async readContract({ functionName }: { functionName: string }) {
+    async readContract({ functionName, blockNumber }: { functionName: string; blockNumber?: bigint }) {
       calls.push(functionName)
+      if ((functionName === 'operators' || functionName === 'operatorActive') && blockNumber !== 867n) {
+        throw new Error('operator permission reads must use fixed block')
+      }
       switch (functionName) {
         case 'parentNode': return options.parent ?? namehash(profile.parentName)
         case 'rootController': return options.controller ?? owner
@@ -91,7 +95,8 @@ describe('G2 OP application-only V4 adapter', () => {
     await expect(adapter.prepareGrant(other, operator, 1n, 5n, future())).rejects.toMatchObject({ kind: 'unauthorized' })
     await expect(adapter.prepareGrant(owner, operator, 2n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 4n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
-    await expect(adapter.prepareGrant(owner, operator, 5n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 8n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
+    await expect(adapter.prepareGrant(owner, operator, 9n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, owner, 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, '0x0000000000000000000000000000000000000000', 1n, 5n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
     await expect(adapter.prepareGrant(owner, operator, 1n, 0n, future())).rejects.toMatchObject({ kind: 'invalid-input' })
@@ -138,13 +143,17 @@ describe('G2 OP application-only V4 adapter', () => {
   it('reads operator state with explicit non-sovereign provenance', async () => {
     const adapter = new V4ControllerAdapter(profile, reader().client)
     const status = await adapter.getOperator(operator)
-    expect(status).toMatchObject({ operator, controller: owner, permissions: 3n, remainingQuota: 2n, epoch: 1n, canIssue: true, l1OwnershipVerified: false, scope: 'op-application-only' })
+    expect(status).toMatchObject({ operator, controller: owner, permissions: 3n, remainingQuota: 2n, epoch: 1n,
+      canIssue: true, canIssueUnsigned: true, canInitialAddrUnsigned: true,
+      requiresControllerSignature: false, l1OwnershipVerified: false, scope: 'op-application-only' })
   })
 
   it('runs independent read-only status RPCs concurrently, without a lock or mutation', async () => {
     const { client, calls } = reader({ deferOperatorReads: true })
     const state = await new V4ControllerAdapter(profile, client).getOperator(operator)
     expect(state.canIssue).toBe(true)
+    expect(state.blockNumber).toBe(867n)
+    expect(calls).toContain('getBlockNumber')
     expect(calls.slice(-3)).toEqual(['operators', 'operatorActive', 'operatorActive'])
   })
 
