@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decodeFunctionData, keccak256, namehash, type Address, type Hex, type PublicClient } from 'viem'
-import { V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
+import { V4_CAP_SIGNED_ISSUE, V4ControllerAdapter, v4CommunityAbi, type V4ControllerProfile } from '../../sdk/v4'
 import { parseV4Args, runV4Cli } from '../../scripts/v4-controller-cli.mjs'
 
 const controller = '0x1111111111111111111111111111111111111111' as const
@@ -20,16 +20,20 @@ const profile: V4ControllerProfile = {
 function mockReader(overrides: {
   chain?: number; bytecode?: Hex; to?: Address; rpcFailure?: boolean
   pending?: string; controllerEpoch?: unknown; operatorEpoch?: bigint
-  remainingQuota?: bigint; expiresAt?: bigint; permissions?: bigint; initialActive?: boolean
+  remainingQuota?: bigint; expiresAt?: bigint; permissions?: bigint; initialActive?: boolean; blockNumber?: bigint
 } = {}) {
   const methods: string[] = []
   const requestedCapabilities: bigint[] = []
   let chainReads = 0
   const reader = {
     async getChainId() { methods.push('eth_chainId'); chainReads++; return overrides.chain ?? 11155420 },
+    async getBlockNumber() { methods.push('eth_blockNumber'); return overrides.blockNumber ?? 123456n },
     async getBytecode() { methods.push('eth_getCode'); return overrides.bytecode ?? code },
-    async readContract({ functionName, args }: { functionName: string; args?: readonly bigint[] }) {
+    async readContract({ functionName, args, blockNumber }: { functionName: string; args?: readonly bigint[]; blockNumber?: bigint }) {
       methods.push(functionName)
+      if (['operators', 'operatorActive'].includes(functionName) && blockNumber !== (overrides.blockNumber ?? 123456n)) {
+        throw new Error('un-pinned permission lookup')
+      }
       if (overrides.rpcFailure) throw new Error('provider token https://rpc.test/v2/SECRET')
       switch (functionName) {
         case 'parentNode': return namehash(profile.parentName)
@@ -88,12 +92,41 @@ describe('G2.5 V4 controller status, receipt and CLI safety', () => {
       { operatorEpoch: 3n }, { remainingQuota: 0n }, { expiresAt: 1n },
     ]) {
       const adapter = new V4ControllerAdapter(profile, mockReader(overrides).reader)
-      expect(await adapter.getOperator(operator)).toMatchObject({ canIssue: false, canInitialAddr: false })
+      expect(await adapter.getOperator(operator)).toMatchObject({
+        canIssue: false, canInitialAddr: false, canIssueUnsigned: false, canInitialAddrUnsigned: false,
+      })
     }
     const independent = mockReader({ permissions: 3n, initialActive: false })
     expect(await new V4ControllerAdapter(profile, independent.reader).getOperator(operator))
-      .toMatchObject({ canIssue: true, canInitialAddr: false })
+      .toMatchObject({ canIssue: true, canInitialAddr: false, canIssueUnsigned: true, canInitialAddrUnsigned: false })
     expect(independent.requestedCapabilities).toEqual([1n, 3n])
+    const revoked = await new V4ControllerAdapter(profile, mockReader({ permissions: 0n }).reader).getOperator(operator)
+    expect(revoked).toMatchObject({ canIssue: false, canIssueUnsigned: false, canInitialAddrUnsigned: false })
+  })
+
+  it('allows signed-only grants but never labels them as unsigned issuance authorization', async () => {
+    const signedOnly = new V4ControllerAdapter(profile, mockReader({ permissions: 5n }).reader)
+    expect(V4_CAP_SIGNED_ISSUE).toBe(4n)
+    expect(await signedOnly.getOperator(operator)).toMatchObject({
+      permissions: 5n, canIssue: true, canIssueUnsigned: false, requiresControllerSignature: true,
+      canInitialAddr: false, canInitialAddrUnsigned: false, scope: 'op-application-only',
+    })
+    const signedWithInitialAddr = new V4ControllerAdapter(profile, mockReader({ permissions: 7n }).reader)
+    expect(await signedWithInitialAddr.getOperator(operator)).toMatchObject({
+      canIssue: true, canIssueUnsigned: false, canInitialAddr: true,
+      canInitialAddrUnsigned: false, requiresControllerSignature: true,
+    })
+    for (const p of [5n, 7n]) {
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 600)
+      const grant = await signedOnly.prepareGrant(controller, operator, p, 2n, expiry)
+      expect(decodeFunctionData({ abi: v4CommunityAbi, data: grant.data }))
+        .toMatchObject({ functionName: 'grantOperator', args: [operator, p, 2n, expiry] })
+      const rotate = await signedOnly.prepareRotate(controller, operator, pending, p, 2n, expiry)
+      expect(decodeFunctionData({ abi: v4CommunityAbi, data: rotate.data }))
+        .toMatchObject({ functionName: 'rotateOperator', args: [operator, pending, p, 2n, expiry] })
+    }
+    const stale = await new V4ControllerAdapter(profile, mockReader({ permissions: 5n, operatorEpoch: 3n }).reader).getOperator(operator)
+    expect(stale).toMatchObject({ canIssue: false, canIssueUnsigned: false, requiresControllerSignature: true })
   })
 
   it('preserves zero pending address and rejects invalid pending/epoch RPC values', async () => {
@@ -181,6 +214,12 @@ describe('G2.5 V4 controller status, receipt and CLI safety', () => {
       expect(status.result.controller).toMatchObject({ controller, pendingController: pending, controllerEpoch: '4', l1OwnershipVerified: false })
       expect(status.result.operator).toMatchObject({ operator, remainingQuota: '12', canIssue: true })
       expect(status.broadcast).toBe(false)
+      const signedStatus = JSON.parse(await runV4Cli(['status', '--profile', path, '--operator', operator],
+        { ...options, client: mockReader({ permissions: 5n }).reader }))
+      expect(signedStatus.result.operator).toMatchObject({
+        canIssue: true, canIssueUnsigned: false, requiresControllerSignature: true,
+      })
+      expect(signedStatus.broadcast).toBe(false)
       const prepared = JSON.parse(await runV4Cli(['prepare-revoke', '--profile', path,
         '--from', controller, '--operator', operator], options))
       expect(prepared).toMatchObject({ kind: 'prepare-revoke', signed: false, broadcast: false,
