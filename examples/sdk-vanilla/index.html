@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CometENS SDK · Independent Consumer Demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; padding: 28px 18px; margin: auto; line-height: 1.6; }
+      input, button { font: inherit; padding: 9px; width: 100%; box-sizing: border-box; }
+      label { display: block; margin: 14px 0; }
+      button { background: #1d377f; color: white; border: 0; border-radius: 6px; cursor: pointer; }
+      output { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f5f5; padding: 12px; margin-top: 16px; }
+      aside { border-left: 3px solid #9b7500; padding: 6px 14px; background: #fff8e5; }
+    </style>
+  </head>
+  <body>
+    <h1>CometENS independent SDK consumer</h1>
+    <p>This site reads ENS records using the installable CometENS SDK package. It does not need AAStar credentials.</p>
+    <aside>G1 testnet read demo. L2 ERC-721 ownership does not prove native L1 ENS ownership. No API keys or private keys belong in browser config.</aside>
+    <form id="lookup">
+      <label for="name">ENS name</label>
+      <input id="name" name="name" placeholder="alice.community.eth" required />
+      <button type="submit">Verify network and read records</button>
+    </form>
+    <output id="result" aria-live="polite">Configure the .env.local public RPC and contract addresses, then look up a name.</output>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

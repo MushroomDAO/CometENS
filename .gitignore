@@ -3,6 +3,7 @@ dist
 .DS_Store
 .env*
 !.env.op-sepolia
+!examples/sdk-vanilla/.env.example
 
 # Foundry build artifacts
 contracts/out/
