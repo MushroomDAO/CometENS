@@ -30,7 +30,10 @@ Nothing in this change updates the V3 Worker/KV or exposes a new SDK mint flow.
   checks granted bits, quota, epoch and expiry. It does **not** mean unsigned
   `issue()` can execute. SDK `getOperator().canIssue` reports this active
   issuance grant, while `canIssueUnsigned` explicitly excludes signed-only
-  operators. Inspect `requiresControllerSignature` before requesting a mint.
+  operators. The SDK pins the three operator permission queries to one OP block,
+  but earlier contract identity/controller reads are separate. Neither status
+  field simulates a mint or proves its execution will succeed. Inspect
+  `requiresControllerSignature` before requesting a mint.
   The subsequent SDK adapter accepts permission combinations including bit `4`
   when paired with `CAP_ISSUE`, and explicitly reports `canIssueUnsigned=false`
   for signed-only operators. It still has no permit-signing/broadcast path.

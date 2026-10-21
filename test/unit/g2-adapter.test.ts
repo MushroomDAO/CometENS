@@ -18,9 +18,13 @@ function reader(options: { chainId?: number; bytecode?: `0x${string}`; parent?: 
   const pending: Array<() => void> = []
   const fake = {
     async getChainId() { calls.push('getChainId'); if (options.error) throw new Error('sensitive-provider-url'); return options.chainId ?? 11155420 },
+    async getBlockNumber() { calls.push('getBlockNumber'); return 867n },
     async getBytecode() { calls.push('getBytecode'); return options.bytecode ?? code },
-    async readContract({ functionName }: { functionName: string }) {
+    async readContract({ functionName, blockNumber }: { functionName: string; blockNumber?: bigint }) {
       calls.push(functionName)
+      if ((functionName === 'operators' || functionName === 'operatorActive') && blockNumber !== 867n) {
+        throw new Error('operator permission reads must use fixed block')
+      }
       switch (functionName) {
         case 'parentNode': return options.parent ?? namehash(profile.parentName)
         case 'rootController': return options.controller ?? owner
@@ -148,6 +152,8 @@ describe('G2 OP application-only V4 adapter', () => {
     const { client, calls } = reader({ deferOperatorReads: true })
     const state = await new V4ControllerAdapter(profile, client).getOperator(operator)
     expect(state.canIssue).toBe(true)
+    expect(state.blockNumber).toBe(867n)
+    expect(calls).toContain('getBlockNumber')
     expect(calls.slice(-3)).toEqual(['operators', 'operatorActive', 'operatorActive'])
   })
 

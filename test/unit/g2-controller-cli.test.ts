@@ -20,16 +20,20 @@ const profile: V4ControllerProfile = {
 function mockReader(overrides: {
   chain?: number; bytecode?: Hex; to?: Address; rpcFailure?: boolean
   pending?: string; controllerEpoch?: unknown; operatorEpoch?: bigint
-  remainingQuota?: bigint; expiresAt?: bigint; permissions?: bigint; initialActive?: boolean
+  remainingQuota?: bigint; expiresAt?: bigint; permissions?: bigint; initialActive?: boolean; blockNumber?: bigint
 } = {}) {
   const methods: string[] = []
   const requestedCapabilities: bigint[] = []
   let chainReads = 0
   const reader = {
     async getChainId() { methods.push('eth_chainId'); chainReads++; return overrides.chain ?? 11155420 },
+    async getBlockNumber() { methods.push('eth_blockNumber'); return overrides.blockNumber ?? 123456n },
     async getBytecode() { methods.push('eth_getCode'); return overrides.bytecode ?? code },
-    async readContract({ functionName, args }: { functionName: string; args?: readonly bigint[] }) {
+    async readContract({ functionName, args, blockNumber }: { functionName: string; args?: readonly bigint[]; blockNumber?: bigint }) {
       methods.push(functionName)
+      if (['operators', 'operatorActive'].includes(functionName) && blockNumber !== (overrides.blockNumber ?? 123456n)) {
+        throw new Error('un-pinned permission lookup')
+      }
       if (overrides.rpcFailure) throw new Error('provider token https://rpc.test/v2/SECRET')
       switch (functionName) {
         case 'parentNode': return namehash(profile.parentName)
@@ -88,12 +92,16 @@ describe('G2.5 V4 controller status, receipt and CLI safety', () => {
       { operatorEpoch: 3n }, { remainingQuota: 0n }, { expiresAt: 1n },
     ]) {
       const adapter = new V4ControllerAdapter(profile, mockReader(overrides).reader)
-      expect(await adapter.getOperator(operator)).toMatchObject({ canIssue: false, canInitialAddr: false })
+      expect(await adapter.getOperator(operator)).toMatchObject({
+        canIssue: false, canInitialAddr: false, canIssueUnsigned: false, canInitialAddrUnsigned: false,
+      })
     }
     const independent = mockReader({ permissions: 3n, initialActive: false })
     expect(await new V4ControllerAdapter(profile, independent.reader).getOperator(operator))
-      .toMatchObject({ canIssue: true, canInitialAddr: false })
+      .toMatchObject({ canIssue: true, canInitialAddr: false, canIssueUnsigned: true, canInitialAddrUnsigned: false })
     expect(independent.requestedCapabilities).toEqual([1n, 3n])
+    const revoked = await new V4ControllerAdapter(profile, mockReader({ permissions: 0n }).reader).getOperator(operator)
+    expect(revoked).toMatchObject({ canIssue: false, canIssueUnsigned: false, canInitialAddrUnsigned: false })
   })
 
   it('allows signed-only grants but never labels them as unsigned issuance authorization', async () => {

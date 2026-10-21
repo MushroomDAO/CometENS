@@ -33,7 +33,7 @@ export interface V4ControllerProfile {
   expectedCodeHash: Hex
 }
 
-type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract'>
+type V4Reader = Pick<PublicClient, 'getChainId' | 'getBytecode' | 'readContract' | 'getBlockNumber'>
 
 export interface V4PreparedTx {
   chainId: 11155420
@@ -114,17 +114,20 @@ export class V4ControllerAdapter {
     requiredAddress(operator)
     const { controller, l1OwnershipVerified } = await this.verify()
     try {
+      // Pin all grant/status reads to one OP block; separate latest reads may
+      // combine an older unsigned grant with a newer signed-only grant.
+      const blockNumber = await this.publicClient.getBlockNumber()
       const [data, canIssue, canInitialAddr] = await Promise.all([
-        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operators', args: [operator] }),
-        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE] }),
-        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE | V4_CAP_INITIAL_ADDR] }),
+        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operators', args: [operator], blockNumber }),
+        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE], blockNumber }),
+        this.publicClient.readContract({ address: this.#profile.contract, abi: v4CommunityAbi, functionName: 'operatorActive', args: [operator, V4_CAP_ISSUE | V4_CAP_INITIAL_ADDR], blockNumber }),
       ])
       const [permissions, remainingQuota, expiresAt, epoch] = data as readonly [bigint, bigint, bigint, bigint]
       if (typeof canIssue !== 'boolean' || typeof canInitialAddr !== 'boolean') throw new Error('Invalid operator status')
       // operatorActive(CAP_ISSUE) includes signed-only grants: it is NOT
       // authorization to call the unsigned issue() entrypoint.
       const requiresControllerSignature = (permissions & V4_CAP_SIGNED_ISSUE) !== 0n
-      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, canIssue,
+      return { operator, controller, permissions, remainingQuota, expiresAt, epoch, blockNumber, canIssue,
         canIssueUnsigned: canIssue && !requiresControllerSignature,
         requiresControllerSignature,
         canInitialAddr, canInitialAddrUnsigned: canInitialAddr && !requiresControllerSignature,
