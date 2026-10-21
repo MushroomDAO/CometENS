@@ -20,7 +20,7 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 
 | Check | Result / command / context |
 |---|---|
-| G1 branch base | G0 accepted and merged via #110 to main as 813f1e2; independent G1 worktrees and branches remain isolated; #112 retargeted to main and awaiting fresh reviewer approval |
+| G1 branch base | G0 #110 用户验收并合并为 `813f1e2`；G1 栈经逐级 base 更新、普通 merge、最新 head review/CI，最终合并至 main `3390adf` |
 | Integration worktree initial typecheck | PASS with Node v22.22.2 |
 | Integration worktree initial unit suite | PASS: 38 files / 727 tests, Foundry on PATH |
 | Integration worktree initial Vite site build | PASS: pnpm build |
@@ -31,6 +31,7 @@ G1 release-candidate scope is complete, but acceptance is explicitly gated on us
 | PR URL/head/review/checks | Stacked G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) → API [#112](https://github.com/MushroomDAO/CometENS/pull/112) → SDK Foundation [#113](https://github.com/MushroomDAO/CometENS/pull/113) → SDK runtime [#114](https://github.com/MushroomDAO/CometENS/pull/114) → CI [#115](https://github.com/MushroomDAO/CometENS/pull/115) → Demo/acceptance [#111](https://github.com/MushroomDAO/CometENS/pull/111). #115 enables full GitHub workflow for `goal/**` PR bases; GitHub results remain separately required. User G1 acceptance remains pending |
 | GitHub full CI evidence | [PR #115](https://github.com/MushroomDAO/CometENS/pull/115) `test` + `cla-check` SUCCESS; [PR #111](https://github.com/MushroomDAO/CometENS/pull/111) `test` + `cla-check` SUCCESS at head `9306f21` ([Actions run 39413890122](https://github.com/MushroomDAO/CometENS/actions/runs/39413890122)). Later doc-only head revisions need their own fresh GitHub check before acceptance or merge |
 | Latest reviewer-fix evidence | #111 head `afd13ca` fixes tracked `.env.example`, demo startup validation, and self-host/mainnet documentation; `test` and `cla-check` SUCCESS ([run 39458665006](https://github.com/MushroomDAO/CometENS/actions/runs/39458665006)). #110 merged to main as `813f1e2`, #112 merged to main as `2734474`; #113 updated to new `main` as `4416b10`, full CI SUCCESS, fresh review requested |
+| GitHub completed landing, 2026-10-21 | G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) `813f1e2`; API [#112](https://github.com/MushroomDAO/CometENS/pull/112) `2734474`; EIP-712 [#113](https://github.com/MushroomDAO/CometENS/pull/113) `40ee340`; SDK package [#114](https://github.com/MushroomDAO/CometENS/pull/114) `d5fc687`; CI [#115](https://github.com/MushroomDAO/CometENS/pull/115) `b434750`; Demo/acceptance [#111](https://github.com/MushroomDAO/CometENS/pull/111) `3390adf`. All PRs APPROVED and CI green at their final reviewed heads before merge. [Final #111 test run 39535343002](https://github.com/MushroomDAO/CometENS/actions/runs/39535343002) SUCCESS at head `848b71c` |
 | User G1 acceptance | PENDING — G2 blocked |
 
 ## Live testnet read-only evidence, 2026-10-20
@@ -45,4 +46,4 @@ CI tests using mocks and local Foundry are not independent confirmation of an ac
 
 ## Audit and dependencies
 
-G0 #110 has merged into main. G1 stacked PRs must be retargeted/rechecked in order, without bypassing GitHub review requirements or using outdated approvals. G2 may start only after this document records confirmed G1 acceptance by the user.
+G0 and all G1 implementation PRs have merged into main with GitHub approval and tests. **This is technical delivery, not a user acceptance event.** G1 remains `READY_FOR_ACCEPTANCE`; G2 may start only after this document records confirmed G1 acceptance by the user.

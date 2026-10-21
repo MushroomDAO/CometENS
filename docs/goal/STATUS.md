@@ -1,11 +1,11 @@
 # CometENS Goal — 当前交付状态与用户验收回执
 
-记录日期：2026-10-20（Asia/Bangkok）；完整步骤见 [MILESTONES.md](MILESTONES.md)。状态值：`PENDING`、`IN_PROGRESS`、`READY_FOR_ACCEPTANCE`、`ACCEPTED`、`BLOCKED`。
+记录更新：2026-10-21（Asia/Bangkok）；完整步骤见 [MILESTONES.md](MILESTONES.md)。状态值：`PENDING`、`IN_PROGRESS`、`READY_FOR_ACCEPTANCE`、`ACCEPTED`、`BLOCKED`。
 
 | Goal | 当前状态 | 下一解锁事件 |
 |---|---|---|
 | **G0 原文/架构/计划基线** | `ACCEPTED`（用户 2026-10-20 明确验收，GitHub [PR #110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED 并合并，merge `813f1e2`） | G1 已解锁 |
-| G1 独立 SDK | `READY_FOR_ACCEPTANCE`（2026-10-20；[PR #111](https://github.com/MushroomDAO/CometENS/pull/111) 已创建） | 需 GitHub CI/review 和用户 G1 验收；此前不得进入 G2 |
+| G1 独立 SDK | `READY_FOR_ACCEPTANCE`（六个 G0/G1 PR 均获 GitHub APPROVED、CI 绿并合入 main，最终 merge `3390adf`；**用户 G1 验收仍待确认**） | 等用户确认 G1；此前不得进入 G2 |
 | G2 per-parent owner / 可撤销 operator | `BLOCKED` | G1 被用户验收 |
 | G3 ENSv1 兼容 + ENSv2 适配及 7×24 解析 | `BLOCKED` | G2 被用户验收 |
 | G4 开源自部署、demo、UI 安全 | `BLOCKED` | G3 被用户验收 |
@@ -31,7 +31,7 @@
 - [x] G0 [#110](https://github.com/MushroomDAO/CometENS/pull/110) 已 APPROVED、cla/test SUCCESS，并合并至 main（2026-10-20，813f1e2）
 - [x] G1 API [#112](https://github.com/MushroomDAO/CometENS/pull/112) 在 main 更新后的 head `4686808` 获重新 APPROVE、cla/test SUCCESS 并合并（`2734474`）
 - [x] Demo [#111](https://github.com/MushroomDAO/CometENS/pull/111) 两项 Medium 已修复，head `afd13ca` 本地 811 测试和 GitHub 完整 test/CLA 通过
-- [ ] G1 #113→#114→#115→#111 尚须逐级符合 GitHub 最新 head 审批/CI 再合并；#113 已基于 main 同步为 `4416b10` 并请求重新审核
+- [x] #113 → #114 → #115 → #111 已逐级按最新 head 审批、完整 GitHub CI 和 mergeable 门禁合入 main；合并提交分别为 `40ee340`、`d5fc687`、`b434750`、`3390adf`
 - [ ] 用户明确 G1 验收（完成后才进入 G2）
 
 验收证据与例外见 [G1-ACCEPTANCE.md](G1-ACCEPTANCE.md)，[PROGRESS.md](PROGRESS.md)。

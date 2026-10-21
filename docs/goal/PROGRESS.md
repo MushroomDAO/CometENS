@@ -141,6 +141,14 @@ Demo #111 原 head 8d8d1be 被要求修改两项 Medium：`.env.example` 被 `.g
 
 按照已冻结的 Goal 模式，**用户尚未验收 G1，G2 BLOCKED**；在上游审核门仍未解除时停止进一步 G1 合并，但所有可修改内容均已修复、测试、提交并推送。
 
+### 2026-10-21 · G1 全部 PR Approved + CI 通过并合入 main
+
+接续上一轮检查，PR #113 在新 head `4416b10` 通过完整 GitHub CI 并获 clestons 重新 APPROVE，合入 main `40ee3400fe0afeae49a5ba6fa3f88e3b11a70aa6`。#114 更新 main 后 CI 首次真实失败：`pnpm check:typecheck-scope` 量到 5 errors，预算仍为 6；将已在 #115 审查过的预算降级提交 `ec206e2` 以 `cherry-pick -x` 正常提交至 #114（新 head `9ffda25`），满足“SDK 类型改进与同 PR 预算收紧”规则。再次获得新 head APPROVE/CI 全绿后合入 main `d5fc6874bde1594657ba67db46638f853dc0f2ef`。无 rebase/force。
+
+#115 相应调整为主要交付 `goal/**` 的 pull_request CI 触发，普通合并最新 SDK 父分支并消解 `docs/agent/tasks.md` 中同内容改动；最新 head `ab6934b` 完整 CI 全绿、重新 APPROVE，合入 main `b434750a57a0e8153b03b9308a7a60320ef6b480`。最后 #111 普通合并最新 main，head `848b71c` 与此前获 APPROVE 的 `df0cacb` 整棵 Git 文件树一致（`git diff --stat` 为空），再次获得独立 [CI run 39535343002](https://github.com/MushroomDAO/CometENS/actions/runs/39535343002) SUCCESS、CLA SUCCESS、最新 head APPROVE 及 MERGEABLE 后合并为 `3390adfc2d09d004c7362615eaaa7b6370075be3`。
+
+**当前恢复结论**：G0 已被用户验收且合并；G1 独立 SDK、API/CCIP 安全、EIP-712、Vanilla Demo、自部署文档和 CI 均已 GitHub 落地。此前完整本地验证 `811 PASS / 9 预设在线部署测试跳过`，GitHub 最终 head `848b71c` 的工作流整体绿。没有执行 npm publish 或主网部署。G1 **业务验收仍未收到**，STATUS 保持 `READY_FOR_ACCEPTANCE`；G2 继续 `BLOCKED`。独立工作树已逐个检查：合并的 G1 部分工作树移除，子模块 worktree 在确认子模块均干净后才安全强制移除；当前 main 工作树更新到 `3390adf`。本条为合并后的额外文档 checkpoint，不能当作用户验收 G1。
+
 ## 下一次进入项目时
 
 1. 首先读取本文件、[STATUS.md](STATUS.md)、[SECURITY-AND-SERVICE.md](SECURITY-AND-SERVICE.md)、[MILESTONES.md](MILESTONES.md)、G0 原始目标 [VISION.md](VISION.md)；随后核对实时 Git branch/head/PR/CI 和未提交改动。
