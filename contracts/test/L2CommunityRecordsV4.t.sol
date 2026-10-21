@@ -90,7 +90,7 @@ contract L2CommunityRecordsV4Test is Test {
         a.grantOperator(operator, 4, 1, uint64(block.timestamp + 1));
         // Unknown bits must fail even if the issuer bit is ALSO present.
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
-        a.grantOperator(operator, 5, 1, uint64(block.timestamp + 1));
+        a.grantOperator(operator, 9, 1, uint64(block.timestamp + 1));
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
         a.grantOperator(controller, 1, 1, uint64(block.timestamp + 1));
         vm.expectRevert(L2CommunityRecordsV4.InvalidInput.selector);
