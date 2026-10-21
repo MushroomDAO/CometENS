@@ -101,6 +101,7 @@ describe('G2.5 independent bounded V4 operator event audit', () => {
   it('rejects speculative ranges, oversized block scan, malformed CLI flags and unpinned profiles', async () => {
     const { client } = fixture()
     await expect(auditV4OperatorEvents(client, profile, 1n, 3n)).rejects.toThrow('unfinalized-range')
+    await expect(auditV4OperatorEvents(client, profile, 1, 2)).rejects.toThrow('invalid-block-range')
     await expect(auditV4OperatorEvents(client, profile, 1n, 65n)).rejects.toThrow('invalid-block-range')
     await expect(auditV4OperatorEvents(client, { ...profile, expectedCodeHash: h(0) }, 1n, 2n)).rejects.toThrow()
     await expect(auditV4OperatorEvents(client, { ...profile, chainId: 10 }, 1n, 2n)).rejects.toThrow()

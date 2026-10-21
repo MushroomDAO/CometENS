@@ -100,7 +100,8 @@ export async function auditV4OperatorEvents(client, profile, fromBlock, toBlock,
   const verified = validateProfile(profile)
   profile = verified.profile
   const parentNode = verified.parentNode
-  if (fromBlock < 1n || toBlock < fromBlock || toBlock - fromBlock >= LIMIT_BLOCKS) fail('invalid-block-range')
+  if (typeof fromBlock !== 'bigint' || typeof toBlock !== 'bigint' ||
+      fromBlock < 1n || toBlock < fromBlock || toBlock - fromBlock >= LIMIT_BLOCKS) fail('invalid-block-range')
   if (operator && !isAddress(operator, { strict: true })) fail('invalid-operator')
   if (await client.getChainId() !== 11155420) fail('wrong-chain')
   const finalized = await client.getBlock({ blockTag: 'finalized' })
