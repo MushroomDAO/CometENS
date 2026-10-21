@@ -73,6 +73,22 @@ function mock(o = {}) {
 }
 
 describe('G2 legacy native handoff observations — never sovereign receipt', () => {
+  it('actually issues concurrent finalized codehash reads without an authorization or write race', async () => {
+    const { client } = mock()
+    const original = client.getBytecode
+    let active = 0
+    let maxActive = 0
+    client.getBytecode = async (opts) => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      try { return await original(opts) } finally { active-- }
+    }
+    const result = await verifyLegacyNativeHandoff({ ...args, client })
+    expect(maxActive).toBe(3)
+    expect(result.sovereignReceipt).toBe(false)
+  })
+
   it('observes member and PCC/CU in one finalized pinned chain snapshot', async () => {
     const { client, calls } = mock()
     const result = await verifyLegacyNativeHandoff({ ...args, client })

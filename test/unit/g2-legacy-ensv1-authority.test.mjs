@@ -105,7 +105,7 @@ describe('G2 legacy ENSv1 Sepolia evidence (read only; never sovereignty)', () =
   it('refuses stale finalized head, missing bytecode, incorrect pins and absent parent', async () => {
     for (const options of [
       { timestamp: now - 10_000n },
-      { timestamp: now + 121n },
+      { timestamp: BigInt(Math.floor(Date.now() / 1000)) + 121n },
     ]) {
       await expect(auditLegacyEnsV1({ ...expected, client: fake(options).client }))
         .rejects.toMatchObject({ code: 'stale-finality' })
