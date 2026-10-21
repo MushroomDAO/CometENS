@@ -22,17 +22,19 @@ Official [wrapped states](https://docs.ens.domains/wrapper/states/),
 ERC721 custody, wrapper ERC1155 owner and registration expiry/grace. **These are
 legacy contracts**; Sepolia's current app/UniversalResolver use ENSv2.
 
-Observed runtime keccak256 from one public Sepolia RPC at `finalized` on
-2026-10-21 (reverify independently before local testing; no default deployed
-CometENS source is supplied):
+Reported runtime keccak256 observations from **one public Sepolia RPC** at
+`finalized` on 2026-10-21 (not independently reproduced by the reviewer;
+reverify using a separate RPC and verified source before any deployment):
 
 | Registry | `0x8ea75f170914f04bc7c03e47eac3d7f5763f40fd5337cad69011bc7245fcf4a0` |
 | NameWrapper | `0x3f3544614f9feb7eb861df74d7864b601920b47f78c4ad9cabc3c587387b48d6` |
 | BaseRegistrar | `0xd7d99a683d1a24fb7af58dc110335c71e09931208bff8b4e00d7787749d030ed` |
 
-The contract constructor pins these runtime hashes, fixed chainId
-`11155111`, the legacy addresses, a strict ASCII-LDH `.eth` 2LD parent
-label and explicit OP destination inbox (address only). Every operation checks
+The constructor requires **caller-supplied** hashes equal the on-chain runtime
+codehashes **at constructor execution**; it does not hardcode or attest the
+three observed values above and this PR has no deployment script. It pins chainId
+`11155111`, legacy contract addresses, a strict ASCII-LDH `.eth` 2LD parent
+label and an explicit OP inbox (address only). Every operation checks
 all three runtime hashes **on L1 execution**, and reads native state:
 ENS Registry `owner(parentNode) == NameWrapper`; registrar
 `ownerOf(labelhash) == NameWrapper`; wrapper `ownerOf(parentNode)` and

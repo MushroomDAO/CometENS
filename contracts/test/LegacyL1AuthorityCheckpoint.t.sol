@@ -178,6 +178,108 @@ contract LegacyL1AuthorityCheckpointTest is Test {
         assertEq(sequence, 3);
     }
 
+    function test_directNativeTransferSameControllerWithoutFreezeBumpsEpoch() public {
+        // Core safety invariant: observeLoss() is NOT required before rebind.
+        // Removing "previous.nativeHolder != holder" must make this test fail.
+        bind(holder, controller, 3600);
+        LegacyWrapperFixture(WRAPPER).setHolder(nextHolder);
+        // Previous OP lease may still be active until delivery/expiry (MANAGED only).
+        (, address previousController, uint64 originalEpoch, uint64 originalSequence,,) = source.state();
+        assertEq(previousController, controller);
+        assertEq(originalEpoch, 1);
+        assertEq(originalSequence, 1);
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.Unauthorized.selector);
+        source.bindOrRenew(controller, 3600);
+        // Same controller, new native holder, NO loss-observation in between.
+        bind(nextHolder, controller, 3600);
+        (address nativeHolder, address active, uint64 epoch, uint64 sequence,,) = source.state();
+        assertEq(nativeHolder, nextHolder);
+        assertEq(active, controller);
+        assertEq(epoch, 2); // required to revoke all old-epoch operator grants in OP
+        assertEq(sequence, 2);
+        assertFalse(source.observeLoss());
+        (,, epoch, sequence,,) = source.state();
+        assertEq(epoch, 2);
+        assertEq(sequence, 2);
+    }
+
+    function test_constructorRejectsInvalidLabelsAndUnknownPins() public {
+        for (uint256 i; i < 2; i++) {
+            string memory valid = i == 0 ? "abc" : "ab-c-d";
+            LegacyL1AuthorityCheckpoint sample =
+                new LegacyL1AuthorityCheckpoint(valid, INBOX, ENS.codehash, WRAPPER.codehash, REGISTRAR.codehash);
+            assertTrue(sample.parentNode() != bytes32(0));
+        }
+        string[9] memory bad = [
+            "",
+            "-abc",
+            "abc-",
+            "ab--c",
+            "xn--abc",
+            "Abc",
+            "a.b",
+            unicode"café",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ];
+        for (uint256 i; i < bad.length; i++) {
+            vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+            new LegacyL1AuthorityCheckpoint(bad[i], INBOX, ENS.codehash, WRAPPER.codehash, REGISTRAR.codehash);
+        }
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        new LegacyL1AuthorityCheckpoint("community", address(0), ENS.codehash, WRAPPER.codehash, REGISTRAR.codehash);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        new LegacyL1AuthorityCheckpoint("community", INBOX, bytes32(0), WRAPPER.codehash, REGISTRAR.codehash);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        new LegacyL1AuthorityCheckpoint("community", INBOX, ENS.codehash, bytes32(0), REGISTRAR.codehash);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        new LegacyL1AuthorityCheckpoint("community", INBOX, ENS.codehash, WRAPPER.codehash, bytes32(0));
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.ContractIdentityChanged.selector);
+        new LegacyL1AuthorityCheckpoint("community", INBOX, bytes32(uint256(1)), WRAPPER.codehash, REGISTRAR.codehash);
+    }
+
+    function test_registryAndWrapperCodehashMismatchFailClosedAtEachBind() public {
+        vm.etch(ENS, hex"60006000fd");
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.ContractIdentityChanged.selector);
+        source.bindOrRenew(controller, 3600);
+        vm.etch(ENS, address(new LegacyRegistryFixture()).code);
+        vm.etch(WRAPPER, hex"60006000fd");
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.ContractIdentityChanged.selector);
+        source.bindOrRenew(controller, 3600);
+    }
+
+    function test_wrapperOwnerAndGetDataMustAgreeAndZeroControllerRejected() public {
+        LegacyWrapperFixture(WRAPPER).setMismatch(true);
+        (address checkedHolder,) = source.currentAuthority();
+        assertEq(checkedHolder, address(0));
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidNativeAuthority.selector);
+        source.bindOrRenew(controller, 3600);
+        LegacyWrapperFixture(WRAPPER).setMismatch(false);
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        source.bindOrRenew(address(0), 3600);
+    }
+
+    function test_unboundCancellationRejectedAndFrozenObservationIsIdempotent() public {
+        vm.prank(holder);
+        vm.expectRevert(LegacyL1AuthorityCheckpoint.InvalidInput.selector);
+        source.cancel();
+        assertFalse(source.observeLoss());
+        bind(holder, controller, 3600);
+        LegacyWrapperFixture(WRAPPER).setHolder(nextHolder);
+        assertTrue(source.observeLoss());
+        (,, uint64 epoch, uint64 sequence,,) = source.state();
+        assertEq(epoch, 2);
+        assertEq(sequence, 2);
+        assertFalse(source.observeLoss());
+        (,, epoch, sequence,,) = source.state();
+        assertEq(epoch, 2);
+        assertEq(sequence, 2);
+    }
+
     function test_transferObservedFreezeOnlyOnL1AndOldHolderCannotRebind() public {
         bind(holder, controller, 7200);
         LegacyWrapperFixture(WRAPPER).setHolder(nextHolder);
