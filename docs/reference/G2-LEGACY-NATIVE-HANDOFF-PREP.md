@@ -1,0 +1,19 @@
+# G2.7 — legacy ENSv1 unsigned native handoff preparation
+
+> **Preparation only; not a native handoff receipt, current ENSv2 authorization, or an executed transaction.** This development script handles a *legacy ENSv1 on Sepolia* direct child of a single lowercase ASCII `.eth` 2LD. Sepolia's active ENS deployment is ENSv2, so using these old legacy addresses cannot prove today's ENSv2 ownership or resolution.
+
+`scripts/prepare-legacy-ensv1-handoff.mjs` exports `prepareLegacyEnsV1Handoff(options)`. It returns an unsigned `from/to/data/value` for the legacy `NameWrapper.setSubnodeRecord(parentNode,label,member,resolver,ttl,fuses,expiry)` method, with `ttl=0` and child `PARENT_CANNOT_CONTROL | CANNOT_UNWRAP`. The intended parent owner must inspect this calldata and independently sign/broadcast with their wallet, **if they consciously choose to**, after separately verifying the official chain environment. The script contains **no signer, keys, wallet client, submit or auto-transaction operation**.
+
+### Read preconditions
+
+The caller supplies a public read client and all of: `parentName` (e.g. `community.eth`), child `label`, exact expected wrapped parent owner, member owner, resolver, requested `expiry` as bigint UNIX seconds, and **three independently verified deployed runtime keccak256 codehashes** (`expectedRegistryCodeHash`, `expectedWrapperCodeHash`, `expectedRegistrarCodeHash`). Unknown or malformed pins are rejected; do not guess or copy the reference examples as real hashes.
+
+The reader requires chain ID **11155111**, a recently finalized block and bytecode at that one block for the legacy Registry `0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e`, Wrapper `0x0635513f179D50A207757E05759CbD106d7dFcE8`, and `.eth` Base Registrar `0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85`. It then checks `Registry.owner(parent)==Wrapper`, actual `Wrapper.getData(parent).holder==expectedParentOwner` and parent `CANNOT_UNWRAP` burned, and requires `Registry.owner(child)==zero` (never silently replace an existing child). It reads Registrar `nameExpires(labelhash(parent 2LD))`, **not merely wrapper expiry including the 90-day grace period**: registrar registration must have at least 24 hours left and requested child expiry must end at least 24 hours **before** registrar expiration and not exceed wrapper expiry. Wrong network, untrusted code, grace/expiry, parent ownership or existing child fail closed. Only ASCII-LDH labels are accepted, not full ENSIP-15 normalizer support.
+
+### What this deliberately does NOT prove
+
+- A prepared transaction might revert or never be signed. **No child exists merely because `data` was encoded**. Ownership, PCC/CU, expiry and finality must be **re-read from actual L1 finalized chain state after execution** by an independent verifier before a name can even be considered for native handoff acceptance.
+- It does not verify the member's resolver actually serves records, an EIP-1271 recipient's ERC1155 receiver compatibility, contract proxy/admin/upgrade risk, parent ERC1155 `setApprovalForAll`, multisig participation, or the holder's ability to sign at transaction time. Future transaction-time state might differ from the finalized snapshot. No `SOVEREIGN` classification may use the prepared draft.
+- It does not implement ENSv2 EAC registry role transfer or migration. It never changes legacy ENSv1 resolver pointers, broadcasts L1/OP writes, deploys code or publishes npm artifacts.
+
+Reference: [ENS legacy testnet deployments](https://docs.ens.domains/learn/deployments/), [NameWrapper expiry/grace](https://docs.ens.domains/wrapper/expiry/), [NameWrapper native subname operations](https://docs.ens.domains/wrapper/creating-subname-registrar/), [G2 acceptance matrix](../goal/G2-ACCEPTANCE.md). All G2.7 native execution / receipt / privilege checks remain `PENDING`.
