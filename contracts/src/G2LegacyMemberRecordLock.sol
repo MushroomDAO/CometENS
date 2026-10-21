@@ -39,6 +39,8 @@ contract G2LegacyMemberRecordLock {
     bytes32 public immutable registrarCodeHash;
 
     bool public locked;
+    // Original opt-in caller, not a guarantee that the member still owns the name.
+    address public lockedBy;
     address private lockedAddr;
     bytes private lockedContenthash;
     string private lockedTextKey;
@@ -128,6 +130,7 @@ contract G2LegacyMemberRecordLock {
         ) revert InvalidMemberOrExpired();
 
         locked = true; // CEI, no external callbacks thereafter.
+        lockedBy = msg.sender;
         lockedAddr = value;
         lockedContenthash = contenthashValue;
         lockedTextKey = key;

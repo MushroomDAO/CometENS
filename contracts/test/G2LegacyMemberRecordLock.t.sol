@@ -98,6 +98,7 @@ contract G2LegacyMemberRecordLockTest is Test {
     function test_realMemberCanIrreversiblyLockDataWithoutAnyAdminEdit() public {
         _lock();
         assertTrue(store.locked());
+        assertEq(store.lockedBy(), member);
         assertEq(store.addr(CHILD), member);
         assertEq(store.contenthash(CHILD), hex"e30102");
         assertEq(store.text(CHILD, "name"), "Alice");
@@ -150,6 +151,31 @@ contract G2LegacyMemberRecordLockTest is Test {
         vm.prank(member);
         vm.expectRevert(G2LegacyMemberRecordLock.InvalidMemberOrExpired.selector);
         store.lock(member, hex"", "name", "X");
+        // Existing tests covered CU-only; PCC-only must also reject.
+        wrapper.setData(uint256(CHILD), member, uint32(1 << 16), uint64(block.timestamp + 7 days));
+        vm.prank(member);
+        vm.expectRevert(G2LegacyMemberRecordLock.InvalidMemberOrExpired.selector);
+        store.lock(member, hex"", "name", "X");
+    }
+
+    function test_childExpiryExactlyOneDayFailsAndOneSecondAfterSucceeds() public {
+        wrapper.setData(uint256(CHILD), member, 1 | (1 << 16), uint64(block.timestamp + 1 days));
+        vm.prank(member);
+        vm.expectRevert(G2LegacyMemberRecordLock.InvalidMemberOrExpired.selector);
+        store.lock(member, hex"", "name", "X");
+        wrapper.setData(uint256(CHILD), member, 1 | (1 << 16), uint64(block.timestamp + 1 days + 1));
+        _lock();
+    }
+
+    function test_childRegistrarOneDayMarginIsInclusiveAndAboveRejected() public {
+        uint64 childExpiry = uint64(block.timestamp + 7 days);
+        wrapper.setData(uint256(CHILD), member, 1 | (1 << 16), childExpiry);
+        registrar.setData(LABEL_ID, address(wrapper), uint256(childExpiry) + 1 days - 1);
+        vm.prank(member);
+        vm.expectRevert(G2LegacyMemberRecordLock.InvalidMemberOrExpired.selector);
+        store.lock(member, hex"", "name", "X");
+        registrar.setData(LABEL_ID, address(wrapper), uint256(childExpiry) + 1 days);
+        _lock();
     }
 
     function test_registryRegistrarOrWrappedCustodyMismatchRefused() public {
