@@ -33,7 +33,7 @@ function fake(config = {}) {
           ? head - 1n : head,
         hash: config.secondHeadHash && calls.filter(c => c[1]?.blockTag === 'finalized').length > 1
           ? config.secondHeadHash : hash,
-        timestamp: config.stale ? 1n : now - 30n,
+        timestamp: config.stale ? 1n : config.future ? now + 121n : now - 30n,
       }
       return { number: config.badNumber && arg.blockNumber === head ? head - 1n : arg.blockNumber,
         hash: config.blockHashes?.[arg.blockNumber.toString()] ?? hash,
@@ -42,7 +42,7 @@ function fake(config = {}) {
     async getBytecode({ address, blockNumber }) {
       calls.push(['code', address, blockNumber])
       if (config.rpcError) throw new Error('https://provider.invalid/?secret=SECRET')
-      return config.badCode ? '0x6000' : code
+      return config.badCode || config.badCodeAt?.includes(blockNumber.toString()) ? '0x6000' : code
     },
     async request(arg) {
       calls.push(['request', arg])
@@ -83,13 +83,70 @@ describe('G2 L1 finalized event backfill trigger (not native ENS authority)', ()
 
   it('rejects bad chain, stale finalized head, runtime hash and wrong source/topic/log provenance', async () => {
     for (const cfg of [
-      { chainId: 1 }, { stale: true }, { badCode: true },
+      { chainId: 1 }, { stale: true }, { future: true }, { badCode: true },
       { logs: [event({ address: '0x2222222222222222222222222222222222222222' })] },
       { logs: [event({ topic: hash2 })] },
       { logs: [event({ blockNumber: 160n })] },
       { logs: [event({ removed: true })] },
     ]) {
       await expect(scanFinalizedL1Events({ client: fake(cfg).io, manifest: manifest() })).rejects.toBeTruthy()
+    }
+  })
+
+  it('requires pinned bytecode at BOTH ends, even if the other endpoint remains valid', async () => {
+    for (const badCodeAt of [['128'], ['150']]) {
+      await expect(scanFinalizedL1Events({ client: fake({ badCodeAt }).io, manifest: manifest() }))
+        .rejects.toMatchObject({ code: 'untrusted-source-code' })
+    }
+  })
+
+  it('fails closed on invalid range bounds, unfinalized starts and prior cursor from before start', async () => {
+    await expect(scanFinalizedL1Events({ client: fake().io, manifest: {
+      ...manifest(), startBlock: '151',
+    } })).rejects.toMatchObject({ code: 'start-not-finalized' })
+    const prior = (await scanFinalizedL1Events({ client: fake().io, manifest: manifest() })).cursor
+    for (const altered of [
+      { ...prior, block: { ...prior.block, number: '127' } },
+      { ...prior, block: { ...prior.block, number: '151' } },
+    ]) {
+      await expect(scanFinalizedL1Events({ client: fake().io, manifest: manifest(),
+        previous: altered })).rejects.toMatchObject({ code: 'finalized-conflict' })
+    }
+  })
+
+  it('rejects inconsistent hashes for logs in the same block and invalid raw index or topic', async () => {
+    const differentTx = `0x${'56'.repeat(32)}`
+    for (const logs of [
+      [event(), event({ transactionHash: differentTx, blockHash: hash2, logIndex: 1 })],
+      [{ ...event(), logIndex: '-0x1' }],
+      [{ ...event(), logIndex: 'not-a-hex-number' }],
+      [{ ...event(), blockHash: '0x123' }],
+      [{ ...event(), topics: 'not-an-array' }],
+    ]) {
+      await expect(scanFinalizedL1Events({ client: fake({ logs }).io, manifest: manifest() }))
+        .rejects.toMatchObject({ code: expect.stringMatching(/invalid-log-batch|conflicting-log-block/) })
+    }
+  })
+
+  it('rejects oversize log batches rather than silently dropping events', async () => {
+    const logs = Array.from({ length: 513 }, (_, index) => event({ logIndex: index }))
+    await expect(scanFinalizedL1Events({ client: fake({ logs }).io, manifest: manifest() }))
+      .rejects.toMatchObject({ code: 'invalid-log-batch' })
+  })
+
+  it('enforces source and topic ceilings, no zero codehash and no repeated selectors', async () => {
+    const source = manifest().sources[0]
+    for (const sources of [
+      [{ ...source, codeHash: `0x${'00'.repeat(32)}` }],
+      [{ ...source, topics: [topic, topic] }],
+      [{ ...source, topics: Array.from({ length: 25 }, (_, i) =>
+        `0x${i.toString(16).padStart(64, '0')}`) }],
+      Array.from({ length: 13 }, (_, i) => ({ ...source,
+        address: `0x${(i + 1).toString(16).padStart(40, '0')}` })),
+    ]) {
+      await expect(scanFinalizedL1Events({ client: fake().io, manifest: {
+        ...manifest(), sources,
+      } })).rejects.toMatchObject({ code: 'invalid-manifest' })
     }
   })
 

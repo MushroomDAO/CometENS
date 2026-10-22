@@ -166,7 +166,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (!data.length || data.length > limit) fail('invalid-input-file')
       return JSON.parse(data.toString())
     }
-    const manifest = await load(args[1], 16384)
+    // A valid 12-source/24-topics-per-source manifest can exceed 16 KiB.
+    const manifest = await load(args[1], 65536)
     const previous = args.length === 4 ? await load(args[3], 4096) : null
     if (args.length === 4 && previous == null) fail('invalid-previous')
     const result = await scanFinalizedL1Events({
