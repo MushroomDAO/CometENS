@@ -170,6 +170,20 @@ contract G2LegacyL1NativeResultRelayTest is Test {
         assertEq(uint8(status), uint8(G2NativeIssueResultInbox.Status.PENDING));
     }
 
+    function test_delayedOPResultAfterNameExpiryRemainsHistoricalObservationOnly() public {
+        _issue(requester, 1); // Native issuance happened while L1 child expiry was future.
+        bytes memory payload = messenger.payload();
+        vm.warp(uint256(childExpiry) + 1);
+        vm.chainId(11155420);
+        vm.prank(inbox.OP_MESSENGER());
+        (bool ok,) = INBOX.call(payload);
+        assertTrue(ok, "historical result should not be discarded solely due to L2 delay");
+        (,,,,,G2NativeIssueResultInbox.Status status,) = inbox.requests(queuedId);
+        assertEq(uint8(status), uint8(G2NativeIssueResultInbox.Status.OBSERVED));
+        assertFalse(inbox.finalizedL1IssuanceVerified());
+        assertFalse(inbox.sovereignReceipt());
+    }
+
     function test_nativeIssueValidationGasBoundsAndWrongChainFailClosed() public {
         vm.prank(holder);
         vm.expectRevert(G2LegacyL1NativeResultRelay.InvalidRelayRequest.selector);
