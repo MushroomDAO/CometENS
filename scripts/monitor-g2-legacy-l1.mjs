@@ -84,6 +84,14 @@ export async function monitorLegacyL1({
         (height === BigInt(prior.block.number) && !same(block.hash, prior.block.hash)))) {
       fail('finalized-conflict')
     }
+    if (prior && height > BigInt(prior.block.number)) {
+      // Check the previously claimed finalized ancestor before advancing the cursor.
+      // A single RPC is still an observation, not an independent consensus proof.
+      const ancestor = await client.getBlock({ blockNumber: BigInt(prior.block.number) })
+      if (ancestor?.number !== BigInt(prior.block.number) ||
+          !same(ancestor.hash, prior.block.hash) ||
+          ancestor.timestamp?.toString() !== prior.block.timestamp) fail('finalized-conflict')
+    }
     const finalizedAgain = await client.getBlock({ blockTag: 'finalized' })
     if (typeof finalizedAgain.number !== 'bigint' || finalizedAgain.number < height ||
         (finalizedAgain.number === height && !same(finalizedAgain.hash, block.hash))) {
@@ -120,33 +128,50 @@ export async function monitorLegacyL1({
   }
 }
 
+/**
+ * The executable CLI uses exactly this runner. Injectable read/client allow an
+ * offline CLI-to-BASELINE test without a live RPC or additional test-only flags.
+ */
+export async function runLegacyMonitorCommand({
+  args, rpc, loadPrevious = readFile,
+  makeClient = (url) => createPublicClient({ chain: sepolia, transport: http(url) }),
+}) {
+  const mandatory = ['--mode', '--parent', '--child', '--registry-codehash', '--wrapper-codehash']
+  if (!Array.isArray(args) || (args.length !== 10 && args.length !== 12)) fail('invalid-arguments')
+  const parsed = new Map()
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i]
+    const value = args[i + 1]
+    if (![...mandatory, '--previous'].includes(flag) || parsed.has(flag) ||
+        typeof value !== 'string' || !value || value.startsWith('--')) fail('invalid-arguments')
+    parsed.set(flag, value)
+  }
+  if (!mandatory.every(flag => parsed.has(flag)) ||
+      parsed.size !== mandatory.length + Number(parsed.has('--previous'))) fail('invalid-arguments')
+  if (parsed.get('--mode') !== 'legacy-ensv1-sepolia') fail('invalid-mode')
+  let url
+  try { url = new URL(rpc) } catch { fail('public-rpc-required') }
+  if (url.protocol !== 'https:' || url.username || url.password ||
+      url.search || url.hash || url.pathname !== '/') fail('public-rpc-required')
+  let previous = null
+  if (parsed.has('--previous')) {
+    let raw
+    try { raw = await loadPrevious(parsed.get('--previous')) } catch { fail('invalid-previous') }
+    if (!raw || raw.length === 0 || raw.length > 8192) fail('invalid-previous')
+    try { previous = JSON.parse(raw.toString()) } catch { fail('invalid-previous') }
+    if (previous == null) fail('invalid-previous')
+  }
+  return monitorLegacyL1({
+    client: makeClient(rpc), parentName: parsed.get('--parent'), childName: parsed.get('--child'),
+    expectedRegistryCodeHash: parsed.get('--registry-codehash'),
+    expectedWrapperCodeHash: parsed.get('--wrapper-codehash'), previous,
+  })
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const flags = ['--mode', '--parent', '--child', '--registry-codehash', '--wrapper-codehash']
-    const args = process.argv.slice(2)
-    const supplied = args.filter((s) => s.startsWith('--'))
-    if (args.length !== 10 && args.length !== 12) fail('invalid-arguments')
-    if (supplied.some((flag) => ![...flags, '--previous'].includes(flag)) ||
-        new Set(supplied).size !== supplied.length || supplied.length * 2 !== args.length ||
-        !flags.every((flag) => supplied.includes(flag))) fail('invalid-arguments')
-    const get = (flag) => args[args.indexOf(flag) + 1]
-    if (get('--mode') !== 'legacy-ensv1-sepolia') fail('invalid-mode')
-    const rpc = process.env.COMETENS_PUBLIC_SEPOLIA_RPC
-    const url = rpc && new URL(rpc)
-    if (!url || url.protocol !== 'https:' || url.username || url.password ||
-        url.search || url.hash || url.pathname !== '/') fail('public-rpc-required')
-    const priorFile = get('--previous')
-    let previous = null
-    if (priorFile) {
-      const raw = await readFile(priorFile)
-      if (raw.length > 8192) fail('previous-too-large')
-      previous = JSON.parse(raw.toString())
-    }
-    const result = await monitorLegacyL1({
-      client: createPublicClient({ chain: sepolia, transport: http(rpc) }),
-      parentName: get('--parent'), childName: get('--child'),
-      expectedRegistryCodeHash: get('--registry-codehash'),
-      expectedWrapperCodeHash: get('--wrapper-codehash'), previous,
+    const result = await runLegacyMonitorCommand({
+      args: process.argv.slice(2), rpc: process.env.COMETENS_PUBLIC_SEPOLIA_RPC,
     })
     process.stdout.write(JSON.stringify(result, null, 2) + '\n')
   } catch (error) {

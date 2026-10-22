@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { keccak256, namehash } from 'viem'
 import {
-  monitorLegacyL1, MonitorFailure,
+  monitorLegacyL1, MonitorFailure, runLegacyMonitorCommand,
 } from '../../scripts/monitor-g2-legacy-l1.mjs'
 import {
   ENSV1_SEPOLIA_REGISTRY, ENSV1_SEPOLIA_WRAPPER,
@@ -46,7 +46,11 @@ function fake(options = {}) {
           return { number: second ? (options.secondFinalizedNumber ?? blockNumber) : blockNumber,
             hash: second ? (options.secondHash ?? hash) : hash, timestamp }
         }
-        expect(arg).toEqual({ blockNumber })
+        if (arg.blockNumber !== blockNumber) {
+          expect(arg).toEqual({ blockNumber: 54321n })
+          return { number: 54321n, hash: options.ancestorHash ?? hash1,
+            timestamp: options.ancestorTimestamp ?? now - 60n }
+        }
         return { number: options.returnedNumber ?? blockNumber, hash, timestamp: options.returnedTimestamp ?? timestamp }
       },
       async getBytecode({ address, blockNumber: at }) {
@@ -122,6 +126,15 @@ describe('G2 finalized-RPC legacy L1 monitor (never an authority gate)', () => {
     expect(unwrapped.cursor.observed.childWrappedHolder).toBeNull()
   })
 
+  it('detects missing parent lock and the childExpiry exactly at the expiry boundary', async () => {
+    const noParentLock = await monitorLegacyL1({ ...expected, client: fake({ parentFuses: 0 }).client })
+    expect(noParentLock.status).toBe('AT_RISK')
+    expect(noParentLock.cursor.observed.parentLocked).toBe(false)
+    const boundary = await monitorLegacyL1({ ...expected, client: fake({ childExpiry: now }).client })
+    expect(boundary.status).toBe('AT_RISK')
+    expect(boundary.cursor.observed.childEmancipated).toBe(false)
+  })
+
   it('permits same-block derived expiry changes but rejects same-block raw-state changes', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Number(now * 1000n))
     try {
@@ -150,6 +163,17 @@ describe('G2 finalized-RPC legacy L1 monitor (never an authority gate)', () => {
     }
   })
 
+  it('rechecks the prior finalized block hash and timestamp when advancing height', async () => {
+    const previous = (await monitorLegacyL1({ ...expected, client: fake().client })).cursor
+    for (const options of [
+      { blockNumber: 54322n, hash: hash2, ancestorHash: hash2 },
+      { blockNumber: 54322n, hash: hash2, ancestorTimestamp: now - 61n },
+    ]) {
+      await expect(monitorLegacyL1({ ...expected, previous, client: fake(options).client }))
+        .rejects.toMatchObject({ code: 'finalized-conflict' })
+    }
+  })
+
   it('rejects moving finalized head and mismatched numbered block identity', async () => {
     for (const options of [
       { returnedNumber: 123n },
@@ -165,6 +189,11 @@ describe('G2 finalized-RPC legacy L1 monitor (never an authority gate)', () => {
   it('rejects changed identity, missing proof pins, malformed cursor and wrong chain', async () => {
     const previous = (await monitorLegacyL1({ ...expected, client: fake().client })).cursor
     for (const modified of [
+      { ...previous, version: 'old' },
+      { ...previous, source: 'WORKER_ASSERTION' },
+      { ...previous, chainId: 1 },
+      { ...previous, parentName: 'other.eth' },
+      { ...previous, pins: { ...previous.pins, registry: hash2 } },
       { ...previous, childName: 'bob.community.eth' },
       { ...previous, pins: { ...previous.pins, wrapper: hash2 } },
       { ...previous, block: { ...previous.block, hash: 'bad' } },
@@ -185,6 +214,47 @@ describe('G2 finalized-RPC legacy L1 monitor (never an authority gate)', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: 'unverifiable-source' })
       expect(error.message).not.toContain('SECRET')
+    }
+  })
+
+  it('runs the real CLI argument pipeline to BASELINE without --previous, then accepts a valid cursor', async () => {
+    const args = ['--mode', 'legacy-ensv1-sepolia', '--parent', parentName,
+      '--child', childName, '--registry-codehash', expected.expectedRegistryCodeHash,
+      '--wrapper-codehash', expected.expectedWrapperCodeHash]
+    const first = await runLegacyMonitorCommand({
+      args, rpc: 'https://rpc.example/', makeClient: () => fake().client,
+      loadPrevious: async () => { throw new Error('unexpected previous read') },
+    })
+    expect(first.status).toBe('BASELINE')
+    const result = await runLegacyMonitorCommand({
+      args: [...args, '--previous', 'previous.json'], rpc: 'https://rpc.example/',
+      makeClient: () => fake({ blockNumber: 54322n, hash: hash2 }).client,
+      loadPrevious: async path => {
+        expect(path).toBe('previous.json')
+        return Buffer.from(JSON.stringify(first.cursor))
+      },
+    })
+    expect(result.status).toBe('UNCHANGED')
+  })
+
+  it('CLI rejects explicit null/empty/truncated cursor and missing --previous value', async () => {
+    const args = ['--mode', 'legacy-ensv1-sepolia', '--parent', parentName,
+      '--child', childName, '--registry-codehash', expected.expectedRegistryCodeHash,
+      '--wrapper-codehash', expected.expectedWrapperCodeHash]
+    for (const raw of ['null', '', 'undefined', '{}']) {
+      await expect(runLegacyMonitorCommand({
+        args: [...args, '--previous', 'previous.json'], rpc: 'https://rpc.example/',
+        makeClient: () => fake().client, loadPrevious: async () => Buffer.from(raw),
+      })).rejects.toMatchObject({ code: 'invalid-previous' })
+    }
+    for (const broken of [
+      [...args, '--previous'],
+      [...args, '--previous', '--mode'],
+      [...args, '--previous', ''],
+    ]) {
+      await expect(runLegacyMonitorCommand({
+        args: broken, rpc: 'https://rpc.example/',
+      })).rejects.toMatchObject({ code: 'invalid-arguments' })
     }
   })
 })
