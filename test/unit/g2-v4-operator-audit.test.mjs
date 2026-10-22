@@ -201,6 +201,34 @@ describe('G2.5 independent bounded V4 operator event audit', () => {
     }
   })
 
+  it('checks per-receipt 512 external logs without relying on V4 eth_getLogs limit', async () => {
+    for (const count of [512, 513]) {
+      const { client } = fixture()
+      client.getBlock = async ({ blockTag }) => blockTag ? { number: 1n, hash: h(1) } :
+        { number: 1n, hash: h(1), transactions: [h(101)] }
+      client.getLogs = async () => []
+      client.request = async () => [{ blockNumber: '0x1', blockHash: h(1),
+        transactionHash: h(101), transactionIndex: '0x0', status: '0x1',
+        logs: Array.from({ length: count }, (_, i) => ({ address: b, blockNumber: '0x1',
+          blockHash: h(1), transactionHash: h(101), transactionIndex: '0x0',
+          logIndex: `0x${i.toString(16)}`, topics: [h(1)], data: '0x', removed: false })) }]
+      if (count === 513) await expect(auditV4OperatorEvents(client, profile, 1n, 1n)).rejects.toThrow('inconsistent-receipt')
+      else expect((await auditV4OperatorEvents(client, profile, 1n, 1n)).events).toEqual([])
+    }
+  })
+
+  it('checks receipt count cap independent of block transaction cap', async () => {
+    const { client } = fixture()
+    client.getBlock = async ({ blockTag }) => blockTag ? { number: 1n, hash: h(1) } :
+      { number: 1n, hash: h(1), transactions: [h(101)] }
+    client.getLogs = async () => []
+    client.request = async () => Array.from({ length: 513 }, (_, i) => ({
+      blockNumber: '0x1', blockHash: h(1), transactionHash: h(101 + i),
+      transactionIndex: `0x${i.toString(16)}`, status: '0x1', logs: [],
+    }))
+    await expect(auditV4OperatorEvents(client, profile, 1n, 1n)).rejects.toThrow('rpc-volume-limit')
+  })
+
   it('rejects speculative ranges, oversized block scan, malformed CLI flags and unpinned profiles', async () => {
     const { client } = fixture()
     await expect(auditV4OperatorEvents(client, profile, 1n, 3n)).rejects.toThrow('unfinalized-range')
