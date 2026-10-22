@@ -32,6 +32,10 @@ contract NativeIssueWrapperFixture {
     uint32 public parentFuses = 1;
     bool public returnWrongNode;
     bool public omitFuses;
+    bool public forgeChildDataOwner;
+    bool public forgeChildTokenOwner;
+    bool public forgeChildExpiry;
+    bool public forgeChildRegistryOwner;
     mapping(address => mapping(address => bool)) public approved;
     mapping(bytes32 => Child) public children;
 
@@ -60,18 +64,34 @@ contract NativeIssueWrapperFixture {
         omitFuses = enabled;
     }
 
+    function setForgedPostconditions(bool dataOwner, bool tokenOwner, bool expiry, bool registryOwner) external {
+        forgeChildDataOwner = dataOwner;
+        forgeChildTokenOwner = tokenOwner;
+        forgeChildExpiry = expiry;
+        forgeChildRegistryOwner = registryOwner;
+    }
+
+    function seedUnregisteredChild(bytes32 node, address childOwner, uint64 expiry) external {
+        children[node] = Child(childOwner, 0, expiry);
+    }
+
     function setApprovalForAll(address operator, bool enabled) external {
         approved[msg.sender][operator] = enabled;
     }
 
     function ownerOf(uint256 id) external view returns (address) {
         if (id == uint256(parent)) return holder;
-        return children[bytes32(id)].holder;
+        address childHolder = children[bytes32(id)].holder;
+        return forgeChildTokenOwner && childHolder != address(0) ? address(0xBAD) : childHolder;
     }
 
     function getData(uint256 id) external view returns (address, uint32, uint64) {
         if (id == uint256(parent)) return (holder, parentFuses, parentExpiry);
         Child memory child = children[bytes32(id)];
+        if (child.holder != address(0)) {
+            if (forgeChildDataOwner) child.holder = address(0xBAD);
+            if (forgeChildExpiry) child.expiry -= 1;
+        }
         return (child.holder, child.fuses, child.expiry);
     }
 
@@ -88,7 +108,9 @@ contract NativeIssueWrapperFixture {
         require(approved[holder][msg.sender], "NameWrapper operator missing");
         node = keccak256(abi.encodePacked(p, keccak256(bytes(label))));
         require(NativeIssueRegistryFixture(registry).owner(node) == address(0), "already issued");
-        NativeIssueRegistryFixture(registry).setRecord(node, address(this), resolver);
+        NativeIssueRegistryFixture(registry).setRecord(
+            node, forgeChildRegistryOwner ? address(0xBAD) : address(this), resolver
+        );
         children[node] = Child(member, omitFuses ? 0 : fuses, expiry);
         if (member.code.length > 0) {
             require(
@@ -113,6 +135,16 @@ contract TransferDuringMintReceiver is INativeIssueReceiver {
     function onERC1155Received(address, address, uint256, uint256, bytes calldata) external returns (bytes4) {
         NativeIssueWrapperFixture(wrapper).setHolder(newOwner);
         return this.onERC1155Received.selector;
+    }
+}
+
+contract NativeIssueGuardHarness is G2LegacyL1NativeActionGuard {
+    constructor(address source, bytes32 hash, bytes32 parent)
+        G2LegacyL1NativeActionGuard(source, hash, parent)
+    {}
+
+    function check() external onlyCurrentLegacyNativeHolder returns (bool) {
+        return true;
     }
 }
 
@@ -244,5 +276,91 @@ contract G2LegacyL1NativeIssuerProofTest is Test {
         vm.prank(oldHolder);
         vm.expectRevert(G2LegacyL1NativeIssuerProof.NativeIssueMismatch.selector);
         issuer.issueNative("wrong-node", member, resolver, uint64(block.timestamp + 2 days));
+    }
+
+    function test_postWriteAssertionsRejectEachIndependentForgedENSField() public {
+        // Each malicious wrapper response changes exactly one property. When
+        // its corresponding issuer condition is removed, no other check saves it.
+        for (uint256 i; i < 4; ++i) {
+            wrapper.setForgedPostconditions(i == 0, i == 1, i == 2, i == 3);
+            string memory label = i == 0 ? "wrong-data-owner" : i == 1 ? "wrong-token-owner"
+                : i == 2 ? "short-expiry" : "wrong-registry-owner";
+            bytes32 node = keccak256(abi.encodePacked(PARENT, keccak256(bytes(label))));
+            vm.prank(oldHolder);
+            vm.expectRevert(G2LegacyL1NativeIssuerProof.NativeIssueMismatch.selector);
+            issuer.issueNative(label, member, resolver, uint64(block.timestamp + 2 days));
+            assertEq(registry.owner(node), address(0), "bad mint must rollback");
+        }
+    }
+
+    function test_vacancyChecksIndependentlyRejectOrphanOwnerResidualExpiryAndRegistryOccupation() public {
+        uint64 requestedExpiry = uint64(block.timestamp + 2 days);
+        bytes32 orphanNode = keccak256(abi.encodePacked(PARENT, keccak256("orphan")));
+        wrapper.seedUnregisteredChild(orphanNode, member, 0);
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative("orphan", member, resolver, requestedExpiry);
+
+        bytes32 residualNode = keccak256(abi.encodePacked(PARENT, keccak256("residual")));
+        wrapper.seedUnregisteredChild(residualNode, address(0), requestedExpiry + 1);
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative("residual", member, resolver, requestedExpiry);
+
+        bytes32 occupiedNode = keccak256(abi.encodePacked(PARENT, keccak256("occupied")));
+        registry.setRecord(occupiedNode, newHolder, address(0));
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative("occupied", member, resolver, requestedExpiry);
+    }
+
+    function test_issueExpiryBoundaryMemberAndLabelDigitLimits() public {
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative("now", member, resolver, uint64(block.timestamp));
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative("zero", address(0), resolver, uint64(block.timestamp + 2 days));
+
+        bytes memory maxLabel = new bytes(63);
+        bytes memory overlong = new bytes(64);
+        for (uint256 i; i < 64; ++i) {
+            overlong[i] = "a";
+            if (i < 63) maxLabel[i] = "a";
+        }
+        _issue(oldHolder, string(maxLabel), member); // exact 63-byte upper boundary
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeIssuerProof.InvalidNativeIssue.selector);
+        issuer.issueNative(string(overlong), member, resolver, uint64(block.timestamp + 2 days));
+        bytes32 digitNode = _issue(oldHolder, "member1", member);
+        assertEq(wrapper.ownerOf(uint256(digitNode)), member, "ASCII digit must stay valid");
+    }
+
+    function test_guardChecksZeroHolderAndExpiredAuthorityAndWrongChainAtConstruction() public {
+        LegacyL1AuthorityCheckpoint source = issuer.nativeSource();
+        NativeIssueGuardHarness harness = new NativeIssueGuardHarness(
+            address(source), address(source).codehash, PARENT
+        );
+        vm.mockCall(
+            address(source), abi.encodeWithSelector(LegacyL1AuthorityCheckpoint.currentAuthority.selector),
+            abi.encode(oldHolder, uint64(block.timestamp))
+        );
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeActionGuard.NotCurrentNativeHolder.selector);
+        harness.check();
+        vm.clearMockedCalls();
+
+        vm.mockCall(
+            address(source), abi.encodeWithSelector(LegacyL1AuthorityCheckpoint.currentAuthority.selector),
+            abi.encode(address(0), uint64(block.timestamp + 1 days))
+        );
+        vm.prank(address(0));
+        vm.expectRevert(G2LegacyL1NativeActionGuard.NotCurrentNativeHolder.selector);
+        harness.check();
+        vm.clearMockedCalls();
+
+        vm.chainId(11155420);
+        vm.expectRevert(G2LegacyL1NativeActionGuard.WrongChain.selector);
+        new NativeIssueGuardHarness(address(source), address(source).codehash, PARENT);
     }
 }
