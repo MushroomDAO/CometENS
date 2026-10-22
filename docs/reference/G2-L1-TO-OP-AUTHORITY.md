@@ -2,6 +2,8 @@
 
 > Design contract, 2026-10-21. **Not implemented, deployed, independently audited, or accepted.** G1 is ACCEPTED; G2 remains IN_PROGRESS and all G2-ACCEPTANCE rows remain PENDING. This file is not a cross-chain proof or a `SOVEREIGN` receipt.
 
+**2026-10-22 architectural update:** the native issuance direction is [L2 request → current-authorization L1 native transaction → authenticated OP result mirror](G2-ZK-MERKLE-L1-AUTHORITY-DECISION.md), with an event-triggered and periodic L1 Monitor for subsequent state convergence. The `MANAGED` lease below remains a documented bounded prototype, **not** a replacement for native issuance or a passing G2.4 transfer-time safety proof.
+
 ## Security decision
 
 An authenticated Ethereum L1→Optimism message proves that a particular L1 authority statement *was submitted* on L1. It does **not** prove that the original L1 owner remains the owner *now*. ENS parent ownership can transfer, expire or migrate before the message reaches OP. OP cannot synchronously read an arbitrary newly finalized Ethereum state without an independently verified state proof. Thus a message-only OP authority is **MANAGED with a finite lease**, never continuous native ENS sovereignty.
