@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { encodeAbiParameters, encodeEventTopics, keccak256, namehash, parseAbiItem, parseAbiParameters } from 'viem'
-import { ENS, observeLegacyResolver } from '../../scripts/observe-g2-legacy-resolver.mjs'
+import { ENS, observeLegacyResolver, runLegacyResolverObservation } from '../../scripts/observe-g2-legacy-resolver.mjs'
 
 const a = '0x1111111111111111111111111111111111111111'
 const b = '0x2222222222222222222222222222222222222222'
@@ -29,23 +33,43 @@ function fixture() {
     expired: false, badFuse: false, wrongCommit: false, wrongLockedBy: false,
     wrongRecord: false, wrongText: false, badEvent: false, missingEvent: false,
     movedBlock: false, unfinalized: false, wrongHistoricalCode: false, badReceipt: false,
-    missingHistoricalTransaction: false, wrongContenthash: false }
+    missingHistoricalTransaction: false, wrongContenthash: false,
+    strictPinnedReads: true, finalizedCalls: 0, chainCalls: 0,
+    changedChainAtEnd: false, revertedFinality: false, changedFinalizedHash: false,
+    parentRegistryOwner: ENS.wrapper, childRegistryOwner: ENS.wrapper,
+    registrarOwner: ENS.wrapper, parentHolder: a, parentFuses: 1n,
+    parentExpiry: null, childHolder: b, tokenHolder: b,
+    childFuses: 65537n, childExpiry: null, registrarExpiry: null,
+    lockedValue: true, wrongStoreRegistryHash: false,
+    duplicateEvent: false, wrongLogBlockHash: false, removedLog: false,
+    receiptAboveHeight: false }
   const block = { number: 100n, hash: h(100), timestamp: 1000000n }
   const lockBlock = { number: 95n, hash: h(95), timestamp: 999900n }
-  const log = () => ({ address: d, blockHash: lockBlock.hash, blockNumber: 95n,
-    transactionHash: profile.lockTransactionHash, logIndex: 0n, removed: false,
+  state.parentExpiry = block.timestamp + 30n * 86400n
+  state.childExpiry = block.timestamp + 7n * 86400n
+  state.registrarExpiry = block.timestamp + 20n * 86400n
+  const log = () => ({ address: d, blockHash: state.wrongLogBlockHash ? h(9999) : lockBlock.hash, blockNumber: 95n,
+    transactionHash: profile.lockTransactionHash, logIndex: 0n, removed: state.removedLog,
     topics: encodeEventTopics({ abi: [event], eventName: 'MemberRecordsLocked',
       args: { node, member: state.badEvent ? a : c } }),
     data: encodeAbiParameters([{ type: 'bytes32' }], [commitment]),
   })
   const client = {
-    async getChainId() { return state.chain },
+    async getChainId() { state.chainCalls++; return state.changedChainAtEnd && state.chainCalls > 1 ? 1 : state.chain },
     async getBlock({ blockTag, blockNumber }) {
-      if (blockTag) return { ...block, number: state.unfinalized ? 90n : 100n }
+      if (blockTag) {
+        state.finalizedCalls++
+        return { ...block,
+          number: state.unfinalized || (state.revertedFinality && state.finalizedCalls > 1) ? 90n : 100n,
+          hash: state.changedFinalizedHash && state.finalizedCalls > 1 ? h(8765) : block.hash }
+      }
       if (blockNumber === 95n) return { ...lockBlock, transactions: state.missingHistoricalTransaction ? [] : [profile.lockTransactionHash] }
       return { ...block, hash: state.movedBlock ? h(333) : block.hash }
     },
     async getCode({ address, blockNumber }) {
+      if (state.strictPinnedReads && blockNumber !== (address.toLowerCase() === d.toLowerCase() && blockNumber === 95n ? 95n : 100n)) {
+        throw new Error('getCode not pinned to requested block')
+      }
       if (address.toLowerCase() === d.toLowerCase()) {
         if (state.wrongStoreCode || (blockNumber === 95n && state.wrongHistoricalCode)) return '0x6005'
         return storeCode
@@ -55,17 +79,18 @@ function fixture() {
       if (address.toLowerCase() === ENS.registrar.toLowerCase()) return registrarCode
       throw new Error('wrong address')
     },
-    async readContract({ address, functionName, args }) {
+    async readContract({ address, functionName, args, blockNumber }) {
+      if (state.strictPinnedReads && blockNumber !== 100n) throw new Error('readContract not pinned to finalized block')
       const who = address.toLowerCase()
       if (who === d.toLowerCase()) {
         switch (functionName) {
           case 'parentNode': return state.wrongParent ? h(7) : parent
           case 'node': return state.wrongChild ? h(7) : node
           case 'parentLabelId': return BigInt(keccak256('0x636f6d6d756e697479'))
-          case 'registryCodeHash': return profile.codehashes.registry
+          case 'registryCodeHash': return state.wrongStoreRegistryHash ? h(9) : profile.codehashes.registry
           case 'wrapperCodeHash': return profile.codehashes.wrapper
           case 'registrarCodeHash': return profile.codehashes.registrar
-          case 'locked': return true
+          case 'locked': return state.lockedValue
           case 'lockedBy': return state.wrongLockedBy ? a : c
           case 'recordCommitment': return state.wrongCommit ? h(8) : commitment
           case 'addr': return state.wrongRecord ? b : records.addr
@@ -75,25 +100,26 @@ function fixture() {
       }
       if (who === ENS.registry.toLowerCase()) {
         if (functionName === 'resolver') return state.wrongPointer ? a : d
-        if (functionName === 'owner') return ENS.wrapper
+        if (functionName === 'owner') return args[0] === parent ? state.parentRegistryOwner : state.childRegistryOwner
       }
       if (who === ENS.wrapper.toLowerCase()) {
-        if (functionName === 'ownerOf') return state.wrongHolder ? a : b
+        if (functionName === 'ownerOf') return state.wrongHolder ? a : state.tokenHolder
         if (functionName === 'getData') {
-          if (args[0] === BigInt(parent)) return [a, 1n, block.timestamp + 30n * 86400n]
-          return [state.wrongHolder ? a : b, state.badFuse ? 1n : 65537n,
-            state.expired ? block.timestamp + 86400n : block.timestamp + 7n * 86400n]
+          if (args[0] === BigInt(parent)) return [state.parentHolder, state.parentFuses, state.parentExpiry]
+          return [state.wrongHolder ? a : state.childHolder, state.badFuse ? 1n : state.childFuses,
+            state.expired ? block.timestamp + 86400n : state.childExpiry]
         }
       }
       if (who === ENS.registrar.toLowerCase()) {
-        if (functionName === 'ownerOf') return ENS.wrapper
-        if (functionName === 'nameExpires') return block.timestamp + 20n * 86400n
+        if (functionName === 'ownerOf') return state.registrarOwner
+        if (functionName === 'nameExpires') return state.registrarExpiry
       }
       throw new Error(`unmocked ${functionName}`)
     },
     async getTransactionReceipt() {
       return { status: state.badReceipt ? 'reverted' : 'success', transactionHash: profile.lockTransactionHash,
-        blockNumber: 95n, blockHash: h(95), logs: state.missingEvent ? [] : [log()] }
+        blockNumber: state.receiptAboveHeight ? 101n : 95n, blockHash: h(95),
+        logs: state.missingEvent ? [] : state.duplicateEvent ? [log(), { ...log(), logIndex: 1n }] : [log()] }
     },
   }
   return { client, state }
@@ -131,6 +157,80 @@ describe('G2.9 finalized legacy ENSv1 resolver bundle observation', () => {
     const { client, state } = fixture()
     state[key] = key === 'chain' ? 1 : true
     await expect(observeLegacyResolver(client, profile)).rejects.toThrow()
+  })
+
+  it('pins EVERY readContract and getCode call to the selected block, including historic bytecode', async () => {
+    const { client } = fixture()
+    const observed = { reads: [], codes: [] }
+    const read = client.readContract
+    const getCode = client.getCode
+    client.readContract = async (params) => {
+      observed.reads.push(params.blockNumber)
+      return read(params)
+    }
+    client.getCode = async (params) => {
+      observed.codes.push([params.address, params.blockNumber])
+      return getCode(params)
+    }
+    await observeLegacyResolver(client, profile)
+    expect(observed.reads).toHaveLength(20)
+    expect(new Set(observed.reads)).toEqual(new Set([100n]))
+    expect(observed.codes.filter(([, height]) => height === 100n)).toHaveLength(4)
+    expect(observed.codes.filter(([, height]) => height === 95n)).toHaveLength(1)
+  })
+
+  const margin = 1000000n + 86400n
+  const healthyChild = 1000000n + 7n * 86400n
+  it.each([
+    ['registrar within grace', 'registrarExpiry', margin, 'registrar-expired-or-grace'],
+    ['child near registrar expiry', 'registrarExpiry', healthyChild + 86400n - 1n, 'child-too-close-to-registrar-expiry'],
+    ['child exceeds parent', 'parentExpiry', healthyChild - 1n, 'child-outlives-parent'],
+    ['parent reaches margin', 'parentExpiry', margin, 'parent-expired'],
+    ['child reaches margin', 'childExpiry', margin, 'child-expired'],
+    ['zero parent holder', 'parentHolder', '0x0000000000000000000000000000000000000000', 'invalid-parent-holder'],
+    ['parent unwrap fuse missing', 'parentFuses', 0n, 'parent-unwrap-fuse-missing'],
+    ['child PCC missing', 'childFuses', 1n, 'child-fuses-missing'],
+    ['child wrapped holder mismatch', 'childHolder', c, 'child-holder-mismatch'],
+    ['child ERC1155 ownerOf mismatch', 'tokenHolder', c, 'wrapper-token-holder-mismatch'],
+    ['Registry parent owner diverted', 'parentRegistryOwner', c, 'native-custody-mismatch'],
+    ['Registry child owner diverted', 'childRegistryOwner', c, 'native-custody-mismatch'],
+    ['BaseRegistrar owner diverted', 'registrarOwner', c, 'native-custody-mismatch'],
+    ['store lock not set', 'lockedValue', false, 'lock-state-mismatch'],
+    ['duplicated historic lock event', 'duplicateEvent', true, 'missing-or-duplicate-lock-event'],
+    ['log block hash disagreement', 'wrongLogBlockHash', true, 'invalid-lock-log'],
+    ['removed historic event', 'removedLog', true, 'invalid-lock-log'],
+    ['receipt after observation block', 'receiptAboveHeight', true, 'invalid-lock-receipt'],
+    ['finalized height rolls back', 'revertedFinality', true, 'block-drift'],
+    ['finalized hash changes at same height', 'changedFinalizedHash', true, 'block-drift'],
+    ['chain changes before final output', 'changedChainAtEnd', true, 'block-drift'],
+    ['store built-in registry codehash changes', 'wrongStoreRegistryHash', true, 'store-identity-mismatch'],
+  ])('rejects individually observable %s', async (_, key, value, expected) => {
+    const { client, state } = fixture()
+    state[key] = value
+    await expect(observeLegacyResolver(client, profile)).rejects.toThrow(expected)
+  })
+
+  it('rejects reserved third/fourth hyphen on both labels, plain HTTP and account credentials', async () => {
+    const { client } = fixture()
+    await expect(observeLegacyResolver(client, { ...profile, childLabel: 'ab--def' })).rejects.toThrow('invalid-profile')
+    await expect(observeLegacyResolver(client, { ...profile, parentName: 'ab--def.eth' })).rejects.toThrow('invalid-profile')
+    const dir = await mkdtemp(join(tmpdir(), 'g29-observer-'))
+    try {
+      const file = join(dir, 'profile.json')
+      await writeFile(file, JSON.stringify(profile))
+      await expect(runLegacyResolverObservation(['--profile', file], { rpcUrl: 'http://rpc.invalid' })).rejects.toThrow('invalid-rpc')
+      await expect(runLegacyResolverObservation(['--profile', file], { rpcUrl: 'https://user:secret@rpc.example' })).rejects.toThrow('invalid-rpc')
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+
+  it('CLI exits 0 for help and 1 for unavailable profile, without printing secrets', () => {
+    const entry = new URL('../../scripts/observe-g2-legacy-resolver.mjs', import.meta.url).pathname
+    const help = execFileSync(process.execPath, [entry, '--help'], { encoding: 'utf8' })
+    expect(help).toContain('Read-only ENSv1')
+    const failure = spawnSync(process.execPath, [entry, '--profile', '/missing-safe-observer-profile.json'], { encoding: 'utf8' })
+    expect(failure.status).toBe(1)
+    expect(failure.stderr).toContain('Legacy resolver observation failed')
+    expect(failure.stderr).not.toContain('/missing-safe-observer-profile.json')
   })
 
   it('rejects getter based profile injection and snapshots nested records before asynchronous reads', async () => {

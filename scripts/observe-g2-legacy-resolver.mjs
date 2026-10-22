@@ -97,11 +97,16 @@ export async function observeLegacyResolver(client, input) {
   const holder = await read(ENS.wrapper, 'ownerOf', ['uint256'], ['address'], [BigInt(p.childNode)])
   const registrarExpiry = bigint(await read(ENS.registrar, 'nameExpires', ['uint256'], ['uint256'], [p.parentLabelId]))
   const margin = bigint(finalized.timestamp) + 86400n
-  if (!same(child[0], p.expectedHolder) || !same(holder, p.expectedHolder) ||
-      !isAddress(parent[0]) || same(parent[0], '0x0000000000000000000000000000000000000000') ||
-      (bigint(parent[1]) & 1n) === 0n || (bigint(child[1]) & 65537n) !== 65537n ||
-      bigint(parent[2]) <= margin || bigint(child[2]) <= margin || registrarExpiry <= margin ||
-      bigint(child[2]) > bigint(parent[2]) || bigint(child[2]) + 86400n > registrarExpiry) fail('holder-fuses-or-expiry-mismatch')
+  if (!same(child[0], p.expectedHolder)) fail('child-holder-mismatch')
+  if (!same(holder, p.expectedHolder)) fail('wrapper-token-holder-mismatch')
+  if (!isAddress(parent[0]) || same(parent[0], '0x0000000000000000000000000000000000000000')) fail('invalid-parent-holder')
+  if ((bigint(parent[1]) & 1n) === 0n) fail('parent-unwrap-fuse-missing')
+  if ((bigint(child[1]) & 65537n) !== 65537n) fail('child-fuses-missing')
+  if (bigint(parent[2]) <= margin) fail('parent-expired')
+  if (bigint(child[2]) <= margin) fail('child-expired')
+  if (registrarExpiry <= margin) fail('registrar-expired-or-grace')
+  if (bigint(child[2]) > bigint(parent[2])) fail('child-outlives-parent')
+  if (bigint(child[2]) + 86400n > registrarExpiry) fail('child-too-close-to-registrar-expiry')
   if (await read(p.contract, 'locked', [], ['bool']) !== true ||
       !same(await read(p.contract, 'lockedBy', [], ['address']), p.expectedLockedBy) ||
       !same(await read(p.contract, 'recordCommitment', [], ['bytes32']), p.recordCommitment)) fail('lock-state-mismatch')
@@ -135,9 +140,11 @@ export async function observeLegacyResolver(client, input) {
   }
   if (matches !== 1) fail('missing-or-duplicate-lock-event')
   const again = await client.getBlock({ blockNumber: height })
+  const finalAgain = await client.getBlock({ blockTag: 'finalized' })
   if (!same(again.hash, finalized.hash) || bigint(again.number) !== height ||
       await client.getChainId() !== 11155111 ||
-      bigint((await client.getBlock({ blockTag: 'finalized' })).number) < height) fail('block-drift')
+      bigint(finalAgain.number) < height ||
+      (bigint(finalAgain.number) === height && !same(finalAgain.hash, finalized.hash))) fail('block-drift')
   return {
     chainId: 11155111, blockNumber: height, blockHash: finalized.hash, blockTimestamp: finalized.timestamp,
     parentNode: p.parentNode, childNode: p.childNode, contract: p.contract,
