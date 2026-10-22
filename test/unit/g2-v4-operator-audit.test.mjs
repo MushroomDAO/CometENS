@@ -171,6 +171,36 @@ describe('G2.5 independent bounded V4 operator event audit', () => {
     await expect(auditV4OperatorEvents(client, profile, 1n, 2n)).rejects.toThrow('invalid-event-encoding')
   })
 
+  it.each(['block-transactions', 'receipt-count', 'getLogs-count', 'receipt-logs'])('enforces independent 512 cap on %s with coherent RPC data', async (target) => {
+    for (const count of [512, 513]) {
+      const { client } = fixture()
+      const isTx = target === 'block-transactions' || target === 'receipt-count'
+      const txs = Array.from({ length: isTx ? count : 1 }, (_, i) => h(10000 + i))
+      const entries = Array.from({ length: isTx ? count : count }, (_, i) => ({
+        ...grant(a, 1, i), transactionHash: isTx ? txs[i] : txs[0],
+        transactionIndex: isTx ? i : 0, logIndex: i,
+      }))
+      client.getBlock = async ({ blockTag }) => blockTag ? { number: 1n, hash: h(1) } :
+        { number: 1n, hash: h(1), transactions: txs }
+      client.getLogs = async () => target === 'receipt-count' ? [] : entries
+      client.request = async () => (isTx ? txs : [txs[0]]).map((tx, i) => ({
+        blockNumber: '0x1', blockHash: h(1), transactionHash: tx,
+        transactionIndex: `0x${i.toString(16)}`, status: '0x1',
+        logs: (target === 'receipt-count' ? [] : isTx ? [entries[i]] : entries).map((log) => ({
+          ...log, blockNumber: '0x1', transactionIndex: `0x${log.transactionIndex.toString(16)}`,
+          logIndex: `0x${log.logIndex.toString(16)}`,
+        })),
+      }))
+      if (count === 513) {
+        const kind = isTx ? 'inconsistent-block' : 'rpc-volume-limit'
+        await expect(auditV4OperatorEvents(client, profile, 1n, 1n)).rejects.toThrow(kind)
+      } else {
+        const result = await auditV4OperatorEvents(client, profile, 1n, 1n)
+        expect(result.events).toHaveLength(target === 'receipt-count' ? 0 : 512)
+      }
+    }
+  })
+
   it('rejects speculative ranges, oversized block scan, malformed CLI flags and unpinned profiles', async () => {
     const { client } = fixture()
     await expect(auditV4OperatorEvents(client, profile, 1n, 3n)).rejects.toThrow('unfinalized-range')
