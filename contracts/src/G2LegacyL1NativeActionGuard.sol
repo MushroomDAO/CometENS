@@ -18,13 +18,13 @@ abstract contract G2LegacyL1NativeActionGuard {
     error NotCurrentNativeHolder();
 
     constructor(address source, bytes32 expectedSourceHash, bytes32 expectedParent) {
-        if (block.chainid != LEGACY_L1_CHAIN_ID) revert WrongChain();
         if (source == address(0) || expectedSourceHash == bytes32(0) || expectedParent == bytes32(0)) {
             revert InvalidNativeSource();
         }
         nativeSource = LegacyL1AuthorityCheckpoint(source);
         sourceRuntimeHash = expectedSourceHash;
         parentNode = expectedParent;
+        // The same _verifySource check also guards every executed native action.
         _verifySource();
     }
 

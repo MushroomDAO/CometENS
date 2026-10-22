@@ -75,6 +75,11 @@ callbacks require separate auditing: an unrelated granted operator or an
 L1 transfer performed *inside* a downstream callback can bypass a naive
 "checked earlier" call pattern. No platform admin/escrow/owner is installed.
 
+The separate [local ENSv1 native atomic issuance proof](./G2-L1-NATIVE-ATOMIC-ISSUE-PROOF.md)
+now demonstrates `setSubnodeRecord` in a single local L1 transaction with
+pre/post authority checks. It does **not** eliminate the existing OP mint race
+or complete the native deployed ENSv1/ENSv2 acceptance gates.
+
 ## Actual ENSv1 and ENSv2 authority surfaces
 
 **ENSv1 `.eth` wrapped name**: check current Registry owner (the wrapper),
