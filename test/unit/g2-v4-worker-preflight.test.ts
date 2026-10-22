@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { keccak256, type Address, type Hex } from 'viem'
+import { describe, expect, it, vi } from 'vitest'
+import { createPublicClient, custom, encodeErrorResult, keccak256, toFunctionSelector, type Address, type Hex } from 'viem'
+import { optimismSepolia } from 'viem/chains'
 import { preflightV4SignedIssuance, V4PreflightDenied, type V4IssuanceIntent, type V4IssuancePin } from '../../workers/api/src/v4-issuance-preflight'
 import worker from '../../workers/api/src/index'
 
@@ -18,6 +19,7 @@ const intent: V4IssuanceIntent = {
 }
 
 class FakeOp {
+  ccipRead: false | undefined | object = false
   chainId = 11155420
   latest = 40n
   hash = blockHash
@@ -88,6 +90,50 @@ async function denied(promise: Promise<unknown>, code: V4PreflightDenied['code']
 }
 
 describe('G2.6 Worker V4 chain-authoritative read-only boundary', () => {
+  it('M1: denies a real viem CCIP-enabled client BEFORE OffchainLookup can request an attacker URL', async () => {
+    const revertData = encodeErrorResult({
+      abi: [{ type: 'error', name: 'OffchainLookup', inputs: [
+        { name: 'sender', type: 'address' }, { name: 'urls', type: 'string[]' },
+        { name: 'callData', type: 'bytes' }, { name: 'callbackFunction', type: 'bytes4' },
+        { name: 'extraData', type: 'bytes' },
+      ] }],
+      errorName: 'OffchainLookup',
+      args: [contract, ['https://attacker.invalid/{data}'], '0x1234', toFunctionSelector('parentNode()'), '0x'],
+    })
+    let ethCalls = 0
+    const rpcTransport = custom({ request: async ({ method, params }) => {
+      if (method !== 'eth_call') throw new Error('Unexpected RPC')
+      ethCalls++
+      const calldata = (params as [{ data: Hex }])[0].data
+      if (calldata.startsWith(toFunctionSelector('parentNode()'))) return parentNode
+      throw { code: 3, message: 'execution reverted', data: revertData }
+    } })
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ data: '0x1234' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchSpy)
+    try {
+      for (const setting of [undefined, {}] as const) {
+        const client = createPublicClient({ chain: optimismSepolia, transport: rpcTransport, ccipRead: setting })
+        const fake = new FakeOp()
+        fake.ccipRead = client.ccipRead
+        const reader = Object.assign(fake, { simulateContract: client.simulateContract })
+        await denied(run(reader), 'invalid-input')
+      }
+      expect(ethCalls).toBe(0)
+      expect(fetchSpy).not.toHaveBeenCalled()
+
+      // The same viem eth_call with CCIP explicitly OFF must reject the
+      // OffchainLookup revert and never reach the attacker's gateway.
+      const safeClient = createPublicClient({ chain: optimismSepolia, transport: rpcTransport, ccipRead: false })
+      const safe = Object.assign(new FakeOp(), { simulateContract: safeClient.simulateContract })
+      await denied(run(safe), 'rejected')
+      expect(ethCalls).toBeGreaterThan(0) // viem transport may retry a reverted RPC
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
   it('simulates the real issueBySig as named operator at the SAME chain block; returns advisory only', async () => {
     const rpc = new FakeOp()
     const result = await run(rpc)
@@ -225,7 +271,25 @@ describe('G2.6 Worker V4 chain-authoritative read-only boundary', () => {
     await denied(run(rpc, { operator: initialAddr }), 'invalid-input')
     await denied(run(rpc, { signature: '0x' }), 'invalid-input')
     await denied(run(rpc, { nonce: -1n }), 'invalid-input')
+    await denied(run(rpc, { member: initialAddr }), 'invalid-input')
+    await denied(run(rpc, { label: 123 as unknown as string }), 'invalid-input')
+    await denied(run(rpc, { nonce: '7' as unknown as bigint }), 'invalid-input')
+    await denied(run(rpc, { deadline: 1700 as unknown as bigint }), 'invalid-input')
+    await denied(run(rpc, { signature: 'not-hex' as Hex }), 'invalid-input')
+    await denied(run(rpc, { signature: `0x${'aa'.repeat(4100)}` as Hex }), 'invalid-input')
+    await denied(run(rpc, {}, { ...pin, parentNode: initialAddr as Hex }), 'invalid-input')
     expect(rpc.readings).toHaveLength(0)
+  })
+
+  it('accepts uppercase-hex parent pins and exact deadline boundary, but refuses deadline past one day', async () => {
+    const uppercasePin = { ...pin, parentNode: `0x${parentNode.slice(2).toUpperCase()}` as Hex }
+    const atBoundary = new FakeOp()
+    atBoundary.timestamp = intent.deadline
+    expect((await run(atBoundary, {}, uppercasePin)).preflightOnly).toBe(true)
+
+    const outOfWindow = new FakeOp()
+    await denied(run(outOfWindow, { deadline: outOfWindow.timestamp + 86401n }), 'stale')
+    expect(outOfWindow.simulateCalls).toBe(0)
   })
 
   it('never activates a V4 Worker endpoint or falls back to V3 KV nonce claims', async () => {

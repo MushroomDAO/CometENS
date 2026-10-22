@@ -9,6 +9,15 @@ capability, KV dependency or transaction broadcasting. Current `/register`,
 still use their existing best-effort Cloudflare KV `consumeNonce` logic. That
 KV `get`+`put` is eventually consistent across PoPs and is **not atomic**.
 
+**Required RPC client configuration:** construct the viem public client with
+`ccipRead: false`, explicitly. The preflight rejects `ccipRead !== false`
+**before making any RPC or simulated call**. viem otherwise follows ERC-3668
+`OffchainLookup` reverts (including from an ERC721 receiver), fetches an
+untrusted URL and executes a callback without the original pinned block and
+account. Such callbacks can turn a reverted V4 mint into a false positive and
+cause SSRF. The real-viem regression asserts rejection and **zero attacker
+gateway requests**, and a disabled-CCIP client rejects the same revert.
+
 The future V4 caller must supply a trusted OP Sepolia RPC client, verified
 `chainId=11155420`, the independently audited **deployed runtime codehash**,
 contract address and expected per-community `parentNode`. The function rejects
@@ -30,6 +39,7 @@ onchain guards. A failed simulation rejects. It then rereads the latest block;
 a different number or hash rejects even if the simulation succeeded. No KV
 value or previously cached authorization is ever consulted; test coverage
 includes KV incorrectly suggesting that a consumed nonce is available.
+Codehash and `parentNode` bytes32 pins accept either hex letter case.
 
 Success returns only `{scope:'op-application-only', preflightOnly:true,
 atomicExecutionVerified:false, blockNumber, blockHash, issuanceNonce,
@@ -56,6 +66,11 @@ signature bytes, keys and RPC URLs are never copied into errors or logged.
   independently verified. An upgradable proxy's shell codehash can remain
   unchanged while its implementation is replaced; this preflight requires an
   independently audited nonproxy deployment or implementation/admin pinning.
+  The snapshot reads are pinned by `blockNumber`, **not** by an EIP-1898
+  `blockHash` selector. Comparing latest hashes before/after does not rule out
+  load-balanced RPC disagreement or an A→B→A reorganization between calls.
+  A future production client must use a verified consistent RPC / EIP-1898
+  pinned-hash proof or reject unproven state; this result remains advisory.
   This module does not prove Ethereum L1 ownership,
   ENSv2 migration, OP safe/finalized settlement or G2.4 immediate transfer
   revocation. An OP application name and even successful V4 execution cannot

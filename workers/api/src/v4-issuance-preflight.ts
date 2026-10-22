@@ -22,7 +22,7 @@ const OP_SEPOLIA = 11155420
 const SIGNED_ISSUER = 5n // CAP_ISSUE | CAP_SIGNED_ISSUE
 const INITIAL_ADDR = 2n
 const ZERO = '0x0000000000000000000000000000000000000000'
-type Reader = Pick<PublicClient, 'getChainId' | 'getBlock' | 'getBytecode' | 'readContract' | 'simulateContract'>
+type Reader = Pick<PublicClient, 'ccipRead' | 'getChainId' | 'getBlock' | 'getBytecode' | 'readContract' | 'simulateContract'>
 
 export interface V4IssuancePin {
   chainId: 11155420
@@ -59,6 +59,9 @@ export async function preflightV4SignedIssuance(reader: Reader, pin: V4IssuanceP
   // Snapshot untrusted caller objects before the first await. Mutable getters
   // cannot switch operator/nonce/contract between the precheck and eth_call.
   try { pin = { ...pin }; intent = { ...intent } } catch { throw new V4PreflightDenied('invalid-input') }
+  // viem follows OffchainLookup by default, fetching arbitrary callback URLs
+  // and retrying without the pinned block/account. Never permit that path.
+  if (reader?.ccipRead !== false) throw new V4PreflightDenied('invalid-input')
   if (!pin || pin.chainId !== OP_SEPOLIA || !validAccount(pin.contract) ||
       !validBytes32(pin.parentNode) || pin.parentNode.toLowerCase() === `0x${'0'.repeat(64)}` ||
       !validBytes32(pin.expectedCodeHash) ||
@@ -90,7 +93,8 @@ export async function preflightV4SignedIssuance(reader: Reader, pin: V4IssuanceP
       read('controllerEpoch'), read('issuanceNonce'), read('operatorRevision'), read('operators'),
     ])
     if (!bytecode || keccak256(bytecode).toLowerCase() !== pin.expectedCodeHash.toLowerCase() ||
-        parent !== pin.parentNode || nativeClaim !== false || !validAccount(controller as string)) {
+        typeof parent !== 'string' || parent.toLowerCase() !== pin.parentNode.toLowerCase() ||
+        nativeClaim !== false || !validAccount(controller as string)) {
       throw new V4PreflightDenied('identity')
     }
 
