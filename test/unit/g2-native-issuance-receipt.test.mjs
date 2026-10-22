@@ -121,6 +121,26 @@ describe('G2 L1 native issuer finalized-RPC receipt observation (read only)', ()
     expect(calls.some(x => /send|write|sign/i.test(x[0]))).toBe(false)
   })
 
+  it('executes simultaneous read-only contract calls pinned to one historical L1 block', async () => {
+    const { client } = fake()
+    const read = client.readContract
+    let active = 0
+    let peak = 0
+    const heights = []
+    client.readContract = async (arg) => {
+      active++
+      peak = Math.max(peak, active)
+      heights.push(arg.blockNumber)
+      await Promise.resolve()
+      try { return await read(arg) } finally { active-- }
+    }
+    const result = await observeNativeIssueReceipt({ client, profile: profile() })
+    expect(result.historicalIssuanceObserved).toBe(true)
+    expect(peak).toBeGreaterThanOrEqual(3)
+    expect(heights).toHaveLength(6)
+    expect(heights.every(h => h === 100n)).toBe(true)
+  })
+
   it('rejects incorrect or duplicated NativeChildIssued events and bad receipt status', async () => {
     for (const options of [
       { logs: [] }, { logs: [encodedLog(), encodedLog({ logIndex: 2 })] },
