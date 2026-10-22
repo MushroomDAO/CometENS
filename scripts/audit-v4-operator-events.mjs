@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import {
   createPublicClient, http, decodeEventLog, isAddress, keccak256, namehash,
-  parseAbiItem, toEventSelector,
+  parseAbiItem, toEventSelector, formatTransactionReceipt,
 } from 'viem'
 import { optimismSepolia } from 'viem/chains'
 
@@ -116,7 +116,10 @@ export async function auditV4OperatorEvents(client, profile, fromBlock, toBlock,
       client.getCode({ address: profile.contract, blockNumber: number }),
       client.readContract({ address: profile.contract, abi: PARENT_ABI, functionName: 'parentNode', blockNumber: number }),
       client.getLogs({ address: profile.contract, fromBlock: number, toBlock: number }),
-      client.getBlockReceipts({ blockNumber: number }),
+      client.request({ method: 'eth_getBlockReceipts', params: [`0x${number.toString(16)}`] }).then((raw) => {
+        if (!Array.isArray(raw)) fail('invalid-rpc-data')
+        return raw.map((receipt) => formatTransactionReceipt(receipt))
+      }),
     ])
     if (!code || code === '0x' || lower(keccak256(code)) !== lower(profile.expectedCodeHash) ||
         lower(parent) !== lower(parentNode)) fail('v4-identity-mismatch')
