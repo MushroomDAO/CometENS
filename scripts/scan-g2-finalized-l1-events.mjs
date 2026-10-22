@@ -91,18 +91,29 @@ export async function scanFinalizedL1Events({ client, manifest, previous = null 
         const bytecode = await client.getBytecode({ address: source.address, blockNumber: height })
         if (!bytecode || bytecode === '0x' || !same(keccak256(bytecode), source.codeHash)) fail('untrusted-source-code')
       }
-      const found = await client.getLogs({
-        address: source.address, topics: [source.topics], fromBlock: from, toBlock: to,
+      // viem publicClient.getLogs ignores a caller-supplied `topics` field and
+      // derives topics only from `event(s)`. Use explicit JSON-RPC to filter a
+      // version-pinned OR-list of topic0 hashes (no unfiltered fallback).
+      const found = await client.request({
+        method: 'eth_getLogs',
+        params: [{
+          address: source.address, topics: [source.topics],
+          fromBlock: toHex(from), toBlock: toHex(to),
+        }],
       })
       if (!Array.isArray(found) || found.length > MAX_LOGS - logs.length) fail('invalid-log-batch')
       for (const log of found) {
+        if (typeof log.blockNumber !== 'string' || !/^0x[0-9a-fA-F]+$/.test(log.blockNumber) ||
+            typeof log.logIndex !== 'string' || !/^0x[0-9a-fA-F]+$/.test(log.logIndex)) fail('invalid-log-batch')
+        const blockNumber = BigInt(log.blockNumber)
+        const logIndex = Number(BigInt(log.logIndex))
         if (!same(log.address, source.address) ||
             !Array.isArray(log.topics) || !source.topics.some(t => same(t, log.topics[0])) ||
-            typeof log.blockNumber !== 'bigint' || log.blockNumber < from || log.blockNumber > to ||
+            blockNumber < from || blockNumber > to ||
             !HASH.test(log.blockHash ?? '') || !HASH.test(log.transactionHash ?? '') ||
-            !Number.isSafeInteger(log.logIndex) || log.logIndex < 0 || log.removed === true) fail('invalid-log-batch')
-        logs.push({ blockNumber: log.blockNumber, blockHash: log.blockHash,
-          transactionHash: log.transactionHash, logIndex: log.logIndex,
+            !Number.isSafeInteger(logIndex) || logIndex < 0 || log.removed === true) fail('invalid-log-batch')
+        logs.push({ blockNumber, blockHash: log.blockHash,
+          transactionHash: log.transactionHash, logIndex,
           address: log.address, topic0: log.topics[0] })
       }
     }

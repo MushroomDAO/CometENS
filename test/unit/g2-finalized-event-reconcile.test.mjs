@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keccak256 } from 'viem'
+import { keccak256, toHex } from 'viem'
 import { scanFinalizedL1Events } from '../../scripts/scan-g2-finalized-l1-events.mjs'
 
 const now = BigInt(Math.floor(Date.now() / 1000))
@@ -15,8 +15,8 @@ const manifest = () => ({
 })
 const event = (options = {}) => ({
   address: options.address ?? addr, topics: [options.topic ?? topic],
-  blockNumber: options.blockNumber ?? 140n, blockHash: options.blockHash ?? hash1,
-  transactionHash: options.transactionHash ?? tx, logIndex: options.logIndex ?? 0,
+  blockNumber: toHex(options.blockNumber ?? 140n), blockHash: options.blockHash ?? hash1,
+  transactionHash: options.transactionHash ?? tx, logIndex: toHex(options.logIndex ?? 0),
   removed: options.removed ?? false,
 })
 
@@ -44,8 +44,8 @@ function fake(config = {}) {
       if (config.rpcError) throw new Error('https://provider.invalid/?secret=SECRET')
       return config.badCode ? '0x6000' : code
     },
-    async getLogs(arg) {
-      calls.push(['logs', arg])
+    async request(arg) {
+      calls.push(['request', arg])
       if (config.rpcError) throw new Error('https://provider.invalid/?secret=SECRET')
       return config.logs ?? []
     },
@@ -64,8 +64,10 @@ describe('G2 L1 finalized event backfill trigger (not native ENS authority)', ()
       cursor: { chainId: 11155111, block: { number: '150', hash: hash1 } },
     })
     expect(out.events).toEqual([])
-    expect(calls.find(c => c[0] === 'logs')[1]).toMatchObject({
-      address: addr, topics: [[topic]], fromBlock: 128n, toBlock: 150n,
+    expect(calls.find(c => c[0] === 'request')[1]).toMatchObject({
+      method: 'eth_getLogs', params: [{
+        address: addr, topics: [[topic]], fromBlock: '0x80', toBlock: '0x96',
+      }],
     })
   })
 
@@ -126,7 +128,7 @@ describe('G2 L1 finalized event backfill trigger (not native ENS authority)', ()
     const again = await scanFinalizedL1Events({ client: io, manifest: manifest(), previous: first.cursor })
     expect(again.status).toBe('UNCHANGED')
     expect(again.mustReconcileNativeState).toBe(true)
-    expect(calls.some(c => c[0] === 'logs')).toBe(false)
+    expect(calls.some(c => c[0] === 'request')).toBe(false)
   })
 
   it('rejects mismatched previous source identity, truncated/forged cursor and invalid manifest', async () => {
