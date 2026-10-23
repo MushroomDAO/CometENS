@@ -33,7 +33,9 @@ function fake(config = {}) {
           ? head - 1n : head,
         hash: config.secondHeadHash && calls.filter(c => c[1]?.blockTag === 'finalized').length > 1
           ? config.secondHeadHash : hash,
-        timestamp: config.stale ? 1n : config.future ? now + 121n : now - 30n,
+        // The 120s future tolerance is checked against real time at execution;
+        // leave ample margin for concurrent Vitest suite startup latency.
+        timestamp: config.stale ? 1n : config.future ? now + 3600n : now - 30n,
       }
       return { number: config.badNumber && arg.blockNumber === head ? head - 1n : arg.blockNumber,
         hash: config.blockHashes?.[arg.blockNumber.toString()] ?? hash,
