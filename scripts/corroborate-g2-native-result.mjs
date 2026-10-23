@@ -46,15 +46,25 @@ async function checkProvider(client, expected, now) {
         !HASH.test(before.hash ?? '') || before.number < expected.height ||
         before.timestamp > now + MAX_SECONDS_FUTURE ||
         before.timestamp + MAX_SECONDS_OLD < now) fail('untrusted-secondary-finality')
+    // When finalized itself points to the historical height, it must also
+    // attest the SAME hash, not merely a different numbered-block response.
+    if (before.number === expected.height && !same(before.hash, expected.hash)) {
+      fail('secondary-block-disagreement')
+    }
     const historical = await client.getBlock({ blockNumber: expected.height })
     if (historical?.number !== expected.height ||
         !same(historical.hash, expected.hash)) fail('secondary-block-disagreement')
 
     const after = await client.getBlock({ blockTag: 'finalized' })
-    if (typeof after?.number !== 'bigint' || !HASH.test(after.hash ?? '') ||
-        after.number < before.number ||
+    if (typeof after?.number !== 'bigint' || typeof after.timestamp !== 'bigint' ||
+        !HASH.test(after.hash ?? '') || after.number < before.number ||
+        after.timestamp > now + MAX_SECONDS_FUTURE ||
+        after.timestamp + MAX_SECONDS_OLD < now ||
         (after.number === before.number && !same(after.hash, before.hash))) {
       fail('unstable-secondary-finality')
+    }
+    if (after.number === expected.height && !same(after.hash, expected.hash)) {
+      fail('secondary-block-disagreement')
     }
     const historicAgain = await client.getBlock({ blockNumber: expected.height })
     if (historicAgain?.number !== expected.height ||
