@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { reconcileNativeIssueResult } from '../../scripts/reconcile-g2-native-result.mjs'
+
+vi.mock('../../scripts/reconcile-g2-native-result.mjs', () => ({
+  reconcileNativeIssueResult: vi.fn(),
+}))
 import {
   corroborateNativeResultBlocks, reconcileWithSecondProviders,
 } from '../../scripts/corroborate-g2-native-result.mjs'
@@ -37,7 +42,9 @@ function provider(chainId, number, hash, options = {}) {
         return {
           number: finalizedReads > 1 ? (options.secondHeight ?? number + 10n) :
             (options.finalizedHeight ?? number + 10n),
-          timestamp: options.timestamp ?? now - 60n,
+          timestamp: finalizedReads > 1 ?
+            (options.secondTimestamp ?? options.timestamp ?? now - 60n) :
+            (options.timestamp ?? now - 60n),
           hash: finalizedReads > 1 ? (options.secondHeadHash ?? headHash) : headHash,
         }
       }
@@ -82,6 +89,31 @@ describe('G2 independent RPC header agreement is not native chain authority', ()
     }
   })
 
+  it('B2: full reconciliation entrypoint MUST execute both secondary providers', async () => {
+    const freshTimestamp = BigInt(Math.floor(Date.now() / 1000)) - 60n
+    const secondaryL1 = l1({ timestamp: freshTimestamp })
+    const secondaryOp = op({ timestamp: freshTimestamp })
+    const l1Client = { kind: 'primary-l1' }
+    const opClient = { kind: 'primary-op' }
+    vi.mocked(reconcileNativeIssueResult).mockResolvedValueOnce(observation())
+    const result = await reconcileWithSecondProviders({
+      l1Client, opClient, secondaryL1, secondaryOp, profile: { kind: 'fixture' },
+    })
+    expect(reconcileNativeIssueResult).toHaveBeenCalledWith({
+      l1Client, opClient, profile: { kind: 'fixture' },
+    })
+    expect(result).toMatchObject({
+      status: 'TWO_RPC_PROVIDER_BLOCK_HASH_AGREEMENT',
+      evidenceLevel: 'SECONDARY_FINALIZED_RPC_HEADER_AGREEMENT_ONLY',
+      ethereumConsensusIndependentlyVerified: false,
+      sovereignReceipt: false,
+    })
+    expect(secondaryL1.calls.filter(c => c[0] === 'block' && c[1].blockNumber === 100n))
+      .toHaveLength(2)
+    expect(secondaryOp.calls.filter(c => c[0] === 'block' && c[1].blockNumber === 200n))
+      .toHaveLength(2)
+  })
+
   it('runs simultaneous read-only provider checks and pins both historical heights', async () => {
     const secondaryL1 = l1()
     const secondaryOp = op()
@@ -110,6 +142,24 @@ describe('G2 independent RPC header agreement is not native chain authority', ()
       { timestamp: now + 121n },
     ]) await expect(check(config)).rejects.toMatchObject({
       code: config.chainId ? 'wrong-secondary-chain' : 'untrusted-secondary-finality',
+    })
+  })
+
+  it('B1: a finalized HEAD at the exact historical height must agree with that block', async () => {
+    // Without comparing finalized.hash to the expected historic hash, a provider
+    // can lie about finalized(N)=A while getBlock(N)=B and still be accepted.
+    await expect(check({ finalizedHeight: 100n, secondHeight: 100n }))
+      .rejects.toMatchObject({ code: 'secondary-block-disagreement' })
+    await expect(check({}, { finalizedHeight: 200n, secondHeight: 200n }))
+      .rejects.toMatchObject({ code: 'secondary-block-disagreement' })
+  })
+
+  it('requires a fresh timestamp also from the SECOND finalized read', async () => {
+    await expect(check({ secondTimestamp: 1n })).rejects.toMatchObject({
+      code: 'unstable-secondary-finality',
+    })
+    await expect(check({}, { secondTimestamp: now + 121n })).rejects.toMatchObject({
+      code: 'unstable-secondary-finality',
     })
   })
 
@@ -149,6 +199,15 @@ describe('G2 independent RPC header agreement is not native chain authority', ()
       { ...observation(), opBlock: { number: '9'.repeat(150), hash: opHash } },
       { ...observation(), sourceBlock: { number: '100', hash: 'bad' } },
     ]) await expect(check({}, {}, source)).rejects.toMatchObject({ code: 'invalid-observation' })
+  })
+
+  it('B3: reusing the primary OP client as secondary OP MUST fail', async () => {
+    const primaryOp = op()
+    vi.mocked(reconcileNativeIssueResult).mockResolvedValueOnce(observation())
+    await expect(reconcileWithSecondProviders({
+      l1Client: l1(), opClient: primaryOp, secondaryL1: l1(),
+      secondaryOp: primaryOp, profile: {},
+    })).rejects.toMatchObject({ code: 'invalid-providers' })
   })
 
   it('rejects duplicated clients and sanitizes secondary RPC errors', async () => {
