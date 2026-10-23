@@ -6,7 +6,7 @@ import {
   decodeEventLog, decodeFunctionData, encodeAbiParameters, isAddress,
   keccak256, parseAbi, parseAbiItem, parseAbiParameters, toEventSelector, toHex,
 } from 'viem'
-import { observeNativeIssueReceipt } from './observe-g2-native-issuance-receipt.mjs'
+import { observeNativeIssueReceipt, NativeReceiptFailure } from './observe-g2-native-issuance-receipt.mjs'
 
 const OP_CHAIN = 11155420
 const L1_CHAIN = 11155111
@@ -186,6 +186,9 @@ export async function reconcileNativeIssueResult({ l1Client, opClient, profile }
     }
   } catch (error) {
     if (error instanceof CrosschainReconciliationFailure) throw error
+    // NativeReceiptFailure.code is a small, controlled reason code (not an
+    // upstream RPC body or credential). Preserve its distinct failure class.
+    if (error instanceof NativeReceiptFailure) fail(`l1-${error.code}`)
     // Neither external ABI errors nor provider URLs (possibly secret-bearing)
     // should cross this API boundary.
     fail('unverifiable-rpc')

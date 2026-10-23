@@ -75,6 +75,7 @@ const l1Input = () => encodeFunctionData({ abi: ABI, functionName: 'issueAndRela
 function fixture(change = {}) {
   const calls = []
   let l1Heads = 0
+  let l1ReceiptReads = 0
   let opHeads = 0
   const now = BigInt(Math.floor(Date.now() / 1000) - 60)
   const l1 = {
@@ -90,9 +91,12 @@ function fixture(change = {}) {
         transactions: [l1TxHash] }
     },
     async getTransactionReceipt() {
+      l1ReceiptReads++
       return { status: 'success', transactionHash: l1TxHash,
-        blockHash: l1Hash, blockNumber: 100n,
-        logs: change.l1Logs ?? [nativeChild(), nativeSent()] }
+        blockHash: l1ReceiptReads > 1 ? (change.l1SecondReceiptHash ?? l1Hash) : l1Hash,
+        blockNumber: 100n, logs: l1ReceiptReads > 1 ?
+          (change.l1SecondReceiptLogs ?? change.l1Logs ?? [nativeChild(), nativeSent()]) :
+          (change.l1Logs ?? [nativeChild(), nativeSent()]) }
     },
     async getTransaction() { return { to: change.l1To ?? source,
       blockNumber: 100n, input: change.l1Input ?? l1Input() } },
@@ -128,10 +132,12 @@ function fixture(change = {}) {
       if (arg.blockTag === 'finalized') {
         opHeads++
         return { number: change.opHead ?? 210n, hash: opHeads > 1 ?
-          (change.opHeadChanged ?? opHeadHash) : opHeadHash, timestamp: now }
+          (change.opHeadChanged ?? opHeadHash) : opHeadHash,
+        timestamp: change.opHeadTimestamp ?? now }
       }
-      return { number: arg.blockNumber, hash: change.opBlockHash ?? opHash,
-        transactions: [opTxHash] }
+      return { number: change.opNumberedBlockNumber ?? arg.blockNumber,
+        hash: change.opBlockHash ?? opHash,
+        transactions: change.opNumberedTransactions ?? [opTxHash] }
     },
     async getTransactionReceipt() {
       return { status: 'success', transactionHash: opTxHash,
@@ -139,7 +145,8 @@ function fixture(change = {}) {
         logs: change.opLogs ?? [opObserved()] }
     },
     async getTransaction() {
-      return { to: change.opTo ?? messenger, blockNumber: 200n }
+      return { to: change.opTo ?? messenger,
+        blockNumber: change.opTxBlockNumber ?? 200n }
     },
     async getBytecode({ address, blockNumber }) {
       calls.push(['opcode', address, blockNumber])
@@ -213,60 +220,128 @@ describe('G2 native issuance ↔ OP provisional result finalized-RPC comparison'
   })
 
   it('rejects a different destination, requester, nonce or transaction input before a positive result', async () => {
-    for (const p of [
-      { ...profile(), opInbox: member },
-      { ...profile(), opRequester: member },
-      { ...profile(), requestNonce: '2' },
-      { ...profile(), requestNonce: '0' },
-      { ...profile(), opTransactionHash: 'bad' },
-      { ...profile(), opInboxCodeHash: '0x123' },
-      { ...profile(), l1MessengerCodeHash: 'bad' },
-    ]) await expect(check({}, p)).rejects.toBeTruthy()
+    for (const [p, code] of [
+      [{ ...profile(), opInbox: member }, 'wrong-l1-relay-identity'],
+      [{ ...profile(), opRequester: member }, 'wrong-l1-request'],
+      [{ ...profile(), requestNonce: '2' }, 'wrong-l1-request'],
+      [{ ...profile(), requestNonce: '0' }, 'invalid-profile'],
+      [{ ...profile(), opTransactionHash: 'bad' }, 'invalid-profile'],
+      [{ ...profile(), opInboxCodeHash: '0x123' }, 'invalid-profile'],
+      [{ ...profile(), l1MessengerCodeHash: 'bad' }, 'invalid-profile'],
+    ]) await expect(check({}, p)).rejects.toMatchObject({ code })
     await expect(check({ l1To: member })).rejects.toMatchObject({ code: 'wrong-l1-entrypoint' })
     await expect(check({ l1Input: '0x1234' })).rejects.toMatchObject({ code: 'wrong-l1-entrypoint' })
   })
 
   it('refuses forged L1 result event, missing original event or mismatched source block', async () => {
-    for (const logs of [
-      [nativeChild()], [nativeChild(), nativeSent(), nativeSent()],
-      [nativeChild(), { ...nativeSent(), address: member }],
-      [nativeChild(), { ...nativeSent(), data: encodeAbiParameters(
-        parseAbiParameters('uint64'), [101n]) }],
-      [nativeChild(), { ...nativeSent(), topics: encodeEventTopics({
+    for (const [logs, code] of [
+      [[nativeChild()], 'missing-l1-result'],
+      [[nativeChild(), nativeSent(), nativeSent()], 'missing-l1-result'],
+      [[nativeChild(), { ...nativeSent(), address: member }], 'missing-l1-result'],
+      [[nativeChild(), { ...nativeSent(), data: encodeAbiParameters(
+        parseAbiParameters('uint64'), [101n]) }], 'invalid-l1-result'],
+      [[nativeChild(), { ...nativeSent(), topics: encodeEventTopics({
         abi: [SENT], eventName: 'NativeIssueResultSent',
         args: { requestId: `0x${'ff'.repeat(32)}`, childNode, member },
-      }) }],
-    ]) await expect(check({ l1Logs: logs })).rejects.toBeTruthy()
+      }) }], 'invalid-l1-result'],
+    ]) await expect(check({ l1Logs: logs })).rejects.toMatchObject({ code })
   })
 
   it('requires pinned L1 relay destination, messenger code and committed request state', async () => {
-    for (const config of [
-      { l1Destination: member }, { l1Messenger: member },
-      { l1Version: l1Hash }, { sentRequest: false },
-      { messengerCode: '0x6000' },
-    ]) await expect(check(config)).rejects.toBeTruthy()
+    for (const [config, code] of [
+      [{ l1Destination: member }, 'wrong-l1-relay-identity'],
+      [{ l1Messenger: member }, 'wrong-l1-relay-identity'],
+      [{ l1Version: l1Hash }, 'wrong-l1-relay-identity'],
+      [{ sentRequest: false }, 'wrong-l1-relay-identity'],
+      [{ messengerCode: '0x6000' }, 'l1-messenger-codehash-mismatch'],
+    ]) await expect(check(config)).rejects.toMatchObject({ code })
   })
 
   it('rejects OP receipt, observed event or historical queue state mismatches', async () => {
+    for (const [config, code] of [
+      [{ opLogs: [] }, 'missing-op-observation'],
+      [{ opLogs: [opObserved(), opObserved()] }, 'missing-op-observation'],
+      [{ opLogs: [{ ...opObserved(), address: member }] }, 'missing-op-observation'],
+      [{ opLogs: [{ ...opObserved(), blockHash: l1Hash }] }, 'invalid-op-observation'],
+      [{ opLogs: [{ ...opObserved(), data: encodeAbiParameters(
+        parseAbiParameters('uint64'), [99n]) }] }, 'invalid-op-observation'],
+      [{ opRequest: [requester, childNode, member, BigInt(expiry), 1n, 1, 100n] }, 'op-request-mismatch'],
+      [{ opRequest: [requester, childNode, member, BigInt(expiry), 1n, 3, 99n] }, 'op-request-mismatch'],
+      [{ opEmitter: member }, 'op-request-mismatch'],
+      [{ opCode: sourceCode }, 'op-runtime-mismatch'],
+      [{ opTo: inbox }, 'wrong-op-execution'],
+    ]) await expect(check(config)).rejects.toMatchObject({ code })
+  })
+
+  it('B1: the OP event must bind THIS exact requestId and THIS exact transaction', async () => {
+    const foreignRequestId = `0x${'ef'.repeat(32)}`
+    const wrongRequestLog = { ...opObserved(), topics: encodeEventTopics({
+      abi: [OBSERVED], eventName: 'NativeResultObserved',
+      args: { requestId: foreignRequestId, childNode },
+    }) }
+    const wrongTxLog = { ...opObserved(), transactionHash: l1TxHash }
+    for (const opLogs of [[wrongRequestLog], [wrongTxLog]]) {
+      await expect(check({ opLogs })).rejects.toMatchObject({
+        code: 'invalid-op-observation',
+      })
+    }
+  })
+
+  it('B2: OP numbered-block inclusion and tx blockNumber must bind the observed tx', async () => {
     for (const config of [
-      { opLogs: [] },
-      { opLogs: [opObserved(), opObserved()] },
-      { opLogs: [{ ...opObserved(), address: member }] },
-      { opLogs: [{ ...opObserved(), blockHash: l1Hash }] },
-      { opLogs: [{ ...opObserved(), data: encodeAbiParameters(
-        parseAbiParameters('uint64'), [99n]) }] },
-      { opRequest: [requester, childNode, member, BigInt(expiry), 1n, 1, 100n] },
-      { opRequest: [requester, childNode, member, BigInt(expiry), 1n, 3, 99n] },
-      { opEmitter: member }, { opCode: sourceCode }, { opTo: inbox },
-    ]) await expect(check(config)).rejects.toBeTruthy()
+      { opNumberedBlockNumber: 201n },
+      { opNumberedTransactions: [l1TxHash] },
+      { opBlockHash: l1Hash },
+    ]) await expect(check(config)).rejects.toMatchObject({
+      code: 'unanchored-transaction',
+    })
+    await expect(check({ opTxBlockNumber: 201n })).rejects.toMatchObject({
+      code: 'wrong-op-execution',
+    })
+  })
+
+  it('B3: OP finalized RPC head must be fresh, not merely above the transaction height', async () => {
+    await expect(check({ opHeadTimestamp: 1n })).rejects.toMatchObject({
+      code: 'invalid-op-finality',
+    })
+    await expect(check({
+      opHeadTimestamp: BigInt(Math.floor(Date.now() / 1000)) + 121n,
+    })).rejects.toMatchObject({ code: 'invalid-op-finality' })
+  })
+
+  it('B4: L1 second receipt hash and sent-event transaction/block provenance are load-bearing', async () => {
+    await expect(check({ l1SecondReceiptHash: opHash })).rejects.toMatchObject({
+      code: 'unanchored-l1-result',
+    })
+    for (const changed of [
+      { ...nativeSent(), transactionHash: opTxHash },
+      { ...nativeSent(), blockHash: opHash },
+      { ...nativeSent(), blockNumber: 101n },
+    ]) {
+      await expect(check({ l1SecondReceiptLogs: [nativeChild(), changed] }))
+        .rejects.toMatchObject({ code: 'invalid-l1-result' })
+    }
+  })
+
+  it('B4: truncated OP historical request tuple fails with precise request mismatch', async () => {
+    for (const opRequest of [
+      [requester, childNode, member, BigInt(expiry), 1n, 3],
+      [requester, childNode, member, BigInt(expiry), 1n, 3, 100n, 'extra'],
+    ]) await expect(check({ opRequest })).rejects.toMatchObject({
+      code: 'op-request-mismatch',
+    })
   })
 
   it('rejects wrong chains, reorged finalized block hashes or unfinalized OP results', async () => {
-    for (const config of [
-      { l1Chain: 1 }, { opChain: 10 },
-      { l1Head: 99n }, { opHead: 199n },
-      { l1BlockHash: opHash }, { opBlockHash: l1Hash },
-      { l1HeadChanged: opHash }, { opHeadChanged: l1Hash },
-    ]) await expect(check(config)).rejects.toBeTruthy()
+    for (const [config, code] of [
+      [{ l1Chain: 1 }, 'wrong-chain'],
+      [{ opChain: 10 }, 'wrong-chain'],
+      [{ l1Head: 99n }, 'l1-invalid-receipt'],
+      [{ opHead: 199n }, 'invalid-op-receipt'],
+      [{ l1BlockHash: opHash }, 'l1-unanchored-transaction'],
+      [{ opBlockHash: l1Hash }, 'unanchored-transaction'],
+      [{ l1HeadChanged: opHash }, 'finality-conflict'],
+      [{ opHeadChanged: l1Hash }, 'finality-conflict'],
+    ]) await expect(check(config)).rejects.toMatchObject({ code })
   })
 })
