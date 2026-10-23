@@ -172,7 +172,9 @@ export async function checkG2NativeReadiness(raw, options = {}) {
       if (newer.number < old.number || (newer.number === old.number && !same(newer.hash,old.hash)) ||
           original.number !== old.number || !same(original.hash,old.hash)) throw Error('finality-drift')
     }
-    result.historicalLegacyPinsMatched = true
+    // RPC-matched immutables alone do not clear an unapproved plan or missing
+    // creation artifact; keep this summary false while such blockers remain.
+    if (blockers.length === 0) result.historicalLegacyPinsMatched = true
     blockers.push('rpc-snapshot-not-current-execution-time-authority')
   } catch {
     blockers.push('unverified-read-only-chain-wiring-or-authority')

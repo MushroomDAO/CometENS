@@ -76,6 +76,7 @@ function fixture(options={}) {
       },
       async readContract(p){
         calls.push(['read',chain,p]);
+        if (options.throwRead) throw Error('provider-private-token-must-not-leak')
         return result(p.functionName,chain,p.address)
       },
     }
@@ -107,19 +108,31 @@ describe('G2 native deployment readiness is a read-only BLOCKER, not a deploymen
     ['only initial OP chain check wrong',{wrongChainFirst:11155420}],
     ['wrong source code',{badCode:'source'}],['wrong relay code',{badCode:'relay'}],
     ['wrong OP messenger code',{badCode:'opMessenger'}],['wrong wrapper code',{badCode:'wrapper'}],
+    ['wrong inbox code',{badCode:'inbox'}],['wrong L1 messenger code',{badCode:'l1Messenger'}],
+    ['wrong registry code',{badCode:'registry'}],['wrong registrar code',{badCode:'registrar'}],
     ['L1 finality drift',{driftChain:11155111}],['OP finality drift',{driftChain:11155420}],
     ['source block hash drift',{driftSource:11155111}],
     ['native holder mismatch',{mutateFunction:'currentAuthority',badValue:[address(5),2_900_000n]}],
     ['native name expires',{mutateFunction:'currentAuthority',badValue:[address(4),2_000_001n]}],
     ['wrong relay destination',{mutateFunction:'destinationInbox',mutateChain:11155111,badValue:address(5)}],
     ['relay destination alone corrupted',{mutateFunction:'destinationInbox',mutateAddress:c.relay.address,badValue:address(5)}],
+    ['source destination alone corrupted',{mutateFunction:'destinationInbox',mutateAddress:c.source.address,badValue:address(5)}],
     ['wrong native source',{mutateFunction:'nativeSource',badValue:address(9)}],
     ['wrong source hash',{mutateFunction:'sourceRuntimeHash',badValue:hash(55)}],
     ['wrong chain constant',{mutateFunction:'SOURCE_CHAIN_ID',badValue:1n}],
     ['wrong parent',{mutateFunction:'parentNode',badValue:hash(22)}],
     ['source parent alone corrupted',{mutateFunction:'parentNode',mutateAddress:c.source.address,badValue:hash(22)}],
+    ['relay parent alone corrupted',{mutateFunction:'parentNode',mutateAddress:c.relay.address,badValue:hash(22)}],
     ['wrong OP emitter',{mutateFunction:'l1ResultEmitter',badValue:address(11)}],
     ['wrong message version',{mutateFunction:'VERSION',badValue:hash(33)}],
+    ['source registryRuntimeHash corrupted',{mutateFunction:'registryRuntimeHash',mutateAddress:c.source.address,badValue:hash(77)}],
+    ['source wrapperRuntimeHash corrupted',{mutateFunction:'wrapperRuntimeHash',mutateAddress:c.source.address,badValue:hash(77)}],
+    ['source registrarRuntimeHash corrupted',{mutateFunction:'registrarRuntimeHash',mutateAddress:c.source.address,badValue:hash(77)}],
+    ['relay L1 messenger address corrupted',{mutateFunction:'l1Messenger',mutateAddress:c.relay.address,badValue:address(5)}],
+    ['relay messengerRuntimeHash corrupted',{mutateFunction:'messengerRuntimeHash',mutateAddress:c.relay.address,badValue:hash(77)}],
+    ['relay MESSAGE_VERSION corrupted',{mutateFunction:'MESSAGE_VERSION',mutateAddress:c.relay.address,badValue:hash(77)}],
+    ['relay L1_CHAIN_ID corrupted',{mutateFunction:'L1_CHAIN_ID',mutateAddress:c.relay.address,badValue:1n}],
+    ['relay OP_CHAIN_ID corrupted',{mutateFunction:'OP_CHAIN_ID',mutateAddress:c.relay.address,badValue:1n}],
     ['false sovereignty flag changes',{mutateFunction:'sovereignReceipt',badValue:true}],
   ])('fails closed on %s',async(_,mutation)=>{
     const report=await run(manifest(),mutation)
@@ -172,6 +185,27 @@ describe('G2 native deployment readiness is a read-only BLOCKER, not a deploymen
     const report = await checkG2NativeReadiness(change,{artifacts:artifacts(),l1Client,opClient})
     expect(report.historicalLegacyPinsMatched).toBe(true)
     expect(report.nativeAuthorityVerified).toBe(false)
+  })
+  it('never marks complete pins matched while plan approval or creation artifacts are missing',async()=>{
+    const m=manifest()
+    m.deployPlan.contractsApproved=false
+    const incompletePlan=await run(m)
+    expect(incompletePlan.blockers).toContain('contractsApproved-not-approved')
+    expect(incompletePlan.historicalLegacyPinsMatched).not.toBe(true)
+
+    const {l1Client,opClient}=fixture()
+    const incompleteArtifacts=await checkG2NativeReadiness(manifest(),{
+      artifacts:{source:artifacts().source},l1Client,opClient,
+    })
+    expect(incompleteArtifacts.blockers).toContain('missing-or-drifted-relay-creation-artifact')
+    expect(incompleteArtifacts.historicalLegacyPinsMatched).not.toBe(true)
+  })
+  it('redacts provider failures and preserves permanent blocked security claims',async()=>{
+    const report=await run(manifest(),{throwRead:true})
+    expect(report.blockers).toContain('unverified-read-only-chain-wiring-or-authority')
+    expect(report.historicalLegacyPinsMatched).not.toBe(true)
+    expect(report.readyToBroadcast).toBe(false)
+    expect(JSON.stringify(report)).not.toContain('provider-private-token-must-not-leak')
   })
   it('CLI remains offline, reports BLOCKED and exits nonzero without leaking secret fields',async()=>{
     const dir=await mkdtemp(join(tmpdir(),'g2-testnet-readiness-'))
