@@ -75,6 +75,10 @@ Test both post-expiry `revokeOperator` and `proposeController(0)` **succeed**, w
 
 **ENSv2 current Sepolia path:** independently pin official v2 deployment and implementation, hierarchical parent/subregistry pointers, name lifecycle and EAC versions (token IDs change when roles or registration versions change). Inspect `ROOT_RESOURCE` regular **and admin** rights, `ROLE_SET_PARENT`, registry `ROLE_UPGRADE`, relevant per-name and per-record write roles and inherited ERC-1155 `setApprovalForAll`. A plain role revoke is not irreversible if an admin/root holder can regrant it. Migrated v1 names require a fresh v2 proof; a v1 `RESERVED` fallback is not a v2 owner. Neither EAC nor v1 fuses alone certify immutable record content.
 
+The separate [Mainnet ENSv2 current EAC read-only preflight](G2-ENSV2-L1-CURRENT-EAC-PREFLIGHT.md)
+checks official Ethereum L1 hierarchy and resource-scoped `ROLE_REGISTRAR`
+against a fresh pinned head while remaining explicitly non-authoritative.
+
 **Receipt/verifier:** `SOVEREIGN` is *never inferred from OP bridge/lease alone*. A reproducible receipt must state name/holder, L1 chain, exact finalized block number/hash, audited contract/implementation identity, native holder/fuses or EAC rights, parent expiry/migration, member resolver control and all remaining approval/admin paths. If resolution or record immutability is claimed, include its independent finality/permission evidence. OP delivery requires a separate finalized OP receipt; an L1 finalized tx is not the same as finalized OP execution. Missing/stale/unsafe evidence yields `MANAGED`, `HANDOFF_PENDING`, `NEEDS_REPAIR` or `AT_RISK`, **never optimistic `SOVEREIGN`**. Public RPC readings alone are not cryptographically independent finality proofs.
 
 ## Small, independently reviewable implementation sequence
