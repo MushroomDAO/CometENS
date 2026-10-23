@@ -82,6 +82,28 @@ describe('G2 independent RPC header agreement is not native chain authority', ()
     }
   })
 
+  it('runs simultaneous read-only provider checks and pins both historical heights', async () => {
+    const secondaryL1 = l1()
+    const secondaryOp = op()
+    let active = 0
+    let peak = 0
+    for (const client of [secondaryL1, secondaryOp]) {
+      const original = client.getChainId
+      client.getChainId = async () => {
+        active++
+        peak = Math.max(peak, active)
+        await Promise.resolve()
+        try { return await original() } finally { active-- }
+      }
+    }
+    await corroborateNativeResultBlocks({
+      observation: observation(), secondaryL1, secondaryOp, now: () => now,
+    })
+    expect(peak).toBeGreaterThanOrEqual(2)
+    expect(secondaryL1.calls.filter(c => c[0] === 'block' && c[1].blockNumber === 100n)).toHaveLength(2)
+    expect(secondaryOp.calls.filter(c => c[0] === 'block' && c[1].blockNumber === 200n)).toHaveLength(2)
+  })
+
   it('fails on wrong secondary chain, missing finalized head, stale or future timestamp', async () => {
     for (const config of [
       { chainId: 1 }, { finalizedHeight: 99n }, { timestamp: 1n },
