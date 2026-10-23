@@ -34,12 +34,17 @@ import { dirname, join } from 'node:path'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-// ENSv2 on Ethereum Sepolia — contracts-v2@97a5729, deployed 2026-07-30.
+// HISTORICAL ENSv2 on Ethereum Sepolia — contracts-v2@97a5729, deployed 2026-07-30.
+// Sepolia active deployments have changed since. Never treat this address as the current resolver.
 const URV2 = '0x4a1817d13e9cf196f471725176355c1234b63c70'
 // OffchainLookup(address,string[],bytes,bytes4,bytes)
 const OFFCHAIN_LOOKUP_SELECTOR = '0x556f1830'
 
 const argv = process.argv.slice(2)
+if (!argv.includes('--historical-20260730')) {
+  console.error('ENSV2_CHECK: this probe pins an obsolete 2026-07-30 Sepolia deployment. Refusing current-authority interpretation; use --historical-20260730 only for explicitly historical comparisons. Use official current ENSv2 addresses for new experiments.')
+  process.exit(2)
+}
 const flag = (n) => { const i = argv.indexOf(`--${n}`); return i === -1 ? undefined : argv[i + 1] }
 const asJson = argv.includes('--json')
 const NAME = flag('name') ?? 'forest.aastar.eth'
