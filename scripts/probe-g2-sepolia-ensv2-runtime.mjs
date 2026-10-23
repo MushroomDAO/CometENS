@@ -11,9 +11,9 @@ const EIP1967_IMPLEMENTATION = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735
 const FAIL = (reason) => ({ status: 'BLOCKED', reason, chainId: 11155111,
   deploymentIdentityVerified: false, nativeAuthorityVerified: false, sovereignReceipt: false })
 
-export async function probeSepoliaEnsv2Runtime(client, expectedPins = null) {
+export async function probeSepoliaEnsv2Runtime(client, expectedPins = undefined) {
   try {
-    if (expectedPins !== null && (!expectedPins || typeof expectedPins !== 'object' ||
+    if (expectedPins !== undefined && (!expectedPins || typeof expectedPins !== 'object' ||
       Array.isArray(expectedPins) || Object.keys(expectedPins).sort().join(',') !== 'ethRuntimeHash,rootRuntimeHash' ||
       !HEX32.test(expectedPins.rootRuntimeHash) || !HEX32.test(expectedPins.ethRuntimeHash) ||
       /^0x0+$/.test(expectedPins.rootRuntimeHash) || /^0x0+$/.test(expectedPins.ethRuntimeHash))) return FAIL('INVALID_PINS')
@@ -57,7 +57,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.stderr.write('Sepolia ENSv2 runtime probe BLOCKED: provide HTTPS COMETENS_SEPOLIA_RPC_URL, no wallet needed.\n')
     process.exitCode = 2
   } else {
-    let pins = null
+    let pins = undefined
     if (pinFile) {
       try {
         const bytes = await readFile(pinFile)
