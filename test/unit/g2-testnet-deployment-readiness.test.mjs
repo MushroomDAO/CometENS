@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -190,6 +190,26 @@ describe('G2 native deployment readiness is a read-only BLOCKER, not a deploymen
       const help=spawnSync(process.execPath,[entry,'--help'],{encoding:'utf8'})
       expect(help.status).toBe(0)
       expect(help.stdout).toContain('No keys')
+    } finally {await rm(dir,{recursive:true,force:true})}
+  })
+  it('T2: shell guard rejects extra args before any forge/node execution',async()=>{
+    const dir=await mkdtemp(join(tmpdir(),'g2-shell-guard-'))
+    const root=new URL('../../scripts/g2-native-testnet-dry-run.sh',import.meta.url).pathname
+    try {
+      const manifestFile=join(dir,'safe-public-manifest.json')
+      const log=join(dir,'commands.log')
+      await writeFile(manifestFile,'{}')
+      await writeFile(log,'')
+      for(const command of ['forge','node']){
+        await writeFile(join(dir,command),'#!/bin/sh\nprintf "%s\\n" "$0" >> "$G2_GUARD_LOG"\n',{mode:0o755})
+      }
+      const result=spawnSync('/bin/bash',[root,manifestFile,'EXTRA_ARGUMENT'],{
+        encoding:'utf8',timeout:5000,
+        env:{PATH:`${dir}:${process.env.PATH}`,G2_GUARD_LOG:log},
+      })
+      expect(result.status).toBe(1)
+      expect(await readFile(log,'utf8')).toBe('')
+      expect(result.stderr).toContain('Usage:')
     } finally {await rm(dir,{recursive:true,force:true})}
   })
 })
