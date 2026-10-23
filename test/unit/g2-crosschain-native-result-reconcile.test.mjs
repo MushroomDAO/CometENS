@@ -180,6 +180,38 @@ describe('G2 native issuance ↔ OP provisional result finalized-RPC comparison'
     expect(calls.filter(c => c[0] === 'l1read').every(c => c[3] === 100n)).toBe(true)
   })
 
+  it('executes simultaneous read-only RPC calls, all pinned to each chain source block', async () => {
+    const { l1, op } = fixture()
+    let l1Concurrent = 0
+    let l1Peak = 0
+    let opConcurrent = 0
+    let opPeak = 0
+    const l1Pins = []
+    const opPins = []
+    const l1Original = l1.readContract
+    const opOriginal = op.readContract
+    l1.readContract = async args => {
+      l1Concurrent++
+      l1Peak = Math.max(l1Peak, l1Concurrent)
+      l1Pins.push(args.blockNumber)
+      await Promise.resolve()
+      try { return await l1Original(args) } finally { l1Concurrent-- }
+    }
+    op.readContract = async args => {
+      opConcurrent++
+      opPeak = Math.max(opPeak, opConcurrent)
+      opPins.push(args.blockNumber)
+      await Promise.resolve()
+      try { return await opOriginal(args) } finally { opConcurrent-- }
+    }
+    const out = await reconcileNativeIssueResult({ l1Client: l1, opClient: op, profile: profile() })
+    expect(out.status).toBe('DUAL_RPC_OBSERVED')
+    expect(l1Peak).toBeGreaterThanOrEqual(3)
+    expect(opPeak).toBeGreaterThanOrEqual(3)
+    expect(l1Pins.every(n => n === 100n)).toBe(true)
+    expect(opPins.every(n => n === 200n)).toBe(true)
+  })
+
   it('rejects a different destination, requester, nonce or transaction input before a positive result', async () => {
     for (const p of [
       { ...profile(), opInbox: member },
