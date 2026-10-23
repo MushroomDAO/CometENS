@@ -48,6 +48,15 @@ contract G2LegacyL1NativeIssuerProof is G2LegacyL1NativeActionGuard {
         onlyCurrentLegacyNativeHolder
         returns (bytes32 node)
     {
+        return _issueNative(label, member, resolver, expiry);
+    }
+
+    /// @dev Shared atomic native issuance body, callable only from protected
+    ///      L1 entrypoints that apply onlyCurrentLegacyNativeHolder.
+    function _issueNative(string calldata label, address member, address resolver, uint64 expiry)
+        internal
+        returns (bytes32 node)
+    {
         _validateLabel(label, member);
         (, uint64 validUntil) = nativeSource.currentAuthority();
         if (expiry <= block.timestamp || expiry > validUntil) revert InvalidNativeIssue();
