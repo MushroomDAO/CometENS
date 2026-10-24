@@ -1,9 +1,17 @@
 import { describe,it,expect,vi } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { validateRegisterOrder,checkRegister } from '../../scripts/g2-local-sepolia-register.mjs'
+import { validateRegisterOrder,checkRegister,checkWalletDelegation } from '../../scripts/g2-local-sepolia-register.mjs'
 const order=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/03-register.json',import.meta.url)))
 const manifest={label:'cometens-g2-20261023',wallet:order.from,durationSeconds:'31536000',maxTotalCost:'9000000',expectedRegistrarCodeHash:'0xb025a7edb8e81862c2d28857211a7a91c1fb2b17c5bcf28b983987067f083c2a',expectedTokenCodeHash:'0xa9a4749f886f5035336f6e16dce5ca6f339ae73f76e94ad4b8f46a447dc335f3'}
 describe('G2 registration safety',()=>{
+ it('rejects observed 7702 delegate on two RPCs, code mismatch and unexpected code',async()=>{
+  const code='0xef01005804b6119d12ad403a430fd3cff12a8ff6e4064b'
+  const client=c=>({getChainId:async()=>11155111,getBytecode:async()=>c})
+  await expect(checkWalletDelegation([client(code),client(code)])).resolves.toMatchObject({reason:'EIP7702_DELEGATION_ACTIVE',delegate:'0x5804b6119d12ad403a430fd3cff12a8ff6e4064b'})
+  await expect(checkWalletDelegation([client(code),client('0x')])).resolves.toMatchObject({reason:'WALLET_CODE_RPC_DISAGREEMENT'})
+  await expect(checkWalletDelegation([client('0x6000'),client('0x6000')])).resolves.toMatchObject({reason:'UNEXPECTED_WALLET_CODE'})
+  await expect(checkWalletDelegation([client('0x'),client('0x')])).resolves.toMatchObject({status:'PASS'})
+ })
  it('requires exact dedicated register schema and fixed manifest',()=>{
   expect(validateRegisterOrder(order,manifest).maxCost).toBe(9000000n)
   for(const mutation of [{action:'commit'},{chainId:1},{maxTotalCost:'10000000'},{commitment:'0x'+'00'.repeat(32)},{from:'0x0000000000000000000000000000000000000001'},{to:'0x0000000000000000000000000000000000000001'},{expiresAt:'2020-01-01T00:00:00.000Z'},{data:'0xdeadbeef'}])
