@@ -70,6 +70,13 @@ export async function validateChain(client,o,m) {
   if(committed!==0n)throw Error('commitment-already-exists')
   return {abi:REG,functionName:'commit',address:REGISTRAR,args:[o.commitment],price}
 }
+export async function awaitSubmittedReceipt(client,hash,action,log=console.error) {
+  try { return await client.waitForTransactionReceipt({hash,confirmations:2,timeout:180000}) }
+  catch {
+    log(JSON.stringify({status:'SUBMITTED_UNCONFIRMED',hash,action,message:'DO NOT RETRY execute; inspect receipt by hash before any further action'}))
+    return null
+  }
+}
 async function main(){
   const [mode,orderPath] = process.argv.slice(2)
   if(!['check','execute'].includes(mode) || !orderPath || process.argv.length!==4)throw Error('usage: node scripts/g2-local-sepolia-signer.mjs check|execute order.json')
@@ -100,7 +107,8 @@ async function main(){
   const wallet=createWalletClient({account,chain:sepolia,transport:http(rpc,{retryCount:0})})
   const hash=await wallet.writeContract({...sim.request,gas:gas*12n/10n})
   console.log(JSON.stringify({status:'SUBMITTED',hash,action:o.action}))
-  const receipt=await client.waitForTransactionReceipt({hash,confirmations:2,timeout:180000})
+  const receipt=await awaitSubmittedReceipt(client,hash,o.action)
+  if(!receipt){process.exitCode=4;return}
   console.log(JSON.stringify({status:receipt.status,hash,blockNumber:String(receipt.blockNumber),gasUsed:String(receipt.gasUsed)}))
   if(receipt.status!=='success')process.exitCode=3
 }

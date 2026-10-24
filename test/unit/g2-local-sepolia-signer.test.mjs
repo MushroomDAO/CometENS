@@ -1,6 +1,6 @@
 import { describe,it,expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { validateOrder,validateChain,assertPrivateFile } from '../../scripts/g2-local-sepolia-signer.mjs'
+import { validateOrder,validateChain,assertPrivateFile,awaitSubmittedReceipt } from '../../scripts/g2-local-sepolia-signer.mjs'
 const a=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/01-approve.json',import.meta.url)))
 const b=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/02-commit.json',import.meta.url)))
 const m={label:'cometens-g2-20261023',wallet:a.from,durationSeconds:'31536000',maxTotalCost:'9000000',expectedRegistrarCodeHash:'0xb025a7edb8e81862c2d28857211a7a91c1fb2b17c5bcf28b983987067f083c2a',expectedTokenCodeHash:'0xa9a4749f886f5035336f6e16dce5ca6f339ae73f76e94ad4b8f46a447dc335f3'}
@@ -28,4 +28,40 @@ describe('G2 manual only signer input gate',()=>{
   await expect(validateChain({getChainId:async()=>1},a,m)).rejects.toThrow('wrong-chain')
   await expect(validateChain({getChainId:async()=>11155111,getBytecode:async()=>undefined},a,m)).rejects.toThrow('code-identity')
  })
+})
+
+describe('actual Sepolia chain guards with deterministic fake RPC',()=>{
+ const fixed = {allowance:0n,balance:9000000n,base:8000021n,premium:0n,available:true,commitmentAt:0n}
+ function fake(change={}) {
+  const state={...fixed,...change}
+  return {
+   getChainId:async()=>11155111,
+   getBytecode:async({address})=>address.toLowerCase()==='0xf633e7fc17e2bbe0d0965d18ec1821dcb754a3d3' ? '0x01' : '0x02',
+   readContract:async({functionName})=>functionName==='getRegisterPrice' ? [state.base,state.premium] : functionName==='isAvailable'?state.available:functionName==='balanceOf'?state.balance:state[functionName]
+  }
+ }
+ // Pins are computed locally from fake deployed bytecode; this confirms the
+ // guards run beyond the code identity check.
+ const pinned={...m,expectedRegistrarCodeHash:'',expectedTokenCodeHash:''}
+ it('rejects all six unsafe mutations while accepting valid approve and commit',async()=>{
+  const {keccak256}=await import('viem')
+  pinned.expectedRegistrarCodeHash=keccak256('0x01')
+  pinned.expectedTokenCodeHash=keccak256('0x02')
+  await expect(validateChain(fake(),a,pinned)).resolves.toMatchObject({functionName:'approve',price:8000021n})
+  await expect(validateChain(fake({allowance:1n}),a,pinned)).rejects.toThrow('existing-allowance-manual-review')
+  await expect(validateChain(fake({base:8000020n}),a,pinned)).rejects.toThrow('stale-approval-price')
+  await expect(validateChain(fake({base:9000001n}),a,pinned)).rejects.toThrow('price-cap')
+  await expect(validateChain(fake({balance:8000020n}),a,pinned)).rejects.toThrow('insufficient-token')
+  await expect(validateChain(fake({available:false}),a,pinned)).rejects.toThrow('name-unavailable')
+  await expect(validateChain(fake(),b,pinned)).resolves.toMatchObject({functionName:'commit'})
+  await expect(validateChain(fake({commitmentAt:1n}),b,pinned)).rejects.toThrow('commitment-already-exists')
+ })
+})
+it('keeps submitted hash and forbids retry when receipt waiting fails',async()=>{
+ const hash=`0x${'ab'.repeat(32)}`
+ const lines=[]
+ const client={waitForTransactionReceipt:async()=>{throw Error('RPC timeout')}}
+ expect(await awaitSubmittedReceipt(client,hash,'commit',x=>lines.push(JSON.parse(x)))).toBeNull()
+ expect(lines).toMatchObject([{status:'SUBMITTED_UNCONFIRMED',hash,action:'commit',message:expect.stringContaining('DO NOT RETRY')}])
+ expect(await awaitSubmittedReceipt({waitForTransactionReceipt:async()=>({status:'success'})},hash,'commit')).toMatchObject({status:'success'})
 })
