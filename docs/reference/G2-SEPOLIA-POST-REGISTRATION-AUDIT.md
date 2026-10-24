@@ -1,0 +1,7 @@
+# G2 Sepolia ENSv2 post-registration observation (not sovereignty)
+
+After a successful Sepolia ETHRegistrar transaction, `auditG2Ensv2Parent` fetches the receipt again from the RPC, verifies the registrar address, transaction status, block number/hash and exactly one matching `NameRegistered` event for the requested label and expected holder, then joins it to a separate finalized ENSv2 `inspectEnsv2` observation. The sampled finalized block must be at least as recent as the transaction, and the target parent must still be registered, non-expired, and held by the expected test wallet.
+
+It returns `REGISTERED_OWNER_RPC_OBSERVED_ONLY` **only** when the snapshot predicates pass; every failure returns `BLOCKED`. It always sets `eacExclusiveControlVerified=false`, `independentlyFinalized=false`, and `sovereignReceipt=false`: the sampled role inventory cannot exhaustively disprove hidden approvals, upgrade paths or current future EAC revocation, and a single finalized RPC cannot establish canonical consensus independently. A successful registration receipt does not imply G2.4 native subname issuance, independent member resolver control or instant OP revocation.
+
+This evidence must be paired with the separate registrar commit/reveal workflow, exact transaction logs/receipt and independent finalized RPC cross-check before the G2 acceptance matrix can advance. User acceptance and permission to broadcast are distinct from this audit output.
