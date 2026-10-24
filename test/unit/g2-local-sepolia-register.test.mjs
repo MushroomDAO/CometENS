@@ -1,10 +1,33 @@
 import { describe,it,expect,vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { createPublicClient, custom } from 'viem'
+import { sepolia } from 'viem/chains'
 import { validateRegisterOrder,checkRegister,checkWalletDelegation } from '../../scripts/g2-local-sepolia-register.mjs'
 const order=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/03-register.json',import.meta.url)))
 order.expiresAt=new Date(Date.now()+3600000).toISOString()
 const manifest={label:'cometens-g2-20261023',wallet:order.from,durationSeconds:'31536000',maxTotalCost:'9000000',expectedRegistrarCodeHash:'0xb025a7edb8e81862c2d28857211a7a91c1fb2b17c5bcf28b983987067f083c2a',expectedTokenCodeHash:'0xa9a4749f886f5035336f6e16dce5ca6f339ae73f76e94ad4b8f46a447dc335f3'}
 describe('G2 registration safety',()=>{
+ it('normalizes actual viem empty eth_getCode responses and rejects delegated runtime',async()=>{
+  const client=code=>createPublicClient({chain:sepolia,transport:custom({request:async({method})=>{
+   if(method==='eth_chainId') return '0xaa36a7'
+   if(method==='eth_getCode') return code
+   throw Error(`unexpected RPC ${method}`)
+  }})})
+  await expect(client('0x').getBytecode({address:order.from})).resolves.toBeUndefined()
+  await expect(checkWalletDelegation([client('0x'),client('0x')])).resolves.toEqual({status:'PASS'})
+  await expect(checkWalletDelegation([client('0x'),client('0xef01005804b6119d12ad403a430fd3cff12a8ff6e4064b')])).resolves.toMatchObject({reason:'WALLET_CODE_RPC_DISAGREEMENT'})
+  await expect(checkWalletDelegation([client('0xef01005804b6119d12ad403a430fd3cff12a8ff6e4064b'),client('0xef01005804b6119d12ad403a430fd3cff12a8ff6e4064b')])).resolves.toMatchObject({reason:'EIP7702_DELEGATION_ACTIVE'})
+ })
+ it('keeps validation independent of the expired October fixture when clock advances',async()=>{
+  vi.useFakeTimers()
+  try {
+   vi.setSystemTime(new Date('2026-11-12T12:00:00Z'))
+   const futureOrder={...order,expiresAt:new Date(Date.now()+3600000).toISOString()}
+   expect(validateRegisterOrder(futureOrder,manifest).maxCost).toBe(9000000n)
+   expect((await checkRegister({order:futureOrder,manifest,saltFile:'/no/file',clients:[]})).reason).toBe('SALT_INVALID')
+   expect(()=>validateRegisterOrder(order,manifest)).toThrow('INVALID_REGISTER_ORDER')
+  } finally {vi.useRealTimers()}
+ })
  it('rejects observed 7702 delegate on two RPCs, code mismatch and unexpected code',async()=>{
   const code='0xef01005804b6119d12ad403a430fd3cff12a8ff6e4064b'
   const client=c=>({getChainId:async()=>11155111,getBytecode:async()=>c})
