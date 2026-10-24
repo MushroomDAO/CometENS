@@ -2,7 +2,7 @@
 
 **This CLI signs only when the human directly runs `execute` in a TTY and types the exact confirmation.** ChatGPT/agents must not invoke execute. The account secret stays in `~/.config/cometens-g2-sepolia/test-wallet.key` (0600); the existing salt and public manifest stay in the same 0700 directory. Never paste a private key into JSON, chat, commits or logs. The CLI deliberately has no register/reveal or arbitrary-call support.
 
-Run in the CometENS repository/worktree with Node 22 and installed dependencies:
+Run on macOS/Linux (POSIX ownership checks required) in the CometENS repository/worktree with Node 22 and installed dependencies. Windows is unsupported and fails closed before reading private files:
 
 ```bash
 node scripts/g2-local-sepolia-signer.mjs check examples/g2-sepolia/01-approve.json

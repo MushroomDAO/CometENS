@@ -44,7 +44,11 @@ export function validateOrder(o, m, s) {
   return o
 }
 const loadJson = async (path,max=4096) => { const b=await readFile(path); if(b.length>max)throw Error('oversized');return JSON.parse(b.toString()) }
-const privateFile = async path => {const s=await stat(path);if(!s.isFile() || (s.mode & 0o777)!==0o600 || s.uid!==process.getuid())throw Error('unsafe-file')}
+export function assertPrivateFile(s, uid = typeof process.getuid === 'function' ? process.getuid() : undefined) {
+  if (uid == null) throw Error('posix-ownership-check-required')
+  if (!s.isFile() || (s.mode & 0o777) !== 0o600 || s.uid !== uid) throw Error('unsafe-file')
+}
+const privateFile = async path => assertPrivateFile(await stat(path))
 export async function validateChain(client,o,m) {
   if (await client.getChainId()!==11155111) throw Error('wrong-chain')
   const [registrarCode,tokenCode] = await Promise.all([client.getBytecode({address:REGISTRAR}),client.getBytecode({address:TOKEN})])
