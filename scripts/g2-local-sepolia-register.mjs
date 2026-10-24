@@ -15,10 +15,11 @@ export async function checkWalletDelegation(clients) {
   if (!Array.isArray(clients)||clients.length!==2) return {status:'BLOCKED',reason:'DUAL_RPC_REQUIRED'}
   try {
     const states=await Promise.all(clients.map(async client=>({chain:await client.getChainId(),code:await client.getBytecode({address:WALLET,blockTag:'latest'})})))
-    if (states.some(s=>s.chain!==11155111||typeof s.code!=='string')) return {status:'BLOCKED',reason:'WALLET_CODE_UNVERIFIED'}
-    if (!same(states[0].code,states[1].code)) return {status:'BLOCKED',reason:'WALLET_CODE_RPC_DISAGREEMENT'}
-    if (DELEGATION.test(states[0].code)) return {status:'BLOCKED',reason:'EIP7702_DELEGATION_ACTIVE',delegate:`0x${states[0].code.slice(8)}`}
-    if (states[0].code!=='0x') return {status:'BLOCKED',reason:'UNEXPECTED_WALLET_CODE'}
+    if (states.some(s=>s.chain!==11155111||(s.code!==undefined&&typeof s.code!=='string'))) return {status:'BLOCKED',reason:'WALLET_CODE_UNVERIFIED'}
+    const codes=states.map(s=>s.code??'0x')
+    if (!same(codes[0],codes[1])) return {status:'BLOCKED',reason:'WALLET_CODE_RPC_DISAGREEMENT'}
+    if (DELEGATION.test(codes[0])) return {status:'BLOCKED',reason:'EIP7702_DELEGATION_ACTIVE',delegate:`0x${codes[0].slice(8)}`}
+    if (codes[0]!=='0x') return {status:'BLOCKED',reason:'UNEXPECTED_WALLET_CODE'}
     return {status:'PASS'}
   } catch { return {status:'BLOCKED',reason:'WALLET_CODE_RPC_FAILED'} }
 }
