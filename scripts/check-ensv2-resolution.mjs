@@ -64,7 +64,11 @@ function readEnvFile(p) {
 
 const home = readEnvFile(join(process.env.HOME ?? '', 'Dev/.env'))
 const local = readEnvFile(join(REPO_ROOT, '.env.local'))
-const RPC = process.env.SEPOLIA_RPC || home.SEPOLIA_RPC || local.VITE_L1_SEPOLIA_RPC_URL
+// An explicit empty SEPOLIA_RPC is an opt-out: never silently fall back to
+// a developer-local .env when a caller intentionally requests no network.
+const RPC = Object.hasOwn(process.env, 'SEPOLIA_RPC')
+  ? process.env.SEPOLIA_RPC
+  : home.SEPOLIA_RPC || local.VITE_L1_SEPOLIA_RPC_URL
 
 if (!RPC) {
   console.error('ENSV2_CHECK: no L1 Sepolia RPC. Set SEPOLIA_RPC, or VITE_L1_SEPOLIA_RPC_URL in .env.local.')
