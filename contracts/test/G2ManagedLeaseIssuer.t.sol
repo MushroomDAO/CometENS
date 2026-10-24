@@ -90,6 +90,23 @@ contract G2ManagedLeaseIssuerTest is Test {
         records.issue("controller-bypass", member, address(0));
         assertFalse(issuer.sovereignReceipt());
         assertFalse(issuer.l1OwnershipVerified());
+        assertFalse(issuer.nativeIssuanceSupported());
+    }
+
+    function test_oldManagedLeaseCanStillWriteAppRecordsBeforeDelayedTransferCheckpoint() public {
+        _grant(issuer.CAP_ISSUE(), 2, uint64(block.timestamp + 1000));
+        // Model the OP side of an L1 transfer with delayed relay: its old
+        // inbox checkpoint remains active regardless of current L1 custody.
+        vm.prank(delegated);
+        bytes32 managedNode = issuer.issue("stalemanaged", member, address(0));
+        assertEq(records.subnodeOwner(managedNode), member);
+        assertFalse(issuer.nativeIssuanceSupported());
+        assertFalse(issuer.sovereignReceipt());
+
+        _checkpoint(2, 2, rotatedOwner, 3600);
+        vm.prank(delegated);
+        vm.expectRevert(G2ManagedLeaseIssuer.Unauthorized.selector);
+        issuer.issue("aftercheckpoint", member, address(0));
     }
 
     function test_opManagedIssuerAllowsCurrentControllerAndScopedDelegates() public {
