@@ -1,0 +1,7 @@
+# ENSv2 L1 issuance prototype — G2.4 remains pending
+
+Sources: https://docs.ens.domains/ensv2/permissioned-registry/ and https://docs.ens.domains/ensv2/enhanced-access-control/ and https://docs.ens.domains/ensv2/tutorial-contract-developers/.
+
+Experimental Sepolia-only contract G2Ensv2AtomicSubnameProof uses the published Permissioned Registry signatures getState(uint256), getSubregistry(string), hasRootRoles(uint256,address), register(string,address,address,address,uint256,uint64). It checks current parent owner, unexpired registration, unchanged subregistry pointer, and contract registrar role within the issuance transaction. A second check after register reverts the entire transaction if the parent changes during execution. There is no platform administrator or delegated issue method.
+
+**Limits:** Constructor accepts caller-supplied registry addresses. It does not attest official deployment, EIP-1967 implementation slots, governance, or parent hierarchy. Codehash pins alone do not detect upgrades behind a proxy. Third parties with child-root registrar role can bypass this contract; a parent or registry upgrade controller might override member rights. It is not a full EAC emancipation proof. Solidity tests use a fixture matching the documented ABI subset, rather than actual official runtime; live ENSv2 deployment, role and issuer authorization, direct alternative paths, expiry, migration and re-registration still require audit. No signer, broadcast or live chain writes. This is not a SOVEREIGN receipt; G2.4 and Issue #138 remain pending.
