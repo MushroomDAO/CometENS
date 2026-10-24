@@ -12,8 +12,8 @@ function fixture(override = {}) {
     getChainId: async () => override.chain ?? 11155111,
     getBlock: async () => ({ number: 100n, hash: '0x' + 'a'.repeat(64) }),
     getBytecode: async ({ address }) => override.badAddress === address ? '0x6001' : bytecode,
-    getStorageAt: async ({ slot }) => slot === '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50'
-      ? (override.beacon ?? zeroSlot) : (override.slot ?? zeroSlot),
+    getStorageAt: async ({ address, slot }) => slot === '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50'
+      ? (address === ETH ? override.ethBeacon ?? zeroSlot : override.beacon ?? zeroSlot) : (override.slot ?? zeroSlot),
     readContract: async ({ address, functionName, blockNumber }) => {
       if (blockNumber !== 100n) throw Error('inconsistent block')
       if (override.badHierarchy) return address === ROOT ? ROOT : [ETH, 'eth']
@@ -37,6 +37,7 @@ describe('ENSv2 Sepolia real-runtime provenance gate (no RPC fixture means no pr
   it('fails closed when beacon proxy pointer exists, even with zero implementation slot', async () => {
     const beacon = '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890'
     expect((await verifySepoliaRuntime({ client: fixture({ beacon }), pins })).reason).toBe('BEACON_PROXY_UNVERIFIED_root')
+    expect((await verifySepoliaRuntime({ client: fixture({ ethBeacon: beacon }), pins })).reason).toBe('BEACON_PROXY_UNVERIFIED_eth')
     expect((await verifySepoliaRuntime({ client: fixture({ beacon: '0x' }), pins })).reason).toBe('BEACON_PROXY_UNVERIFIED_root')
   })
   it('even matching synthetic runtime cannot imply member sovereignty', async () => {
