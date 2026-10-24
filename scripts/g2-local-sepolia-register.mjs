@@ -5,7 +5,7 @@ import { createPublicClient, http } from 'viem'
 import { sepolia } from 'viem/chains'
 import { validateRegistrationManifest, loadOrCreateSalt, prepareSepoliaRegistration, REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
 import { assertPrivateFile } from './g2-local-sepolia-signer.mjs'
-import { stat } from 'node:fs/promises'
+import { stat, lstat } from 'node:fs/promises'
 
 const COMMITMENT='0x2f960f05f42a357bbadfd04487066d5e429ccea0329860ea5a7211e5a7c2ec35'
 const REVERT_RECEIVER='0x57f447ce'
@@ -57,15 +57,22 @@ export async function checkRegister({order,manifest,saltFile,clients}) {
     commitment:order.commitment,quotedPrice:a.totalCost,allowance:a.allowance,
     block:a.simulationBlock,signatures:false,broadcasts:false}
 }
+export async function readPublicOrder(path) {
+  const info=await lstat(path)
+  if(!info.isFile() || info.isSymbolicLink() || info.size>4096 || info.size===0) throw Error('UNSAFE_ORDER_FILE')
+  const raw=await readFile(path)
+  if(raw.length>4096) throw Error('OVERSIZED_ORDER')
+  return JSON.parse(raw.toString())
+}
 async function main() {
   const [mode,orderPath]=process.argv.slice(2)
   if (process.argv.length!==4 || !['check','execute'].includes(mode)) throw Error('USAGE')
   if (mode==='execute') throw Error('REGISTER_EXECUTION_DISABLED_PENDING_OWNER_DELEGATION_CLEARANCE')
   const dir=`${process.env.HOME}/.config/cometens-g2-sepolia`
   const [manifestPath,saltFile]=[`${dir}/cometens-g2-20261023.public-manifest.json`,`${dir}/cometens-g2-20261023.salt.json`]
-  await Promise.all([manifestPath,saltFile,orderPath].map(async p=>assertPrivateFile(await stat(p))))
+  await Promise.all([manifestPath,saltFile].map(async p=>assertPrivateFile(await stat(p))))
   const parse=async p=>{const data=await readFile(p);if(data.length>4096)throw Error('SIZE');return JSON.parse(data.toString())}
-  const [manifest,order]=await Promise.all([parse(manifestPath),parse(orderPath)])
+  const [manifest,order]=await Promise.all([parse(manifestPath),readPublicOrder(orderPath)])
   const urls=['https://sepolia.drpc.org','https://ethereum-sepolia-rpc.publicnode.com']
   const clients=urls.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0}),ccipRead:false}))
   console.log(JSON.stringify(await checkRegister({order,manifest,saltFile,clients})))

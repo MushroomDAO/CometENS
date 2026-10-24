@@ -25,3 +25,23 @@ describe('G2 registration safety',()=>{
   expect(spy).not.toHaveBeenCalled()
  })
 })
+
+it('accepts ordinary public 0644 order JSON, rejects symlink and oversized order',async()=>{
+ const {readPublicOrder}=await import('../../scripts/g2-local-sepolia-register.mjs')
+ const {mkdtemp,writeFile,chmod,symlink,rm}=await import('node:fs/promises')
+ const {tmpdir}=await import('node:os')
+ const {join}=await import('node:path')
+ const dir=await mkdtemp(join(tmpdir(),'g2-public-order-'))
+ try {
+  const publicPath=join(dir,'order.json')
+  await writeFile(publicPath,JSON.stringify(order))
+  await chmod(publicPath,0o644)
+  expect(await readPublicOrder(publicPath)).toEqual(order)
+  const alias=join(dir,'alias.json')
+  await symlink(publicPath,alias)
+  await expect(readPublicOrder(alias)).rejects.toThrow('UNSAFE_ORDER_FILE')
+  const large=join(dir,'large.json')
+  await writeFile(large,'x'.repeat(4097))
+  await expect(readPublicOrder(large)).rejects.toThrow('UNSAFE_ORDER_FILE')
+ } finally {await rm(dir,{recursive:true,force:true})}
+})
