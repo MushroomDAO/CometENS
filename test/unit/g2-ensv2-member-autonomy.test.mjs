@@ -41,13 +41,15 @@ describe('ENSv2 member resolver autonomy: negative-only snapshot evidence', () =
     expect((await result({ values: { getResolver: registry } })).reason).toBe('RESOLVER_POINTER_CHANGED')
   })
   it('reports EAC root resolver, subregistry, unregister, upgrade administrators', async () => {
-    for (const bit of [12n, 20n, 24n, 124n]) {
+    for (const bit of [8n, 12n, 20n, 24n, 124n]) {
       const r = await result({ values: { roleCount: 1n << (bit + 128n) } })
       expect(r.findings).toContain('ROOT_EAC_OVERRIDE_AVAILABLE')
     }
   })
   it('reports dangerous regular role even if emancipation flag claims true', async () => {
-    expect((await result({ values: { roleCount: 1n << 24n } })).findings).toContain('ROOT_EAC_OVERRIDE_AVAILABLE')
+    for (const bit of [8n, 24n]) {
+      expect((await result({ values: { roleCount: 1n << bit } })).findings).toContain('ROOT_EAC_OVERRIDE_AVAILABLE')
+    }
   })
   it('fails closed on unknown runtime or any RPC/ABI error', async () => {
     expect((await result({ code: '0x' })).reason).toBe('NO_REGISTRY_CODE')

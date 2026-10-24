@@ -16,7 +16,7 @@ export const REGISTRY_ABI = [
 ]
 
 const ZERO = '0x0000000000000000000000000000000000000000'
-const danger = [12n, 20n, 24n, 124n]
+const danger = [8n, 12n, 20n, 24n, 124n]
 const count = (bitmap, shift) => (bitmap >> shift) & 15n
 const deny = (reason, findings = []) => ({ verdict: 'UNPROVEN', sovereignReceipt: false, reason, findings })
 
