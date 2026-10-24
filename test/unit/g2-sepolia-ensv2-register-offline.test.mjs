@@ -27,9 +27,14 @@ async function privateFixture() {
 function fake(config = {}) {
   const calls = []
   const unix = now()
+  let latestReads = 0
   const publicClient = {
     async getChainId() { calls.push(['chain']); return config.wrongChain ? 1 : 11155111 },
-    async getBlock(args) { calls.push(['block', args]); return { number: 200n,
+    async getBlock(args) { calls.push(['block', args]);
+      if (args.blockTag === 'latest' && ++latestReads > 1 && config.newHeadDuringPreparation) {
+        return { number: 201n, hash: h(201), timestamp: unix + 1n }
+      }
+      return { number: 200n,
       hash: config.reorg && args.blockNumber !== undefined ? h(201) : h(200),
       timestamp: config.stale ? unix - 900n : unix } },
     async getBytecode({ address, blockNumber }) { calls.push(['code', address, blockNumber]);
@@ -186,7 +191,10 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
       const r = await prepareSepoliaRegistration({ manifest: manifest(), saltFile: f.path,
         phase: 'reveal', client: fake({ commitmentTime: now() - 100n }).client })
       expect(r).toMatchObject({ reason: 'EXTERNAL_WALLET_ACTION_REQUIRED', simulated: true,
-        registrationCompleted: false, sovereignReceipt: false })
+        registrationCompleted: false, sovereignReceipt: false, quoteSafety: {
+          atomicPriceCap: false, maxTotalCostBaseUnits: '100000000',
+          allowanceMayChangeAfterSnapshot: true, walletMustRecheckAllowanceBeforeSigning: true,
+        } })
       expect(r.revealDraft.data.slice(0, 10)).toBe('0xcff3e7c2')
       const decoded = decodeFunctionData({ abi: REG_ABI, data: r.revealDraft.data })
       expect(decoded.functionName).toBe('register')
@@ -227,6 +235,7 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
     ['too old', { commitmentTime: now() - 86500n }, 'COMMITMENT_NOT_IN_WINDOW'],
     ['low allowance', { commitmentTime: now() - 100n, lowAllowance: true }, 'ALLOWANCE_TOO_LOW'],
     ['over-cap allowance', { commitmentTime: now() - 100n, excessAllowance: true }, 'ALLOWANCE_EXCEEDS_CAP'],
+    ['head advances after quote', { commitmentTime: now() - 100n, newHeadDuringPreparation: true }, 'QUOTE_HEAD_ADVANCED'],
     ['simulation revert', { commitmentTime: now() - 100n, simulateFails: true }, 'RPC_OR_SIMULATION_FAILED'],
   ])('reveal guards %s without exposing salt', async (_, options, reason) => {
     const f = await privateFixture()
@@ -278,6 +287,26 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
       expect(r).toMatchObject({ status: 'BLOCKED', reason: 'SALT_PERSISTENCE_FAILED' })
       expect(r).not.toHaveProperty('revealDraft')
       await expect(stat(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await f.done() }
+  })
+
+  it('shows non-atomic allowance race explicitly: later wallet approval can invalidate simulated cap', async () => {
+    const f = await privateFixture()
+    try {
+      await loadOrCreateSalt(f.path, validateRegistrationManifest(manifest()),
+        { create: true, entropy: () => fixedSalt })
+      const conditions = { commitmentTime: now() - 100n }
+      const { client } = fake(conditions)
+      const draft = await prepareSepoliaRegistration({ manifest: manifest(), saltFile: f.path,
+        phase: 'reveal', client })
+      expect(draft.revealDraft).toBeDefined()
+      expect(draft.quoteSafety.atomicPriceCap).toBe(false)
+      conditions.excessAllowance = true // A separate wallet approval mined AFTER the simulated snapshot.
+      const laterAllowance = await client.readContract({ address: MOCK_USDC, functionName: 'allowance',
+        args: [WALLET, REGISTRAR], blockNumber: 201n })
+      expect(laterAllowance).toBe(200000000n)
+      expect(laterAllowance).toBeGreaterThan(BigInt(draft.quoteSafety.maxTotalCostBaseUnits))
+      expect(draft.quoteSafety.walletMustRecheckAllowanceBeforeSigning).toBe(true)
     } finally { await f.done() }
   })
 })

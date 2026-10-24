@@ -201,11 +201,20 @@ export async function prepareSepoliaRegistration({ manifest, saltFile, phase, cl
         BigInt(Math.floor(Date.now() / 1000)) - block.timestamp > 120n) {
       return blocked('CHAIN_OR_BLOCK_DRIFT')
     }
+    // The quote/allowance simulation is not atomic with a later wallet action.
+    // Refuse to hand off reveal calldata if a newer L1 head arrived during preparation.
+    if (phase === 'reveal') {
+      const tip = await client.getBlock({ blockTag: 'latest' })
+      if (tip?.number !== at || !same(tip?.hash, block.hash)) return blocked('QUOTE_HEAD_ADVANCED')
+    }
     return { ...blocked('EXTERNAL_WALLET_ACTION_REQUIRED', { quoteBase: String(quote[0]),
       quotePremium: String(quote[1]), totalCost: String(price), allowance: String(allowance),
       paymentBalance: String(tokenBalance), gasReserveWei: String(gas * gasPrice * 2n),
       ...(phase === 'reveal' ? { revealDraft: { to: REGISTRAR, from: WALLET, value: '0', data: calldata } } : {}),
     }), simulated: true, simulationBlock: { number: String(at), hash: block.hash },
+      quoteSafety: { maxTotalCostBaseUnits: String(m.maxCost), quotedAtBlock: String(at),
+        atomicPriceCap: false, allowanceMayChangeAfterSnapshot: true,
+        walletMustRecheckAllowanceBeforeSigning: phase === 'reveal' },
     }
   } catch { return blocked('RPC_OR_SIMULATION_FAILED') }
 }
