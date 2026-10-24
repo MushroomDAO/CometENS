@@ -33,10 +33,14 @@ const CONTRACT = '0x1111111111111111111111111111111111111111' as Address
  * classify it makes this suite fail rather than quietly skip it. Adding a name here is a
  * deliberate act someone has to justify in review.
  */
-const READ_ONLY = new Set([
+const GET_READ_ONLY = new Set([
   '/health', '/check-label', '/check-owner', '/lookup', '/resolve-status',
   '/root-domains', '/application', '/applications', '/approval-mode',
 ])
+// V4 preflight is POST-only but uses only eth_call. It is NOT an issuance endpoint,
+// never consumes KV nonce, and defaults to 403 until specifically configured.
+const POST_READ_ONLY = new Set(['/v4/issuance/preflight'])
+const READ_ONLY = new Set([...GET_READ_ONLY, ...POST_READ_ONLY])
 
 function allDispatchedPaths(): string[] {
   const src = readFileSync(SOURCE, 'utf8')
@@ -160,7 +164,7 @@ describe('a malformed signature is 401, never 5xx', () => {
     // Reading is what these routes are for, so: a read-only route answers GET. A write route
     // does not — it is POST-only and a GET falls through to 404.
     return Promise.all(
-      [...READ_ONLY].map(async (path) => {
+      [...GET_READ_ONLY].map(async (path) => {
         const worker = (await import('../../workers/api/src/index')).default
         const res = await worker.fetch(
           new Request(`https://api.test${path}`, { method: 'GET' }),
@@ -169,6 +173,17 @@ describe('a malformed signature is 401, never 5xx', () => {
         expect({ path, status: res.status }).not.toMatchObject({ status: 404 })
       }),
     )
+  })
+
+  it('the sole POST-only read-only exception is disabled by default, not a V3 writer', async () => {
+    const worker = (await import('../../workers/api/src/index')).default
+    for (const path of POST_READ_ONLY) {
+      const res = await worker.fetch(new Request(`https://api.test${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signature: 'invalid' }),
+      }), env() as any, {} as unknown as TestExecutionContext)
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ preflightOnly: true, nativeAuthorityVerified: false })
+    }
   })
 
   it('a WRITE route does not answer a GET (control)', async () => {
