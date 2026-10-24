@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "chainId": 11155111,
+  "from": "0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C",
+  "action": "approve",
+  "to": "0x240b0316df57887dbbe58b586508b19e633a14aa",
+  "amountBaseUnits": "8000021",
+  "commitment": null,
+  "expiresAt": "2026-10-27T00:00:00.000Z"
+}
