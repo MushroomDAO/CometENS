@@ -28,6 +28,9 @@ contract G2ManagedLeaseIssuer {
     uint256 public constant CAP_INITIAL_ADDR = 2;
     bool public constant sovereignReceipt = false;
     bool public constant l1OwnershipVerified = false;
+    /// @notice OP writes are application records; callers MUST NOT interpret
+    /// these as ENS native ownership or as proof of current L1 authority.
+    bool public constant nativeIssuanceSupported = false;
 
     address public immutable inbox;
     address public immutable records;
