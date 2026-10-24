@@ -51,7 +51,7 @@ function fake(config = {}) {
         case 'rentPriceOracle': return '0x4444444444444444444444444444444444444444'
         case 'decimals': return config.wrongDecimals ? 18 : 6
         case 'balanceOf': return config.lowBalance ? 1000000n : 100000000n
-        case 'allowance': return config.lowAllowance ? 1n : 100000000n
+        case 'allowance': return config.lowAllowance ? 1n : config.excessAllowance ? 200000000n : 100000000n
         case 'isPaymentToken': return !config.unapprovedToken
         default: throw Error(`unmatched ${functionName}`)
       }
@@ -226,6 +226,7 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
     ['too new', { commitmentTime: now() - 30n }, 'COMMITMENT_NOT_IN_WINDOW'],
     ['too old', { commitmentTime: now() - 86500n }, 'COMMITMENT_NOT_IN_WINDOW'],
     ['low allowance', { commitmentTime: now() - 100n, lowAllowance: true }, 'ALLOWANCE_TOO_LOW'],
+    ['over-cap allowance', { commitmentTime: now() - 100n, excessAllowance: true }, 'ALLOWANCE_EXCEEDS_CAP'],
     ['simulation revert', { commitmentTime: now() - 100n, simulateFails: true }, 'RPC_OR_SIMULATION_FAILED'],
   ])('reveal guards %s without exposing salt', async (_, options, reason) => {
     const f = await privateFixture()

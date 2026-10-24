@@ -170,6 +170,12 @@ export async function prepareSepoliaRegistration({ manifest, saltFile, phase, cl
     const price = BigInt(quote[0]) + BigInt(quote[1])
     if (price <= 0n || price > m.maxCost) return blocked('COST_EXCEEDS_CAP')
     if (BigInt(tokenBalance) < price) return blocked('INSUFFICIENT_MOCK_USDC', { required: String(price) })
+    // Registrar reprices at transaction inclusion. Keep ERC20 transferFrom's
+    // actual spending allowance bounded by the wallet's explicit price cap.
+    if (phase === 'reveal' && BigInt(allowance) > m.maxCost) return blocked('ALLOWANCE_EXCEEDS_CAP', {
+      maxTotalCost: String(m.maxCost), approveDraft: { to: MOCK_USDC, from: WALLET, value: '0',
+        data: encodeFunctionData({ abi: TOKEN_ABI, functionName: 'approve', args: [REGISTRAR, price] }) },
+    })
     if (phase === 'reveal' && BigInt(allowance) < price) return blocked('ALLOWANCE_TOO_LOW', {
       required: String(price), approveDraft: { to: MOCK_USDC, from: WALLET, value: '0',
         data: encodeFunctionData({ abi: TOKEN_ABI, functionName: 'approve', args: [REGISTRAR, price] }) },
