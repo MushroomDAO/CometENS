@@ -11,7 +11,7 @@ interface ILiveV2Registry {
     function roleCount(uint256) external view returns (uint256);
     function grantRootRoles(uint256, address) external;
     function grantRoles(uint256, uint256, address) external;
-    function setResolver(string calldata, address) external;
+    function setResolver(uint256, address) external;
 }
 
 /// @notice Mandatory Anvil/Foundry fork test against actual deployed Sepolia code.
@@ -23,6 +23,11 @@ contract G2Ensv2LiveSepoliaForkTest is Test {
     uint256 constant ROLE_SET_RESOLVER = 1 << 24;
     uint256 constant ROLE_UPGRADE_ADMIN = uint256(1) << 252;
     uint256 constant ETH_LABEL = uint256(keccak256("eth"));
+    // Exact custom-error selectors observed against official Sepolia deployed
+    // runtime at the pinned fork block. An unknown function's empty revert
+    // must never be accepted as EAC authorization evidence.
+    bytes4 constant ROLE_GRANT_DENIED = 0xd1a3b355;
+    bytes4 constant RESOLVER_WRITE_DENIED = 0x4b27a133;
 
     function setUp() public {
         if (block.chainid != 11155111) { vm.skip(true); return; }
@@ -40,22 +45,25 @@ contract G2Ensv2LiveSepoliaForkTest is Test {
 
     function test_unprivilegedActorCannotGrantRootRegistryAdmin() public {
         vm.prank(ATTACKER);
-        vm.expectRevert();
+        vm.expectPartialRevert(ROLE_GRANT_DENIED);
         ILiveV2Registry(ROOT).grantRootRoles(ROLE_UPGRADE_ADMIN, ATTACKER);
     }
 
     function test_unprivilegedActorCannotGrantEthRegistryRootResolverRole() public {
         vm.prank(ATTACKER);
-        vm.expectRevert();
+        vm.expectPartialRevert(ROLE_GRANT_DENIED);
         ILiveV2Registry(ETH).grantRootRoles(ROLE_SET_RESOLVER, ATTACKER);
     }
 
-    function test_unprivilegedActorCannotRewriteEthResolverOrEacRoles() public {
+    function test_unprivilegedActorCannotRewriteEthResolver() public {
         vm.prank(ATTACKER);
-        vm.expectRevert();
-        ILiveV2Registry(ROOT).setResolver("eth", ATTACKER);
+        vm.expectPartialRevert(RESOLVER_WRITE_DENIED);
+        ILiveV2Registry(ROOT).setResolver(ETH_LABEL, ATTACKER);
+    }
+
+    function test_unprivilegedActorCannotGrantEthResolverRole() public {
         vm.prank(ATTACKER);
-        vm.expectRevert();
+        vm.expectPartialRevert(ROLE_GRANT_DENIED);
         ILiveV2Registry(ROOT).grantRoles(ETH_LABEL, ROLE_SET_RESOLVER, ATTACKER);
     }
 }
