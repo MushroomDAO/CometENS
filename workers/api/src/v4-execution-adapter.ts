@@ -179,6 +179,16 @@ export async function verifyV4ExternalReceipt(reader: V4ReceiptClient,
     if (typeof consumed !== 'bigint' || consumed <= handoff.nonce) throw Error('nonce')
     const repeat = await reader.getBlock({ blockNumber: receipt.blockNumber })
     if (!same(repeat.hash, receipt.blockHash) || await reader.getChainId() !== OP) throw Error('drift')
+    // The first finalized snapshot may be invalidated while the receipt, bytecode
+    // and event evidence are fetched. A second finalized read must still cover
+    // this receipt; reject rollback or same-height finalized hash changes.
+    const latestFinalized = await reader.getBlock({ blockTag: 'finalized' })
+    if (typeof latestFinalized.number !== 'bigint' || !bytes32(latestFinalized.hash) ||
+        same(latestFinalized.hash, ZERO32) || latestFinalized.number < receipt.blockNumber ||
+        latestFinalized.number < finalized.number ||
+        (latestFinalized.number === finalized.number && !same(latestFinalized.hash, finalized.hash))) {
+      throw Error('finality-regression')
+    }
     return { status: 'EXTERNAL_OP_TX_OBSERVED_ONLY' as const,
       chainId: OP, txHash, blockNumber: receipt.blockNumber, node,
       scope: 'op-application-only' as const, receiptVerified: true as const,

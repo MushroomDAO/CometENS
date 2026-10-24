@@ -120,13 +120,18 @@ function externalReceipt(handoff: V4UnsignedHandoff, changes: Record<string, unk
   const receipt = { transactionHash: txHash, from: operator, to: contract,
     status: 'success', blockHash, blockNumber: 50n, logs: [issuance, issued],
     ...(changes.receipt as object ?? {}) }
+  let finalizedReads = 0
   const reader = {
     async getChainId() { return changes.chain ?? 11155420 },
     async getTransaction() { if (changes.throwRpc) throw Error('secret-rpc-url'); return tx },
     async getTransactionReceipt() { return receipt },
     async getBytecode() { return changes.runtimeChanged ? '0x6000' : bytecode },
     async getBlock({ blockTag }: { blockTag?: string }) {
-      if (blockTag === 'finalized') return { number: changes.unfinalized ? 45n : 60n, hash: blockHash }
+      if (blockTag === 'finalized') {
+        finalizedReads++
+        if (finalizedReads > 1 && changes.terminalFinalized) return changes.terminalFinalized
+        return { number: changes.unfinalized ? 45n : 60n, hash: blockHash }
+      }
       return { hash: changes.reorg ? `0x${'ee'.repeat(32)}` : blockHash, number: 50n }
     },
     async readContract() { return changes.nonceNotConsumed ? 7n : 8n },
@@ -206,6 +211,25 @@ describe('G2.6 opt-in V4 unsigned Worker execution adapter', () => {
     expect(result).toMatchObject({ status: 'EXTERNAL_OP_TX_OBSERVED_ONLY',
       receiptVerified: true, l1NativeRights: false, broadcastHere: false, signedHere: false,
       txHash, node, blockNumber: 50n })
+  })
+
+  it('rechecks finalized coverage after receipt reads and denies finality rollback or same-height reorg', async () => {
+    const handoff = await prep()
+    const regressions = [
+      { number: 49n, hash: blockHash }, // receipt is no longer finalized
+      { number: 55n, hash: blockHash }, // finality rolled back even if receipt remains below it
+      { number: 60n, hash: parentNode }, // same-height finalized tip was replaced
+      { number: 60n, hash: '0x' }, // malformed tip is never considered evidence
+    ]
+    for (const terminalFinalized of regressions) {
+      const { reader } = externalReceipt(handoff, { terminalFinalized })
+      await denied(verifyV4ExternalReceipt(reader as unknown as
+        Parameters<typeof verifyV4ExternalReceipt>[0], handoff, txHash), 'unverified-receipt')
+    }
+    const { reader } = externalReceipt(handoff, { terminalFinalized: { number: 70n, hash: parentNode } })
+    await expect(verifyV4ExternalReceipt(reader as unknown as
+      Parameters<typeof verifyV4ExternalReceipt>[0], handoff, txHash)).resolves.toMatchObject({
+      receiptVerified: true, blockNumber: 50n })
   })
 
   it('fails closed for tampered, premature, reverted, replayed or forged receipt evidence', async () => {
