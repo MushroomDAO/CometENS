@@ -13,6 +13,29 @@ type Reader = Parameters<typeof preflightV4SignedIssuance>[0]
 const DECIMAL = /^(0|[1-9][0-9]*)$/
 const FIELDS = ['operator', 'label', 'member', 'initialAddr', 'nonce', 'deadline', 'signature']
 const denied = (status: number, error: string) => ({ status, body: { error, preflightOnly: true, nativeAuthorityVerified: false } })
+const MAX_BODY_BYTES = 8192
+
+async function boundedBody(request: Request): Promise<string | null> {
+  const declared = request.headers.get('content-length')
+  if (declared !== null && (!DECIMAL.test(declared) || Number(declared) > MAX_BODY_BYTES)) return null
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const parts: Uint8Array[] = []
+  let length = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      length += value.byteLength
+      if (length > MAX_BODY_BYTES) return null
+      parts.push(value)
+    }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const part of parts) { bytes.set(part, offset); offset += part.byteLength }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock() }
+}
 
 /** Optional, intentionally unsigned, OP APPLICATION-ONLY preflight; never consumes nonce or forwards a write. */
 export async function v4ReadonlyPreflightRoute(request: Request, env: V4Config, client: Reader,
@@ -23,10 +46,8 @@ export async function v4ReadonlyPreflightRoute(request: Request, env: V4Config, 
   }
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return denied(415, 'JSON required')
   try {
-    const length = Number(request.headers.get('content-length') ?? 0)
-    if (length > 8192) return denied(413, 'Body too large')
-    const body = await request.text()
-    if (body.length > 8192) return denied(413, 'Body too large')
+    const body = await boundedBody(request)
+    if (body === null) return denied(413, 'Body too large')
     const parsed: unknown = JSON.parse(body)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
         Object.keys(parsed).sort().join(',') !== FIELDS.slice().sort().join(',')) return denied(400, 'Invalid V4 intent')

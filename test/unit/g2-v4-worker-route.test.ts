@@ -63,5 +63,8 @@ describe('G2 V4 Worker endpoint is an optional read-only preflight', () => {
   it('rejects non-JSON and >8KiB body', async () => {
     expect((await run(input, config, accepted, { 'content-type': 'text/plain' })).status).toBe(415)
     expect((await run('x'.repeat(8193))).status).toBe(413)
+    // 5000 UTF-16 code units but 10000 UTF-8 bytes, without Content-Length.
+    expect((await run('×'.repeat(5000))).status).toBe(413)
+    expect((await run(input, config, accepted, { 'content-length': '9000' })).status).toBe(413)
   })
 })
