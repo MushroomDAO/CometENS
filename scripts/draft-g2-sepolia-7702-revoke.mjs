@@ -9,9 +9,9 @@ export function validateDraftOrder(o) {
   if (!o || Object.getPrototypeOf(o)!==Object.prototype ||
     Object.keys(o).sort().join(',')!=='action,chainId,expiresAt,maxFeeWei,maxGas,version,wallet' ||
     o.version!==1 || o.action!=='revoke-7702' || o.chainId!==CHAIN || o.wallet!==WALLET ||
-    !Number.isFinite(Date.parse(o.expiresAt)) || Date.parse(o.expiresAt)<=Date.now() || Date.parse(o.expiresAt)>Date.now()+3600000 ||
-    !/^[1-9][0-9]*$/.test(o.maxFeeWei??'') || !/^[1-9][0-9]*$/.test(o.maxGas??'') ||
-    BigInt(o.maxFeeWei)>1000000000000000n || BigInt(o.maxGas)>150000n) throw Error('INVALID_REVOKE_ORDER')
+    typeof o.expiresAt!=='string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(o.expiresAt) || !Number.isFinite(Date.parse(o.expiresAt)) || Date.parse(o.expiresAt)<=Date.now() || Date.parse(o.expiresAt)>Date.now()+3600000 ||
+    typeof o.maxFeeWei!=='string' || typeof o.maxGas!=='string' || !/^[1-9][0-9]*$/.test(o.maxFeeWei) || !/^[1-9][0-9]*$/.test(o.maxGas) ||
+    BigInt(o.maxFeeWei)>1000000000000000n || BigInt(o.maxGas)>150000n || BigInt(o.maxGas)<46000n) throw Error('INVALID_REVOKE_ORDER')
   return o
 }
 export async function draftRevocation(o, clients) {
@@ -26,6 +26,7 @@ export async function draftRevocation(o, clients) {
       if (x.fees.maxFeePerGas==null || x.fees.maxPriorityFeePerGas==null ||
           BigInt(x.fees.maxFeePerGas)*BigInt(o.maxGas)>BigInt(o.maxFeeWei)) return blocked('GAS_FEE_CAP')
     }
+    if (Date.parse(o.expiresAt)<=Date.now()) return blocked('INVALID_REVOKE_ORDER')
     return {status:'UNSIGNED_HUMAN_REVIEW_ONLY',safeToSign:false,broadcast:false,
       wallet:WALLET,chainId:CHAIN,currentDelegate:DELEGATE,
       authorization:{contractAddress:zeroAddress,executor:'self',chainId:CHAIN,nonce:a.snapshot.expectedSelfAuthorizationNonce},
