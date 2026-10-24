@@ -1,0 +1,19 @@
+import { describe,it,expect,vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { validateRegisterOrder,checkRegister } from '../../scripts/g2-local-sepolia-register.mjs'
+const order=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/03-register.json',import.meta.url)))
+const manifest={label:'cometens-g2-20261023',wallet:order.from,durationSeconds:'31536000',maxTotalCost:'9000000',expectedRegistrarCodeHash:'0xb025a7edb8e81862c2d28857211a7a91c1fb2b17c5bcf28b983987067f083c2a',expectedTokenCodeHash:'0xa9a4749f886f5035336f6e16dce5ca6f339ae73f76e94ad4b8f46a447dc335f3'}
+describe('G2 registration safety',()=>{
+ it('requires exact dedicated register schema and fixed manifest',()=>{
+  expect(validateRegisterOrder(order,manifest).maxCost).toBe(9000000n)
+  for(const mutation of [{action:'commit'},{chainId:1},{maxTotalCost:'10000000'},{commitment:'0x'+'00'.repeat(32)},{from:'0x0000000000000000000000000000000000000001'},{to:'0x0000000000000000000000000000000000000001'},{expiresAt:'2020-01-01T00:00:00.000Z'},{data:'0xdeadbeef'}])
+   expect(()=>validateRegisterOrder({...order,...mutation},manifest)).toThrow()
+  expect(()=>validateRegisterOrder(order,{...manifest,maxTotalCost:'9000001'})).toThrow()
+ })
+ it('blocks a missing, expired, or mismatched local commitment before any RPC',async()=>{
+  const spy=vi.fn()
+  expect((await checkRegister({order:{...order,expiresAt:'2020-01-01T00:00:00.000Z'},manifest,saltFile:'/no/file',clients:[spy,spy]})).reason).toBe('INVALID_REGISTER_ORDER')
+  expect((await checkRegister({order,manifest,saltFile:'/no/file',clients:[spy,spy]})).reason).toBe('SALT_INVALID')
+  expect(spy).not.toHaveBeenCalled()
+ })
+})
