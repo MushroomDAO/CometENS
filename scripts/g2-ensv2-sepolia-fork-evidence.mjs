@@ -7,6 +7,7 @@ import { ROOT, ETH, ABI } from './inspect-ensv2-risk.mjs'
 const HEX32 = /^0x[0-9a-fA-F]{64}$/
 const ZERO = '0x0000000000000000000000000000000000000000'
 const IMPL = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'
+const BEACON = '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50'
 const deny = (reason) => ({ verdict: 'DENY', reason, ensv2Proven: false })
 
 /** Only pinned, finalized, coherent runtime is eligible for subsequent fork work. */
@@ -24,6 +25,9 @@ export async function verifySepoliaRuntime({ client, pins }) {
       if (!code || keccak256(code).toLowerCase() !== pins[key].codeHash.toLowerCase()) return deny('RUNTIME_HASH_MISMATCH_' + key)
       const impl = await client.getStorageAt({ address, slot: IMPL, blockNumber: block.number })
       if (!HEX32.test(impl ?? '')) return deny('MISSING_IMPLEMENTATION_SLOT')
+      const beacon = await client.getStorageAt({ address, slot: BEACON, blockNumber: block.number })
+      if (!HEX32.test(beacon ?? '') || '0x' + beacon.slice(-40).toLowerCase() !== ZERO)
+        return deny('BEACON_PROXY_UNVERIFIED_' + key)
       const addr = '0x' + impl.slice(-40)
       if (addr.toLowerCase() !== ZERO) {
         const pin = pins[key].implementation
