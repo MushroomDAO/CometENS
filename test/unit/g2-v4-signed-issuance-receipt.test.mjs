@@ -27,9 +27,9 @@ function fixture() {
   const logs = data.map((d, i) => ({ address: contract, topics: encodeEventTopics(d), data: i === 0 ? `0x${operator.slice(2).padStart(64,'0')}` : toHex(7n, { size: 32 }),
     transactionHash: txHash, blockHash, blockNumber: 20n, logIndex: i, removed: false }))
   const receipt = { status: 'success', transactionHash: txHash, to: contract, blockNumber: 20n, blockHash, logs }
-  const tx = { hash: txHash, from: operator, to: contract, input }
+  const tx = { hash: txHash, from: operator, to: contract, blockNumber: 20n, blockHash, input }
   const client = { getChainId: async () => 11155420, getBlock: async ({ blockTag,blockNumber }) =>
-      blockTag === 'finalized' ? { number: 25n, hash: `0x${'cc'.repeat(32)}` } : { number: blockNumber, hash: blockHash },
+      blockTag === 'finalized' ? { number: 25n, hash: `0x${'cc'.repeat(32)}` } : { number: blockNumber, hash: blockHash, transactions: [txHash] },
     getTransactionReceipt: async () => receipt, getTransaction: async () => tx,
     getBytecode: async () => code,
     readContract: async ({ functionName }) => ({ parentNode, ownerOf: member, issuanceNonce: 8n })[functionName] }
@@ -49,6 +49,7 @@ describe('OP V4 signed issuance receipt is historical and application-only', () 
       f => { f.client.getBlock = async () => ({ number: 19n, hash: blockHash }) },
       f => { f.receipt.status = 'reverted' },
       f => { f.tx.from = member },
+      f => { f.tx.blockHash = `0x${'dd'.repeat(32)}` },
       f => { f.tx.input = '0xdeadbeef' },
     ]) { const f = fixture(); mutate(f); await expect(audit({ client: f.client, profile })).rejects.toBeInstanceOf(V4ReceiptDenied) }
   })

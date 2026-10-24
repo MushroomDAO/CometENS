@@ -49,8 +49,10 @@ export async function observeV4SignedIssuanceReceipt({ client, profile }) {
       client.readContract({ address: p.contract, abi: OWNER_ABI, functionName: 'issuanceNonce', blockNumber: height }),
     ])
     if (!same(tx?.hash, p.transactionHash) || !same(tx?.from, p.operator) ||
-        !same(tx?.to, p.contract) || !same(block?.hash, receipt.blockHash) ||
-        block?.number !== height || !code || !same(keccak256(code), p.codeHash) ||
+        !same(tx?.to, p.contract) || !same(tx?.blockHash, receipt.blockHash) ||
+        tx?.blockNumber !== height || !same(block?.hash, receipt.blockHash) ||
+        block?.number !== height || !Array.isArray(block.transactions) ||
+        !block.transactions.some(t => same(typeof t === 'string' ? t : t?.hash, p.transactionHash)) || !code || !same(keccak256(code), p.codeHash) ||
         !same(parent, p.parentNode) || !same(owner, p.member) ||
         typeof nextNonce !== 'bigint' || nextNonce <= BigInt(p.nonce)) deny('historical-state-mismatch')
     let call
