@@ -158,6 +158,7 @@ contract G2LegacyL1NativeIssuerProofTest is Test {
     address private member = makeAddr("member");
     address private resolver = makeAddr("member-resolver");
     G2LegacyL1NativeIssuerProof private issuer;
+    LegacyL1AuthorityCheckpoint private source;
     NativeIssueWrapperFixture private wrapper;
     NativeIssueRegistryFixture private registry;
 
@@ -175,7 +176,7 @@ contract G2LegacyL1NativeIssuerProofTest is Test {
         wrapper.setHolder(oldHolder);
         wrapper.setParentFuses(1);
         wrapper.setParentExpiry(uint64(block.timestamp + 94 days));
-        LegacyL1AuthorityCheckpoint source = new LegacyL1AuthorityCheckpoint(
+        source = new LegacyL1AuthorityCheckpoint(
             "community", address(0x9876), ENS.codehash, WRAPPER.codehash, REGISTRAR.codehash
         );
         assertEq(source.parentNode(), PARENT);
@@ -187,6 +188,32 @@ contract G2LegacyL1NativeIssuerProofTest is Test {
     function _issue(address caller, string memory label, address recipient) private returns (bytes32) {
         vm.prank(caller);
         return issuer.issueNative(label, recipient, resolver, uint64(block.timestamp + 2 days));
+    }
+
+    function test_staleL1CheckpointCannotAuthorizeNativeIssuanceAfterTransfer() public {
+        vm.prank(oldHolder);
+        source.bindOrRenew(oldHolder, 2 hours);
+        (address cachedHolder, address cachedController, uint64 epoch,, uint64 leaseUntil,) = source.state();
+        assertEq(cachedHolder, oldHolder);
+        assertEq(cachedController, oldHolder);
+        assertEq(epoch, 1);
+
+        // No observation/relay/OP checkpoint is delivered after this L1 transfer.
+        // The historical lease is still valid, demonstrating the asynchronous race.
+        wrapper.setHolder(newHolder);
+        assertGt(leaseUntil, block.timestamp);
+        (cachedHolder, cachedController, epoch,,,) = source.state();
+        assertEq(cachedHolder, oldHolder);
+        assertEq(cachedController, oldHolder);
+        assertEq(epoch, 1);
+
+        // The actual native write must read current L1 custody in this transaction.
+        // An old wrapper operator approval cannot bypass it.
+        assertTrue(wrapper.approved(oldHolder, address(issuer)));
+        vm.prank(oldHolder);
+        vm.expectRevert(G2LegacyL1NativeActionGuard.NotCurrentNativeHolder.selector);
+        issuer.issueNative("stalelease", member, resolver, uint64(block.timestamp + 2 days));
+        assertEq(registry.owner(keccak256(abi.encodePacked(PARENT, keccak256("stalelease")))), address(0));
     }
 
     function test_nativeMintAndTransferImmediatelyRevokesFormerHolder() public {
