@@ -50,6 +50,7 @@ import {
   ApprovalError, type Application,
 } from '../../../server/gateway/approval'
 import { tryCreateSigner } from '../../../server/gateway/signer'
+import { v4ReadonlyPreflightRoute } from './v4-readonly-preflight-route'
 
 // ─── CF Worker Env ────────────────────────────────────────────────────────────
 
@@ -97,6 +98,11 @@ export interface ExecutionContext {
 }
 
 export interface Env {
+  /** Explicit opt-in to read-only OP application V4 preflight, never native rights or a write. */
+  V4_PREFLIGHT_ENABLED?: string
+  V4_PREFLIGHT_CONTRACT?: string
+  V4_PREFLIGHT_CODEHASH?: string
+  V4_PREFLIGHT_PARENT_NODE?: string
   /** 'op-sepolia' | 'op-mainnet' */
   NETWORK: string
   /** L2RecordsV2 contract address */
@@ -174,6 +180,19 @@ export default {
           version: 'v0.6.1',
           timestamp: Math.floor(Date.now() / 1000),
         })
+        trackEvent(env.ANALYTICS, path, response.status)
+        return response
+      }
+
+      // Deliberately separate from the ten legacy KV-backed write endpoints:
+      // this V4 route only performs a signed-permit eth_call preflight.
+      if (request.method === 'POST' && path === '/v4/issuance/preflight') {
+        const client = createPublicClient({ chain: optimismSepolia, transport: http(env.OP_RPC_URL), ccipRead: false })
+        // OP deposit transactions widen viem's generic getBlock typing;
+        // only header fields are inspected by the existing preflight.
+        const result = await v4ReadonlyPreflightRoute(request, env,
+          client as unknown as Parameters<typeof v4ReadonlyPreflightRoute>[2])
+        response = json(result.body, result.status)
         trackEvent(env.ANALYTICS, path, response.status)
         return response
       }
