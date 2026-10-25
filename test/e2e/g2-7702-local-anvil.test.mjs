@@ -1,16 +1,20 @@
 import {it, expect} from 'vitest'
 import {spawn} from 'node:child_process'
 import {createServer} from 'node:net'
-import {access} from 'node:fs/promises'
 import {existsSync} from 'node:fs'
-import {createPublicClient, createWalletClient, defineChain, http, toHex, zeroAddress} from 'viem'
+import {delimiter, join} from 'node:path'
+import {createPublicClient, createWalletClient, defineChain, http, keccak256, toHex, zeroAddress} from 'viem'
 import {generatePrivateKey, privateKeyToAccount} from 'viem/accounts'
 
-const executable = `${process.env.HOME}/.foundry/bin/anvil`
+const executable = [
+  ...(process.env.PATH ?? '').split(delimiter).map(dir => join(dir, 'anvil')),
+  join(process.env.HOME ?? '', '.foundry/bin/anvil'),
+  join(process.env.XDG_DATA_HOME ?? '', 'foundry/bin/anvil'),
+].find(path => existsSync(path))
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-it.skipIf(!existsSync(executable))('clears delegated code through a locally mined type-4 self-authorization', async () => {
-  await access(executable)
+it('clears delegated code through a locally mined type-4 self-authorization', async () => {
+  expect(executable, 'Anvil must be installed for EIP-7702 integration testing').toBeTruthy()
   const server = createServer()
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = server.address().port
@@ -33,8 +37,12 @@ it.skipIf(!existsSync(executable))('clears delegated code through a locally mine
     const authorization = await wallet.signAuthorization({contractAddress:zeroAddress,executor:'self',chainId:31337})
     expect(BigInt(authorization.nonce)).toBe(BigInt(nonce)+1n)
     expect(authorization.address.toLowerCase()).toBe(zeroAddress)
-    const hash = await wallet.sendTransaction({account,chain,to:account.address,type:'eip7702',data:'0x',value:0n,nonce,gas:100000n,maxFeePerGas:2000000000n,maxPriorityFeePerGas:1000000000n,authorizationList:[authorization]})
+    const signed = await wallet.signTransaction({account,chain,to:account.address,type:'eip7702',data:'0x',value:0n,nonce,gas:100000n,maxFeePerGas:2000000000n,maxPriorityFeePerGas:1000000000n,authorizationList:[authorization]})
+    const expectedHash = keccak256(signed)
+    const hash = await wallet.sendRawTransaction({serializedTransaction:signed})
+    expect(hash).toBe(expectedHash)
     const tx = await publicClient.getTransaction({hash})
+    expect(tx.hash).toBe(expectedHash)
     expect(tx.type).toBe('eip7702')
     expect(tx.authorizationList).toHaveLength(1)
     expect((await publicClient.waitForTransactionReceipt({hash})).status).toBe('success')
