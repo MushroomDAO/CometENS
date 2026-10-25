@@ -52,7 +52,8 @@ KEY="$PRIVATE/owner-existing-sepolia-key"
 # Confirm pinned WALLET manually from the checker and wallet owner, not from a guessed address.
 rg '^export const WALLET' "$RUNNER/scripts/check-g2-sepolia-7702-revocation.mjs"
 # Manually enter the EXACT pinned wallet address into a shell variable; no key material.
-read -r -p 'Pinned wallet address (0x...): ' TARGET_WALLET
+printf 'Pinned wallet address (0x...): '
+read -r TARGET_WALLET
 # Create a fresh, unique, non-preexisting order file. Expiry is dynamic, 10 minutes from now (<=15 minutes).
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 ORDER="$PRIVATE/order-$STAMP.json"
