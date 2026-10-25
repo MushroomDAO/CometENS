@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /** Explicit human-only execution. NEVER invoke execute from automation. */
 import {open, lstat, realpath} from 'node:fs/promises'
-import {constants} from 'node:fs'
+import {constants,realpathSync} from 'node:fs'
 import {dirname, resolve} from 'node:path'
-import {pathToFileURL} from 'node:url'
+import {fileURLToPath} from 'node:url'
 import {createInterface} from 'node:readline/promises'
 import {stdin,stdout} from 'node:process'
 import {createPublicClient,createWalletClient,http,zeroAddress,keccak256} from 'viem'
@@ -172,4 +172,7 @@ async function main(){
  if(result.status!=='DELEGATION_CLEARED_FINALIZED')process.exitCode=2
  return result
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
+let invoked=false
+try{invoked=!!process.argv[1]&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))}
+catch(e){console.error('BLOCKED ENTRYPOINT_PATH',e.message);process.exitCode=2}
+if(invoked)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
