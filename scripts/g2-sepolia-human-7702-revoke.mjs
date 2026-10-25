@@ -121,6 +121,8 @@ export async function inspectHash(clients,hash,nonce){
   if(!SAME(receipt.transactionHash,hash)||receipt.blockNumber===null)fail('RECEIPT_MISMATCH')
  }
  const receipt=results[0].receipt
+ // A reverted or disagreeing outer execution can never prove revocation.
+ if(results.some(x=>x.receipt.status!=='success'))return {status:'OUTER_EXECUTION_FAILED_NO_RETRY',hash,retry:false}
  if(receipt.blockNumber!==results[1].receipt.blockNumber||
   !SAME(receipt.blockHash,results[1].receipt.blockHash))return {status:'CHAIN_DISAGREEMENT',hash,retry:false}
  const blocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:receipt.blockNumber})))
