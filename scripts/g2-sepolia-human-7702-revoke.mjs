@@ -2,6 +2,7 @@
 /** Explicit human-only execution. NEVER invoke execute from automation. */
 import {readFile, open, lstat, realpath} from 'node:fs/promises'
 import {dirname, resolve} from 'node:path'
+import {pathToFileURL} from 'node:url'
 import {createInterface} from 'node:readline/promises'
 import {stdin,stdout} from 'node:process'
 import {createPublicClient,createWalletClient,http,zeroAddress} from 'viem'
@@ -41,11 +42,11 @@ async function main(){
  if(!['check','execute'].includes(mode)||!orderPath||process.argv.length!==(mode==='check'?4:6))fail('USAGE')
  await assertPrivatePath(orderPath,{mustExist:true})
  const o=validate(JSON.parse(await readFile(orderPath,'utf8')))
+ if(mode==='execute'&&(!stdin.isTTY||!stdout.isTTY))fail('HUMAN_TTY_REQUIRED')
  const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0}),ccipRead:false}))
  const pre=await prepare(o,clients)
  console.log(JSON.stringify(pre))
  if(mode==='check')return
- if(!stdin.isTTY||!stdout.isTTY)fail('HUMAN_TTY_REQUIRED')
  await assertPrivatePath(keyPath,{mustExist:true})
  await assertPrivatePath(journalPath)
  // Exclusive journal reservation precedes access to any signing key.
@@ -70,6 +71,7 @@ async function main(){
  await assertPrivatePath(journalPath+'.attempt')
  await persistent(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',nonce:pre.nonce,
    chainId:CHAIN,orderExpiresAt:o.expiresAt,warning:'NEVER REPEAT EXECUTE; inspect the wallet nonce and chain before any recovery'})
+ // The attempt journal remains even if the RPC reports a timeout; never retry automatically.
  const hash=await wallet.sendTransaction({account,chain:sepolia,type:'eip7702',to:WALLET,
    data:'0x',value:0n,nonce:pre.nonce,gas:BigInt(o.maxGas),
    maxFeePerGas:BigInt(o.maxFeePerGasWei),maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),
@@ -83,4 +85,4 @@ async function main(){
  if(codes.some(x=>x&&x!=='0x'))fail('POSTCONDITION_PENDING')
  console.log(JSON.stringify({status:'DELEGATION_CLEARED',hash}))
 }
-if(process.argv[1]?.endsWith('g2-sepolia-human-7702-revoke.mjs'))main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
