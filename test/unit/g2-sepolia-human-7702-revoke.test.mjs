@@ -1,6 +1,8 @@
 import {it,expect} from 'vitest'
 import {execFileSync} from 'node:child_process'
-import {existsSync} from 'node:fs'
+import {existsSync,mkdtempSync,symlinkSync,rmSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join,dirname} from 'node:path'
 import {strict as assert} from 'node:assert'
 import {keccak256,zeroAddress} from 'viem'
 import {validate,verify} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
@@ -88,4 +90,20 @@ it('finalized marker hash must agree with canonical block at its height',async()
  const clients=finalizedClients()
  clients[0].getBlock=async({blockNumber,blockTag})=>({number:blockNumber??12n,hash:blockTag==='finalized'?'0x'+'bb'.repeat(32):'0x'+'aa'.repeat(32)})
  expect(await inspectHash(clients,hash,7)).toMatchObject({status:'FINALIZED_CHAIN_DISAGREEMENT',retry:false})
+})
+
+it('symlinked CLI invocation fails closed for absent arguments',()=>{
+ const target=new URL('../../scripts/g2-sepolia-human-7702-revoke.mjs',import.meta.url)
+ const dir=mkdtempSync(join(tmpdir(),'g2-cli-link-'))
+ try{
+  symlinkSync(dirname(target.pathname),join(dir,'scripts'),'dir')
+  const linked=join(dir,'scripts','g2-sepolia-human-7702-revoke.mjs')
+  for(const args of [[],['check'],['recover']]){
+   let error
+   try{execFileSync(process.execPath,[linked,...args],{timeout:3000,encoding:'utf8',stdio:['ignore','pipe','pipe']})}
+   catch(e){error=e}
+   expect(error?.status).toBe(2)
+   expect(String(error?.stderr)).toMatch(/BLOCKED/)
+  }
+ }finally{rmSync(dir,{recursive:true,force:true})}
 })
