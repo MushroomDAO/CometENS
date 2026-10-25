@@ -59,12 +59,19 @@ async function secureRead(path){
   return await f.readFile('utf8')
  }finally{await f.close()}
 }
-const persistent=async(path,obj)=>{
- const f=await open(path,'wx',0o600)
+export const persistent=async(path,obj)=>{
+ const f=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
  try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}
  // Persist the newly created directory entry before signing or broadcasting.
  const dir=await open(dirname(path),'r')
  try{await dir.sync()}finally{await dir.close()}
+}
+export async function reserveNonce(nonce,persist=persistent,guard=assertPrivatePath){
+ if(!Number.isSafeInteger(nonce)||nonce<0)fail('INVALID_NONCE')
+ const path=PRIVATE_DIR+'/nonce-'+WALLET.toLowerCase()+'-'+nonce+'.lock'
+ await guard(path)
+ await persist(path,{state:'NONCE_RESERVED_NO_RETRY',wallet:WALLET,nonce})
+ return path
 }
 export async function executeVerified({o,clients,wallet,account,nonce,journalPath,
  recheck=verify,guard=assertPrivatePath,persist=persistent}){
@@ -77,6 +84,7 @@ export async function executeVerified({o,clients,wallet,account,nonce,journalPat
   data:'0x',value:0n,nonce,gas:BigInt(o.maxGas),maxFeePerGas:BigInt(o.maxFeePerGasWei),
   maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]}
  // signTransaction never broadcasts. Durable hash must exist before the first send.
+ validate(o) // Reject orders that expired while authorization was signed or RPCs were checked.
  const serialized=await wallet.signTransaction(tx)
  const hash=keccak256(serialized)
  await guard(journalPath+'.hash')
@@ -84,6 +92,7 @@ export async function executeVerified({o,clients,wallet,account,nonce,journalPat
   warning:'Single send only. On uncertain outcome inspect hash across RPCs; never automatically retry.'})
  await guard(journalPath+'.attempt')
  await persist(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',hash,nonce,chainId:CHAIN})
+ validate(o) // Expiry is binding even after durable journals were synced.
  const returned=await wallet.sendRawTransaction({serializedTransaction:serialized})
  if(!SAME(returned,hash))fail('BROADCAST_HASH_MISMATCH')
  return await inspectHash(clients,hash,nonce)
@@ -96,7 +105,12 @@ export async function inspectHash(clients,hash,nonce){
   const tx=await c.getTransaction({hash}).catch(e=>{if(e.name==='TransactionNotFoundError')return null;throw e})
   return {tx,receipt}
  }))
- if(results.some(x=>!x.tx||!x.receipt))return {status:'PENDING_NO_RETRY',hash,retry:false}
+ if(results.some(x=>!x.tx||!x.receipt)){
+  const observations=await Promise.all(clients.map(async c=>({nonce:await c.getTransactionCount({address:WALLET,blockTag:'latest'}),tx:await c.getTransaction({hash}).catch(e=>{if(e.name==='TransactionNotFoundError')return null;throw e})})))
+  if(observations.some(x=>BigInt(x.nonce)>BigInt(nonce)))return {status:'NONCE_CONSUMED_OR_TX_REPLACED_NO_RETRY',hash,retry:false}
+  if(observations.some(x=>!x.tx))return {status:'TX_NOT_FOUND_OR_DROPPED_NO_RETRY',hash,retry:false}
+  return {status:'PENDING_NO_RETRY',hash,retry:false}
+ }
  for(const {tx,receipt} of results){
   if(!SAME(tx.from,WALLET)||!SAME(tx.to,WALLET)||BigInt(tx.nonce)!==BigInt(nonce)||
    BigInt(tx.chainId)!==BigInt(CHAIN)||!['eip7702','0x4','0x04',4].includes(tx.type)||
@@ -125,6 +139,10 @@ export async function inspectHash(clients,hash,nonce){
  const commonCodes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:common})))
  if([...latestCodes,...commonCodes].some(code=>code != null && code !== '0x'))
   return {status:'DELEGATION_RESTORED_OR_CHANGED',hash,outerExecution:receipt.status,retry:false}
+ // Finality RPC calls can overlap a reorg. Verify the canonical receipt block again.
+ const confirmed=await Promise.all(clients.map(async c=>({block:await c.getBlock({blockNumber:receipt.blockNumber}),receipt:await c.getTransactionReceipt({hash})})))
+ if(confirmed.some(x=>!SAME(x.block.hash,receipt.blockHash)||!SAME(x.receipt.blockHash,receipt.blockHash)||x.receipt.blockNumber!==receipt.blockNumber))
+  return {status:'REORG_AFTER_FINALITY_CHECK_NO_RETRY',hash,retry:false}
  const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:receipt.blockNumber})))
  if(codes.some(code=>code != null && code !== '0x'))
   return {status:'DELEGATION_NOT_CLEARED_AT_FINALIZED_RECEIPT',hash,outerExecution:receipt.status,retry:false}
@@ -134,10 +152,19 @@ async function recover(path,clients){
  const saved=JSON.parse(await secureRead(path+'.hash'))
  if(saved.state!=='SIGNED_BEFORE_BROADCAST'||saved.chainId!==CHAIN||
   !/^0x[0-9a-fA-F]{64}$/.test(saved.hash)||!Number.isSafeInteger(saved.nonce))fail('INVALID_JOURNAL')
- const attempt=JSON.parse(await secureRead(path+'.attempt'))
+ let attempt
+ try{attempt=JSON.parse(await secureRead(path+'.attempt'))}
+ catch(e){if(e.code==='ENOENT')return {status:'MISSING_ATTEMPT_JOURNAL_NO_RETRY',hash:saved.hash,retry:false};throw e}
  if(attempt.state!=='BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY'||!SAME(attempt.hash,saved.hash)||
   attempt.nonce!==saved.nonce||attempt.chainId!==CHAIN)fail('ATTEMPT_JOURNAL_MISMATCH')
  return inspectHash(clients,saved.hash,saved.nonce)
+}
+export async function confirmAndReserve({ask,o,clients,nonce,journalPath,check=verify,lock=reserveNonce,persist=persistent}){
+ if(await ask()!=='CLEAR SEPOLIA DELEGATION')fail('DECLINED')
+ validate(o)
+ if(await check(clients,o)!==nonce)fail('NONCE_RACE')
+ await lock(nonce)
+ await persist(journalPath,{state:'RESERVED_NO_RETRY',wallet:WALLET,nonce,createdAt:new Date().toISOString()})
 }
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
@@ -153,13 +180,9 @@ async function main(){
  if(mode==='check')return
  await assertPrivatePath(keyPath,{mustExist:true})
  await assertPrivatePath(journalPath)
- // Exclusive journal reservation precedes access to any signing key.
- await persistent(journalPath,{state:'RESERVED_NO_RETRY',wallet:WALLET,nonce:pre.nonce,createdAt:new Date().toISOString()})
  const ui=createInterface({input:stdin,output:stdout})
- try{if(await ui.question('This removes delegated smart-account capabilities. Type CLEAR SEPOLIA DELEGATION: ')!=='CLEAR SEPOLIA DELEGATION')fail('DECLINED')}
+ try{await confirmAndReserve({ask:()=>ui.question('This removes delegated smart-account capabilities. Type CLEAR SEPOLIA DELEGATION: '),o,clients,nonce:pre.nonce,journalPath})}
  finally{ui.close()}
- validate(o)
- if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE')
  const st=await assertPrivatePath(keyPath,{mustExist:true})
  if((st.mode&0o777)!==0o600||!st.isFile()||st.uid!==process.getuid())fail('UNSAFE_KEY_FILE')
  const secret=(await secureRead(keyPath)).trim()
