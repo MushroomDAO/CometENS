@@ -9,8 +9,20 @@ The reviewed candidate is **main commit `d28ab52166f9ecc28c22668f6eafbb6e1914bc5
 ```sh
 # HUMAN: inspect current directory; stop if this is not the CometENS repository root.
 pwd
-test -d node_modules/viem || { echo 'STOP: missing local viem dependency'; exit 2; }
 set -euo pipefail
+# Mac terminal/agent shell may omit the installed nvm Node directory from PATH.
+if ! command -v node >/dev/null 2>&1; then
+  NVM_NODE_DIR="$HOME/.nvm/versions/node/v22.22.2/bin"
+  test -x "$NVM_NODE_DIR/node" || { echo 'STOP: Node v22.22.2 unavailable'; exit 2; }
+  PATH="$NVM_NODE_DIR:$PATH"
+  export PATH
+fi
+command -v node >/dev/null 2>&1 || { echo 'STOP: Node not available'; exit 2; }
+test "$(node --version)" = 'v22.22.2' || { echo 'STOP: unexpected Node version'; exit 2; }
+test -d node_modules/viem || { echo 'STOP: missing local viem dependency'; exit 2; }
+# Read dependency metadata only; no key access, network, signing, or transaction.
+VIEM_VERSION=$(node -p 'require("./node_modules/viem/package.json").version')
+test "$VIEM_VERSION" = '2.47.6' || { echo 'STOP: unexpected viem version'; exit 2; }
 PIN=d28ab52166f9ecc28c22668f6eafbb6e1914bc5f
 RUNNER="$PWD/.g2-7702-human-runner-$PIN"
 # Directory must be absent: avoid inheriting untrusted or previously edited files.
@@ -50,7 +62,7 @@ test ! -L "$PRIVATE" || { echo 'STOP: symlink private dir'; exit 2; }
 KEY="$PRIVATE/owner-existing-sepolia-key"
 [ -f "$KEY" ] && [ ! -L "$KEY" ] && [ "$(stat -f %Lp "$KEY")" = 600 ] || { echo 'STOP: key path/permissions'; exit 2; }
 # Confirm pinned WALLET manually from the checker and wallet owner, not from a guessed address.
-rg '^export const WALLET' "$RUNNER/scripts/check-g2-sepolia-7702-revocation.mjs"
+grep '^export const WALLET' "$RUNNER/scripts/check-g2-sepolia-7702-revocation.mjs"
 # Manually enter the EXACT pinned wallet address into a shell variable; no key material.
 printf 'Pinned wallet address (0x...): '
 read -r TARGET_WALLET
