@@ -78,3 +78,5 @@ node scripts/g2-sepolia-human-7702-revoke.mjs recover "$JOURNAL"
 ```
 
 `recover` reads neither the signing key nor the order, constructs no wallet, never signs, and never sends. Repeat this **read-only query** after initial confirmations and while waiting for finality; `AWAITING_FINALITY` and `PENDING_NO_RETRY` are not permission to resubmit. Only matched transaction, canonical receipt block, finalized inclusion on both RPCs, and empty code at the mined block qualify for `DELEGATION_CLEARED_FINALIZED`. Outer execution may revert even when EIP-7702 revocation is effective, so inspect `outerExecution` separately.
+
+CLI exit status is fail-closed: `check` may exit 0 for a successful unsigned read-only preflight; `execute` and `recover` print their JSON result, and return exit code 0 **only** for `DELEGATION_CLEARED_FINALIZED`. Pending, missing, or inconsistent finality returns nonzero (2); a nonzero result is never a reason to retry execute.
