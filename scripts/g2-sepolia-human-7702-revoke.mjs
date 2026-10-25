@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /** Explicit human-only execution. NEVER invoke execute from automation. */
-import {readFile, open, mkdir} from 'node:fs/promises'
+import {readFile, open, lstat, realpath} from 'node:fs/promises'
+import {dirname, resolve} from 'node:path'
 import {createInterface} from 'node:readline/promises'
 import {stdin,stdout} from 'node:process'
-import {createPublicClient,createWalletClient,http,zeroAddress,keccak256,parseTransaction,serializeTransaction} from 'viem'
+import {createPublicClient,createWalletClient,http,zeroAddress,keccak256,parseTransaction,recoverTransactionAddress} from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
+import {recoverAuthorizationAddress} from 'viem/experimental'
 import {sepolia} from 'viem/chains'
 import {checkRemote,WALLET,DELEGATE,CHAIN} from './check-g2-sepolia-7702-revocation.mjs'
 const SAME=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase()
 const fail=s=>{throw Error(s)}
+const PRIVATE_DIR=resolve(process.env.HOME ?? '/nonexistent','/.config/cometens-g2-sepolia'.slice(1))
 const RPC=['https://sepolia.drpc.org','https://ethereum-sepolia-rpc.publicnode.com']
 export function validate(o){
  if(!o||Object.keys(o).sort().join()!==['action','chainId','expiresAt','maxFeePerGasWei','maxGas','maxPriorityFeePerGasWei','version','wallet'].sort().join()||o.action!=='clear-7702'||o.version!==1||o.chainId!==CHAIN||!SAME(o.wallet,WALLET))fail('INVALID_ORDER')
@@ -26,24 +29,37 @@ export async function verify(clients,o,checker=checkRemote){
  if(a.height>b.height+2n||b.height>a.height+2n)fail('RPC_BLOCK_DRIFT')
  return a.snapshot.observedTransactionNonce
 }
-export function assertRaw(raw,o,nonce){
+export async function assertRaw(raw,o,nonce){
  const tx=parseTransaction(raw)
  if(tx.type!=='eip7702'||!SAME(tx.to,WALLET)||tx.nonce!==nonce||tx.value!==0n||(tx.data??'0x')!=='0x'||tx.chainId!==CHAIN||!tx.gas||tx.gas>BigInt(o.maxGas)||!tx.maxFeePerGas||tx.maxFeePerGas>BigInt(o.maxFeePerGasWei)||tx.maxFeePerGas*tx.gas>1000000000000000n||tx.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)||tx.authorizationList?.length!==1)fail('SIGNED_TX_MISMATCH')
  const a=tx.authorizationList[0]
  if(!SAME(a.address,zeroAddress)||BigInt(a.chainId)!==BigInt(CHAIN)||BigInt(a.nonce)!==BigInt(nonce+1))fail('SIGNED_AUTH_MISMATCH')
+ const sender=await recoverTransactionAddress({serializedTransaction:raw})
+ if(!SAME(sender,WALLET))fail('TX_SIGNER_MISMATCH')
+ const authSigner=await recoverAuthorizationAddress({authorization:a})
+ if(!SAME(authSigner,WALLET))fail('AUTH_SIGNER_MISMATCH')
  return keccak256(raw)
 }
 export async function prepare(o,clients){return {status:'UNSIGNED_ONLY',nonce:await verify(clients,o),target:zeroAddress,chainId:CHAIN,wallet:WALLET,delegate:DELEGATE}}
+export async function assertPrivatePath(path,{mustExist=false}={}){
+ if(typeof path!=='string'||!path.startsWith(PRIVATE_DIR+'/')||dirname(path)!==PRIVATE_DIR)fail('PATH_OUTSIDE_PRIVATE_DIR')
+ const dir=await lstat(PRIVATE_DIR)
+ if(!dir.isDirectory()||(dir.mode&0o077)!==0||dir.uid!==process.getuid()||await realpath(PRIVATE_DIR)!==PRIVATE_DIR)fail('UNSAFE_PRIVATE_DIR')
+ try{const st=await lstat(path);if(st.isSymbolicLink()||!st.isFile()||(st.mode&0o777)!==0o600||st.uid!==process.getuid())fail('UNSAFE_FILE');return st}catch(e){if(mustExist||e.code!=='ENOENT')throw e}
+}
 const persistent=async(path,obj)=>{const f=await open(path,'wx',0o600);try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}}
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
  if(!['check','execute'].includes(mode)||!orderPath||process.argv.length!==(mode==='check'?4:6))fail('USAGE')
+ await assertPrivatePath(orderPath,{mustExist:true})
  const o=validate(JSON.parse(await readFile(orderPath,'utf8')))
  const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0}),ccipRead:false}))
  const pre=await prepare(o,clients)
  console.log(JSON.stringify(pre))
  if(mode==='check')return
  if(!stdin.isTTY||!stdout.isTTY)fail('HUMAN_TTY_REQUIRED')
+ await assertPrivatePath(keyPath,{mustExist:true})
+ await assertPrivatePath(journalPath)
  // Exclusive journal reservation precedes access to any signing key.
  await persistent(journalPath,{state:'RESERVED_NO_RETRY',wallet:WALLET,nonce:pre.nonce,createdAt:new Date().toISOString()})
  const ui=createInterface({input:stdin,output:stdout})
@@ -51,7 +67,7 @@ async function main(){
  finally{ui.close()}
  validate(o)
  if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE')
- const st=await (await import('node:fs/promises')).stat(keyPath)
+ const st=await assertPrivatePath(keyPath,{mustExist:true})
  if((st.mode&0o777)!==0o600||!st.isFile()||st.uid!==process.getuid())fail('UNSAFE_KEY_FILE')
  const secret=(await readFile(keyPath,'utf8')).trim()
  if(!/^0x[0-9a-fA-F]{64}$/.test(secret))fail('KEY_FORMAT')
@@ -62,8 +78,9 @@ async function main(){
  if(!SAME(authorization.address,zeroAddress)||BigInt(authorization.nonce)!==BigInt(pre.nonce+1))fail('AUTH_NONCE_MISMATCH')
  const tx={account,chain:sepolia,type:'eip7702',to:WALLET,data:'0x',value:0n,nonce:pre.nonce,gas:BigInt(o.maxGas),maxFeePerGas:BigInt(o.maxFeePerGasWei),maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]}
  const raw=await wallet.signTransaction(tx)
- const hash=assertRaw(raw,o,pre.nonce)
+ const hash=await assertRaw(raw,o,pre.nonce)
  // Journal hash BEFORE transmission: timeout must never lead to an automatic retry.
+ await assertPrivatePath(journalPath+'.signed')
  await persistent(journalPath+'.signed',{state:'SIGNED_NOT_SENT',hash,nonce:pre.nonce,warning:'No automatic retry after unknown RPC response'})
  if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE_AFTER_SIGN')
  const sent=await clients[0].sendRawTransaction({serializedTransaction:raw})

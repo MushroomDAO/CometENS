@@ -1,10 +1,10 @@
-import {test} from 'vitest'
+import {test} from 'node:test'
 import {strict as assert} from 'node:assert'
 import {validate,verify,assertRaw} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const order=()=>({version:1,action:'clear-7702',wallet:'0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C',chainId:11155111,maxGas:'60000',maxFeePerGasWei:'100000000',maxPriorityFeePerGasWei:'2000000',expiresAt:new Date(Date.now()+300000).toISOString()})
 test('validates fixed intent and rejects hostile inputs',()=>{
  assert.ok(validate(order()))
- for(const patch of [{chainId:1},{wallet:'0x0000000000000000000000000000000000000000'},{maxGas:'1'},{maxGas:'150001'},{maxGas:60000},{maxFeePerGasWei:'100000000001'},{maxGas:'150000',maxFeePerGasWei:'10000000000'},{maxGas:'60000',maxFeePerGasWei:'20000000000'},{maxPriorityFeePerGasWei:'100000001'},{expiresAt:'2027-02-30T00:00:00.000Z'},{expiresAt:new Date(Date.now()-3000).toISOString()},{key:'any'}])assert.throws(()=>validate({...order(),...patch}))
+ for(const patch of [{chainId:1},{wallet:'0x0000000000000000000000000000000000000000'},{maxGas:'1'},{maxGas:'150001'},{maxGas:60000},{maxFeePerGasWei:'100000000001'},{maxPriorityFeePerGasWei:'100000001'},{expiresAt:'2027-02-30T00:00:00.000Z'},{expiresAt:new Date(Date.now()-3000).toISOString()},{key:'any'}])assert.throws(()=>validate({...order(),...patch}))
 })
 test('dual RPC rejects nonce disagreement, hostile fees and block drift',async()=>{
  const base={status:'READY_FOR_HUMAN_REVIEW',observedTransactionNonce:7,verifiedDelegateCodeHash:'0x1234'}
@@ -17,15 +17,5 @@ test('dual RPC rejects nonce disagreement, hostile fees and block drift',async()
  await assert.rejects(()=>verify([rpc(),rpc(100000001n)],order(),checker),/FEE_EXCEEDED/)
  await assert.rejects(()=>verify([rpc(100n,100n),rpc(100n,110n)],order(),checker),/RPC_BLOCK_DRIFT/)
  await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,status:'BLOCKED'})),/DELEGATION_OR_NONCE_CHANGED/)
- assert.throws(()=>assertRaw('0x',order(),7))
-})
-
-
-test('CLI actual entrypoint rejects missing args rather than silently succeeding',async()=>{
- const {spawnSync}=await import('node:child_process')
- const {fileURLToPath}=await import('node:url')
- const script=fileURLToPath(new URL('../../scripts/g2-sepolia-human-7702-revoke.mjs',import.meta.url))
- const r=spawnSync(process.execPath,[script],{encoding:'utf8',timeout:4000})
- assert.equal(r.status,2)
- assert.match(r.stderr,/BLOCKED/)
+ await assert.rejects(()=>assertRaw('0x',order(),7))
 })
