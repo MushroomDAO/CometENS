@@ -1,6 +1,6 @@
 import {test} from 'node:test'
 import {strict as assert} from 'node:assert'
-import {validate,verify,assertRaw} from './revoke-human.mjs'
+import {validate,verify,assertRaw} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const order=()=>({version:1,action:'clear-7702',wallet:'0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C',chainId:11155111,maxGas:'60000',maxFeePerGasWei:'100000000',maxPriorityFeePerGasWei:'2000000',expiresAt:new Date(Date.now()+300000).toISOString()})
 test('validates fixed intent and rejects hostile inputs',()=>{
  assert.ok(validate(order()))
