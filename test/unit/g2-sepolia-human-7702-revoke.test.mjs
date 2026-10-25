@@ -149,6 +149,14 @@ it('missing receipt distinguishes replaced nonce from dropped hash without autom
  expect((await inspectHash(noReceipt(7),hash,7)).status).toBe('TX_NOT_FOUND_OR_DROPPED_NO_RETRY')
 })
 
+it('reverted outer transaction cannot be accepted as successful even if account code is already empty',async()=>{
+ const clients=finalizedClients()
+ clients[0].getTransactionReceipt=async()=>({transactionHash:hash,blockNumber:11n,blockHash:'0x'+'aa'.repeat(32),status:'reverted'})
+ expect(await inspectHash(clients,hash,7)).toMatchObject({status:'OUTER_EXECUTION_FAILED_NO_RETRY',retry:false})
+ const both=finalizedClients()
+ for(const c of both)c.getTransactionReceipt=async()=>({transactionHash:hash,blockNumber:11n,blockHash:'0x'+'aa'.repeat(32),status:'reverted'})
+ expect(await inspectHash(both,hash,7)).toMatchObject({status:'OUTER_EXECUTION_FAILED_NO_RETRY',retry:false})
+})
 it('real exclusive durable journals refuse pre-existing hash/attempt without mutation',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'g2-journal-real-'))
  try{
