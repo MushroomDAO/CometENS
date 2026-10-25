@@ -122,7 +122,7 @@ async function main(){
  if(mode!=='recover'&&(!orderPath||process.argv.length!==(mode==='check'?4:6)))fail('USAGE')
  if(mode==='execute'&&(!stdin.isTTY||!stdout.isTTY))fail('HUMAN_TTY_REQUIRED')
  const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0,timeout:15000}),ccipRead:false}))
- if(mode==='recover'){console.log(JSON.stringify(await recover(orderPath,clients)));return}
+ if(mode==='recover'){const result=await recover(orderPath,clients);console.log(JSON.stringify(result));if(result.status!=='DELEGATION_CLEARED_FINALIZED')process.exitCode=2;return}
  const o=validate(JSON.parse(await secureRead(orderPath)))
  const pre=await prepare(o,clients)
  console.log(JSON.stringify(pre))
@@ -143,6 +143,9 @@ async function main(){
  const account=privateKeyToAccount(secret)
  if(!SAME(account.address,WALLET))fail('WRONG_SIGNER')
  const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0,timeout:15000})})
- return await executeVerified({o,clients,wallet,account,nonce:pre.nonce,journalPath})
+ const result=await executeVerified({o,clients,wallet,account,nonce:pre.nonce,journalPath})
+ console.log(JSON.stringify(result))
+ if(result.status!=='DELEGATION_CLEARED_FINALIZED')process.exitCode=2
+ return result
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
