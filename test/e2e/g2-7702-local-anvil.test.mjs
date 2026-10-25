@@ -38,7 +38,8 @@ it('uses the real executor, signed type-4 transaction and receipt inspector on d
     expect(await publicClient.getBytecode({address:account.address})).toBe(oldCode)
 
     // Isolate the production wallet constant only in this test's module loader.
-    // The runtime's signer/nonce/receipt gates and viem signing stay real.
+    // Locally signs a real type-4 transaction; recheck, guard, persist and checkRemote are mocked.
+    // Both RPC positions deliberately share one Anvil client; this test cannot prove independent-RPC agreement.
     vi.doMock('../../scripts/check-g2-sepolia-7702-revocation.mjs',()=>({
       WALLET:account.address, DELEGATE:'0x'+'11'.repeat(20), CHAIN:11155111,
       checkRemote:async()=>{throw Error('unexpected remote check')},
@@ -51,7 +52,8 @@ it('uses the real executor, signed type-4 transaction and receipt inspector on d
     const persist=async(path,obj)=>{const file=await open(path,'wx',0o600);try{await file.writeFile(JSON.stringify(obj));await file.sync()}finally{await file.close()}}
     const result=await executeVerified({o,clients:[publicClient,publicClient],wallet,account,nonce,
       journalPath:join(directory,'attempt'),recheck:async()=>nonce,guard:async()=>{},persist})
-    expect(['PENDING_NO_RETRY','AWAITING_FINALITY','DELEGATION_CLEARED_FINALIZED']).toContain(result.status)
+    // A first call must not claim finality before the explicit mined-finality poll below.
+    expect(['PENDING_NO_RETRY','AWAITING_FINALITY']).toContain(result.status)
     const hash=result.hash
     await publicClient.waitForTransactionReceipt({hash})
     const tx=await publicClient.getTransaction({hash})
