@@ -21,7 +21,15 @@ export function validate(o){
  if(typeof o.expiresAt!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(o.expiresAt)||new Date(o.expiresAt).toISOString()!==o.expiresAt||Date.parse(o.expiresAt)<=Date.now()||Date.parse(o.expiresAt)>Date.now()+3600000)fail('EXPIRED')
  return o
 }
-export async function verify(clients,o,checker=checkRemote){
+export async function checkPinnedCode(clients,height){
+ const codes=await Promise.all(clients.map(async c=>Promise.all([
+  c.getBytecode({address:WALLET,blockNumber:height}),
+  c.getBytecode({address:DELEGATE,blockNumber:height})])))
+ for(const [walletCode,delegateCode] of codes)
+  if(!SAME(walletCode,'0xef0100'+DELEGATE.slice(2))||
+   !delegateCode||keccak256(delegateCode).toLowerCase()!==DELEGATE_HASH.toLowerCase())fail('PINNED_CODE_MISMATCH')
+}
+export async function verify(clients,o,checker=checkRemote,pinnedCheck=checkPinnedCode){
  const results=await Promise.all(clients.map(async c=>({snapshot:await checker(c),fees:await c.estimateFeesPerGas(),height:await c.getBlockNumber()})))
  const [a,b]=results
  if(results.some(x=>x.snapshot.status!=='READY_FOR_HUMAN_REVIEW'))fail('DELEGATION_OR_NONCE_CHANGED')
@@ -32,13 +40,7 @@ export async function verify(clients,o,checker=checkRemote){
  const height=a.height<b.height?a.height:b.height
  const blocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:height})))
  if(blocks.some(b=>b.number!==height||!b.hash||!SAME(b.hash,blocks[0].hash)))fail('RPC_CANONICAL_BLOCK_MISMATCH')
- const codes=await Promise.all(clients.map(async c=>Promise.all([
-  c.getBytecode({address:WALLET,blockNumber:height}),
-  c.getBytecode({address:DELEGATE,blockNumber:height})])))
- for(const [walletCode,delegateCode] of codes){
-  if(!SAME(walletCode,'0xef0100'+DELEGATE.slice(2))||
-   !delegateCode||keccak256(delegateCode).toLowerCase()!==DELEGATE_HASH.toLowerCase())fail('PINNED_CODE_MISMATCH')
- }
+ await pinnedCheck(clients,height)
  return a.snapshot.observedTransactionNonce
 }
 export async function prepare(o,clients){return {status:'UNSIGNED_ONLY',nonce:await verify(clients,o),target:zeroAddress,chainId:CHAIN,wallet:WALLET,delegate:DELEGATE}}
