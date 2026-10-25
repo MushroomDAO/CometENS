@@ -9,7 +9,7 @@ import {stdin,stdout} from 'node:process'
 import {createPublicClient,createWalletClient,http,zeroAddress,keccak256} from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
 import {sepolia} from 'viem/chains'
-import {checkRemote,WALLET,DELEGATE,CHAIN} from './check-g2-sepolia-7702-revocation.mjs'
+import {checkRemote,WALLET,DELEGATE,DELEGATE_HASH,CHAIN} from './check-g2-sepolia-7702-revocation.mjs'
 const SAME=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase()
 const fail=s=>{throw Error(s)}
 const PRIVATE_DIR=resolve(process.env.HOME ?? '/nonexistent','/.config/cometens-g2-sepolia'.slice(1))
@@ -28,6 +28,17 @@ export async function verify(clients,o,checker=checkRemote){
  if(a.snapshot.observedTransactionNonce!==b.snapshot.observedTransactionNonce||a.snapshot.verifiedDelegateCodeHash!==b.snapshot.verifiedDelegateCodeHash)fail('RPC_DISAGREEMENT')
  if(results.some(x=>!x.fees.maxFeePerGas||!x.fees.maxPriorityFeePerGas||x.fees.maxFeePerGas>BigInt(o.maxFeePerGasWei)||x.fees.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)))fail('FEE_EXCEEDED')
  if(a.height>b.height+2n||b.height>a.height+2n)fail('RPC_BLOCK_DRIFT')
+ // Compare code at one canonical height; keep pending/latest nonce checks in checkRemote.
+ const height=a.height<b.height?a.height:b.height
+ const blocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:height})))
+ if(blocks.some(b=>b.number!==height||!b.hash||!SAME(b.hash,blocks[0].hash)))fail('RPC_CANONICAL_BLOCK_MISMATCH')
+ const codes=await Promise.all(clients.map(async c=>Promise.all([
+  c.getBytecode({address:WALLET,blockNumber:height}),
+  c.getBytecode({address:DELEGATE,blockNumber:height})])))
+ for(const [walletCode,delegateCode] of codes){
+  if(!SAME(walletCode,'0xef0100'+DELEGATE.slice(2))||
+   !delegateCode||keccak256(delegateCode).toLowerCase()!==DELEGATE_HASH.toLowerCase())fail('PINNED_CODE_MISMATCH')
+ }
  return a.snapshot.observedTransactionNonce
 }
 export async function prepare(o,clients){return {status:'UNSIGNED_ONLY',nonce:await verify(clients,o),target:zeroAddress,chainId:CHAIN,wallet:WALLET,delegate:DELEGATE}}
@@ -101,6 +112,16 @@ export async function inspectHash(clients,hash,nonce){
  const finalized=await Promise.all(clients.map(c=>c.getBlock({blockTag:'finalized'})))
  if(finalized.some(b=>b.number===null||b.number<receipt.blockNumber))
   return {status:'AWAITING_FINALITY',hash,outerExecution:receipt.status,retry:false}
+ // Independent finalized heights can differ; inspect their common canonical ancestor.
+ const common=finalized[0].number<finalized[1].number?finalized[0].number:finalized[1].number
+ const commonBlocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:common})))
+ if(commonBlocks.some(b=>b.number!==common||!b.hash||!SAME(b.hash,commonBlocks[0].hash)))
+  return {status:'FINALIZED_CHAIN_DISAGREEMENT',hash,retry:false}
+ const latestBlocks=await Promise.all(clients.map(c=>c.getBlock({blockTag:'latest'})))
+ const latestCodes=await Promise.all(clients.map((c,i)=>c.getBytecode({address:WALLET,blockNumber:latestBlocks[i].number})))
+ const commonCodes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:common})))
+ if([...latestCodes,...commonCodes].some(code=>code != null && code !== '0x'))
+  return {status:'DELEGATION_RESTORED_OR_CHANGED',hash,outerExecution:receipt.status,retry:false}
  const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:receipt.blockNumber})))
  if(codes.some(code=>code != null && code !== '0x'))
   return {status:'DELEGATION_NOT_CLEARED_AT_FINALIZED_RECEIPT',hash,outerExecution:receipt.status,retry:false}
