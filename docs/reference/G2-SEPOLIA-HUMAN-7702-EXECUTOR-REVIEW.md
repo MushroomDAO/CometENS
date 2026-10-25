@@ -24,3 +24,5 @@ EIP-7702 authorization changes are applied before outer execution and persist if
 Recovery requires both protected journal.hash and journal.attempt records to agree on hash, nonce and Sepolia chain ID; a signed-but-never-attempted transaction cannot be described as submitted. Missing receipts or transactions yield PENDING_NO_RETRY. Each provider must agree on the receipt's mined block hash and its canonical block at that height. Both independently reported finalized heights must include that mined block, but need not be equal. EIP-7702 code is checked at that receipt block regardless of outer transaction status.
 
 Local signed EIP-7702 Type-4 Anvil test has passed using a disposable test key and local chain. This is not a Sepolia fork test, not an approval for live execution, and does not establish behavior on the target Sepolia wallet.
+
+For every exclusive journal creation, both the file contents and the parent directory entry are fsynced before continuing. Failure to sync either is fatal; the executor must not broadcast on a journal durability error. This includes the prebroadcast .hash and .attempt files.
