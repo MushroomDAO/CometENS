@@ -59,7 +59,7 @@ async function secureRead(path){
   return await f.readFile('utf8')
  }finally{await f.close()}
 }
-const persistent=async(path,obj)=>{
+export const persistent=async(path,obj)=>{
  const f=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
  try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}
  // Persist the newly created directory entry before signing or broadcasting.
@@ -159,6 +159,13 @@ async function recover(path,clients){
   attempt.nonce!==saved.nonce||attempt.chainId!==CHAIN)fail('ATTEMPT_JOURNAL_MISMATCH')
  return inspectHash(clients,saved.hash,saved.nonce)
 }
+export async function confirmAndReserve({ask,o,clients,nonce,journalPath,check=verify,lock=reserveNonce,persist=persistent}){
+ if(await ask()!=='CLEAR SEPOLIA DELEGATION')fail('DECLINED')
+ validate(o)
+ if(await check(clients,o)!==nonce)fail('NONCE_RACE')
+ await lock(nonce)
+ await persist(journalPath,{state:'RESERVED_NO_RETRY',wallet:WALLET,nonce,createdAt:new Date().toISOString()})
+}
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
  if(!['check','execute','recover'].includes(mode))fail('USAGE')
@@ -173,14 +180,9 @@ async function main(){
  if(mode==='check')return
  await assertPrivatePath(keyPath,{mustExist:true})
  await assertPrivatePath(journalPath)
- // Exclusive journal reservation precedes access to any signing key.
- await reserveNonce(pre.nonce) // Durable wallet/nonce lock before reading signing key.
- await persistent(journalPath,{state:'RESERVED_NO_RETRY',wallet:WALLET,nonce:pre.nonce,createdAt:new Date().toISOString()})
  const ui=createInterface({input:stdin,output:stdout})
- try{if(await ui.question('This removes delegated smart-account capabilities. Type CLEAR SEPOLIA DELEGATION: ')!=='CLEAR SEPOLIA DELEGATION')fail('DECLINED')}
+ try{await confirmAndReserve({ask:()=>ui.question('This removes delegated smart-account capabilities. Type CLEAR SEPOLIA DELEGATION: '),o,clients,nonce:pre.nonce,journalPath})}
  finally{ui.close()}
- validate(o)
- if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE')
  const st=await assertPrivatePath(keyPath,{mustExist:true})
  if((st.mode&0o777)!==0o600||!st.isFile()||st.uid!==process.getuid())fail('UNSAFE_KEY_FILE')
  const secret=(await secureRead(keyPath)).trim()
