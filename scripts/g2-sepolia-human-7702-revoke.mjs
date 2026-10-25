@@ -13,7 +13,7 @@ const RPC=['https://sepolia.drpc.org','https://ethereum-sepolia-rpc.publicnode.c
 export function validate(o){
  if(!o||Object.keys(o).sort().join()!==['action','chainId','expiresAt','maxFeePerGasWei','maxGas','maxPriorityFeePerGasWei','version','wallet'].sort().join()||o.action!=='clear-7702'||o.version!==1||o.chainId!==CHAIN||!SAME(o.wallet,WALLET))fail('INVALID_ORDER')
  for(const k of ['maxGas','maxFeePerGasWei','maxPriorityFeePerGasWei'])if(typeof o[k]!=='string'||!/^[1-9]\d*$/.test(o[k]))fail('INVALID_AMOUNT')
- if(BigInt(o.maxGas)<46000n||BigInt(o.maxGas)>150000n||BigInt(o.maxFeePerGasWei)>100000000000n||BigInt(o.maxPriorityFeePerGasWei)>BigInt(o.maxFeePerGasWei))fail('FEE_CAP')
+ if(BigInt(o.maxGas)<46000n||BigInt(o.maxGas)>150000n||BigInt(o.maxFeePerGasWei)>100000000000n||BigInt(o.maxPriorityFeePerGasWei)>BigInt(o.maxFeePerGasWei)||BigInt(o.maxGas)*BigInt(o.maxFeePerGasWei)>1000000000000000n)fail('FEE_CAP')
  if(typeof o.expiresAt!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(o.expiresAt)||new Date(o.expiresAt).toISOString()!==o.expiresAt||Date.parse(o.expiresAt)<=Date.now()||Date.parse(o.expiresAt)>Date.now()+3600000)fail('EXPIRED')
  return o
 }
@@ -28,7 +28,7 @@ export async function verify(clients,o,checker=checkRemote){
 }
 export function assertRaw(raw,o,nonce){
  const tx=parseTransaction(raw)
- if(tx.type!=='eip7702'||!SAME(tx.to,WALLET)||tx.nonce!==nonce||tx.value!==0n||(tx.data??'0x')!=='0x'||tx.chainId!==CHAIN||tx.gas>BigInt(o.maxGas)||tx.maxFeePerGas>BigInt(o.maxFeePerGasWei)||tx.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)||tx.authorizationList?.length!==1)fail('SIGNED_TX_MISMATCH')
+ if(tx.type!=='eip7702'||!SAME(tx.to,WALLET)||tx.nonce!==nonce||tx.value!==0n||(tx.data??'0x')!=='0x'||tx.chainId!==CHAIN||!tx.gas||tx.gas>BigInt(o.maxGas)||!tx.maxFeePerGas||tx.maxFeePerGas>BigInt(o.maxFeePerGasWei)||tx.maxFeePerGas*tx.gas>1000000000000000n||tx.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)||tx.authorizationList?.length!==1)fail('SIGNED_TX_MISMATCH')
  const a=tx.authorizationList[0]
  if(!SAME(a.address,zeroAddress)||BigInt(a.chainId)!==BigInt(CHAIN)||BigInt(a.nonce)!==BigInt(nonce+1))fail('SIGNED_AUTH_MISMATCH')
  return keccak256(raw)
