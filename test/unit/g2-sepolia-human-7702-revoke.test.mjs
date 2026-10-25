@@ -11,15 +11,17 @@ it('validates fixed intent and rejects hostile inputs',()=>{
 })
 it('dual RPC rejects nonce disagreement, hostile fees and block drift',async()=>{
  const base={status:'READY_FOR_HUMAN_REVIEW',observedTransactionNonce:7,verifiedDelegateCodeHash:'0x1234'}
- const rpc=(fee=100n,height=100n)=>({getBlockNumber:async()=>height,estimateFeesPerGas:async()=>({maxFeePerGas:fee,maxPriorityFeePerGas:1n})})
+ const rpc=(fee=100n,height=100n,hash='0xabc')=>({getBlockNumber:async()=>height,getBlock:async({blockNumber})=>({number:blockNumber,hash}),estimateFeesPerGas:async()=>({maxFeePerGas:fee,maxPriorityFeePerGas:1n})})
  const checker=async()=>base
- assert.equal(await verify([rpc(),rpc()],order(),checker),7)
+ const pinned=async()=>{}
+ assert.equal(await verify([rpc(),rpc()],order(),checker,pinned),7)
+ await assert.rejects(()=>verify([rpc(),rpc(100n,100n,'0xdef')],order(),checker,pinned),/RPC_CANONICAL_BLOCK_MISMATCH/)
  let n=0
- await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,observedTransactionNonce:++n})),/RPC_DISAGREEMENT/)
- await assert.rejects(()=>verify([rpc(100000001n),rpc()],order(),checker),/FEE_EXCEEDED/)
- await assert.rejects(()=>verify([rpc(),rpc(100000001n)],order(),checker),/FEE_EXCEEDED/)
- await assert.rejects(()=>verify([rpc(100n,100n),rpc(100n,110n)],order(),checker),/RPC_BLOCK_DRIFT/)
- await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,status:'BLOCKED'})),/DELEGATION_OR_NONCE_CHANGED/)
+ await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,observedTransactionNonce:++n}),pinned),/RPC_DISAGREEMENT/)
+ await assert.rejects(()=>verify([rpc(100000001n),rpc()],order(),checker,pinned),/FEE_EXCEEDED/)
+ await assert.rejects(()=>verify([rpc(),rpc(100000001n)],order(),checker,pinned),/FEE_EXCEEDED/)
+ await assert.rejects(()=>verify([rpc(100n,100n),rpc(100n,110n)],order(),checker,pinned),/RPC_BLOCK_DRIFT/)
+ await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,status:'BLOCKED'}),pinned),/DELEGATION_OR_NONCE_CHANGED/)
 
 })
 
@@ -39,7 +41,7 @@ const hash=keccak256(signed)
 const finalizedClients=()=>[0,1].map((i)=>({
  getTransaction:async()=>({from:fixedWallet,to:fixedWallet,nonce:7,chainId:11155111,type:'eip7702',authorizationList:[{address:zeroAddress,nonce:8,chainId:11155111}]}),
  getTransactionReceipt:async()=>({transactionHash:hash,blockNumber:11n,blockHash:'0x'+'aa'.repeat(32),status:'success'}),
- getBlock:async()=>({number:12n,hash:'0x'+'aa'.repeat(32)}),
+ getBlock:async({blockNumber,blockTag})=>({number:blockNumber??12n,hash:'0x'+'aa'.repeat(32)}),
  getBytecode:async()=> i===0?'0x':undefined
 }))
 it('mocked positive Type-4 clears delegation and journals before send',async()=>{
@@ -69,4 +71,15 @@ it('ambiguous send preserves offline hash before first send and can recover afte
  expect(sends).toBe(1)
  expect(await inspectHash(finalizedClients(),journals[0].obj.hash,7)).toEqual({status:'DELEGATION_CLEARED_FINALIZED',hash,outerExecution:'success',retry:false})
  expect(sends).toBe(1)
+})
+
+it('finalized receipt clearing cannot hide restored delegation',async()=>{
+ const clients=finalizedClients()
+ clients[1].getBytecode=async({blockNumber})=>blockNumber===12n?'0xef01001234':undefined
+ expect(await inspectHash(clients,hash,7)).toMatchObject({status:'DELEGATION_RESTORED_OR_CHANGED',retry:false})
+})
+it('common finalized hash disagreement blocks success',async()=>{
+ const clients=finalizedClients()
+ clients[1].getBlock=async({blockNumber,blockTag})=>({number:blockNumber??12n,hash:blockNumber===12n?'0xbbbb':'0x'+'aa'.repeat(32)})
+ expect(await inspectHash(clients,hash,7)).toMatchObject({status:'FINALIZED_CHAIN_DISAGREEMENT',retry:false})
 })
