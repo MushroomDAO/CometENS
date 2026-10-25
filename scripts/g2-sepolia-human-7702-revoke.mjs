@@ -96,7 +96,7 @@ export async function inspectHash(clients,hash,nonce){
  if(finalized.some(b=>b.number===null||b.number<receipt.blockNumber))
   return {status:'AWAITING_FINALITY',hash,outerExecution:receipt.status,retry:false}
  const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:receipt.blockNumber})))
- if(codes.some(code=>code!=='0x'))
+ if(codes.some(code=>code != null && code !== '0x'))
   return {status:'DELEGATION_NOT_CLEARED_AT_FINALIZED_RECEIPT',hash,outerExecution:receipt.status,retry:false}
  return {status:'DELEGATION_CLEARED_FINALIZED',hash,outerExecution:receipt.status,retry:false}
 }
