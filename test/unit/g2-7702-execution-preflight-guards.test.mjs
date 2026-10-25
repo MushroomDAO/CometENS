@@ -7,7 +7,7 @@ import {verify} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 import {WALLET,DELEGATE,DELEGATE_HASH,CHAIN} from '../../scripts/check-g2-sepolia-7702-revocation.mjs'
 
 const order=()=>({version:1,action:'clear-7702',wallet:WALLET,chainId:CHAIN,maxGas:'60000',maxFeePerGasWei:'100000000',maxPriorityFeePerGasWei:'2000000',expiresAt:new Date(Date.now()+300000).toISOString()})
-// Invoke actual checkRemote and checkPinnedCode, with only the transport mocked.
+// Exercise the real verify() disagreement checks with injected checker snapshots and mocked RPC clients.
 const delegateBytecode='0x6001600055'
 const rpc=(overrides={})=>({
  getChainId:async()=>CHAIN,
@@ -18,8 +18,7 @@ const rpc=(overrides={})=>({
  estimateFeesPerGas:async()=>({maxFeePerGas:100n,maxPriorityFeePerGas:1n}),
  ...overrides,
 })
-// Actual pinned code hash is fixed in the production module; use the published hash via a fixture override.
-// The first comparison is mocked ONLY for pinned bytecode to avoid assuming deployed code bytes.
+// Skip pinned bytecode validation here; this suite specifically tests verify() disagreement guards.
 const pinned=async()=>{}
 it('verify with two distinct RPC client objects rejects nonce/delegation disagreement',async()=>{
  const checker=async c=>({status:'READY_FOR_HUMAN_REVIEW',observedTransactionNonce:await c.getTransactionCount({address:WALLET,blockTag:'latest'}),verifiedDelegateCodeHash:await c.getBytecode({address:DELEGATE})})
