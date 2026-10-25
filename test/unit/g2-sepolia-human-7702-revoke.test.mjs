@@ -83,3 +83,9 @@ it('common finalized hash disagreement blocks success',async()=>{
  clients[1].getBlock=async({blockNumber,blockTag})=>({number:blockNumber??12n,hash:blockNumber===12n?'0xbbbb':'0x'+'aa'.repeat(32)})
  expect(await inspectHash(clients,hash,7)).toMatchObject({status:'FINALIZED_CHAIN_DISAGREEMENT',retry:false})
 })
+
+it('finalized marker hash must agree with canonical block at its height',async()=>{
+ const clients=finalizedClients()
+ clients[0].getBlock=async({blockNumber,blockTag})=>({number:blockNumber??12n,hash:blockTag==='finalized'?'0x'+'bb'.repeat(32):'0x'+'aa'.repeat(32)})
+ expect(await inspectHash(clients,hash,7)).toMatchObject({status:'FINALIZED_CHAIN_DISAGREEMENT',retry:false})
+})
