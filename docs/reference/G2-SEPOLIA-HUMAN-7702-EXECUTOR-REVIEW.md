@@ -12,3 +12,11 @@ Example order JSON keys: `version:1`, `action:'clear-7702'`, `chainId:11155111`,
 The executor signs a Type-4 transaction offline, derives its hash with keccak256(serialized), persists the hash before transmission, and uses exactly one raw-transaction submission. An RPC timeout leaves the .hash journal for manual chain inspection. The key is opened with O_NOFOLLOW and checked by descriptor fstat before reading. Network calls have explicit timeout and zero retries.
 
 A success receipt alone is insufficient: both providers must return the expected Type-4 transaction with the fixed sender, destination, nonce, and zero-address self-authorization at nonce + 1. The receipt must be included in finalized history reported by both providers, and code at the receipt block must be empty from both providers. Until that evidence is available, execution reports a blocked/pending result instead of declaring completion. Disposable local Anvil validation and external formal review are still required.
+
+## Read-only recovery and reverted outer execution
+
+Run: node scripts/g2-sepolia-human-7702-revoke.mjs recover /absolute/path/to/journal
+
+Recovery reads only the protected journal.hash file and queries both RPCs. No signing key, signing, or broadcasting occurs. Repeat it after two confirmations until finality. PENDING_OR_RPC_DISAGREEMENT and AWAITING_FINALITY are not success states, and no automatic retry is allowed.
+
+EIP-7702 authorization changes are applied before outer execution and persist if outer execution reverts. Recovery validates Type-4 transaction fields and authorization, independent of receipt.status, then checks wallet code at the finalized receipt block on both providers. The outerExecution field records success or reverted separately. Conflicting RPC results and delegated code remain non-success statuses.
