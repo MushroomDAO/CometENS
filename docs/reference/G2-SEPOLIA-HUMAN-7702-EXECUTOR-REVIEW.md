@@ -1,0 +1,7 @@
+# Sepolia EIP-7702 local human revoke candidate — DRAFT, not approved for execution
+
+Only test wallet `0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C`, Sepolia `11155111`, current pinned delegate `0x5804b6119d12ad403a430fd3cff12a8ff6e4064b`. The intended authorization uses `contractAddress: zeroAddress`, `executor:'self'` and nonce transaction nonce + 1. The command defaults to `check`. `execute` requires a real TTY, exact phrase, POSIX mode 0600 test-key file and a pre-existing unique journal location; it never logs key bytes. All fee/nonce/delegate checks are refreshed after consent and again after signing. Raw signed hash is journaled before its single submission. Unknown RPC outcome MUST NOT trigger retry. A successful receipt still needs independent read-only cross-RPC finality verification.
+
+Example order JSON keys: `version:1`, `action:'clear-7702'`, `chainId:11155111`, fixed `wallet`, `maxGas:'60000'`, `maxFeePerGasWei:'100000000'`, `maxPriorityFeePerGasWei:'2000000'`, `expiresAt:'<UTC ISO within 1 hour>'`. The suggested limits are illustrative, not live fee guidance.
+
+**Execution review blockers**: No full Anvil Sepolia fork execution test for the actual delegated wallet and revocation, no validated type-4 serialized tx fixture signed with disposable key, and the second RPC may be stale/hostile. No code claims atomic nonce reservation. A trusted human must approve these gaps resolved before using execute. Do not ask AI agents to run execute or read key files. Clearing delegation breaks smart-account sessions and leaves prior storage intact.
