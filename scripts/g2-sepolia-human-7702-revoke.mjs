@@ -72,12 +72,12 @@ export async function executeVerified({o,clients,wallet,account,nonce,journalPat
 export async function inspectHash(clients,hash,nonce){
  if(!/^0x[0-9a-fA-F]{64}$/.test(hash)||!Number.isSafeInteger(nonce)||nonce<0)fail('INVALID_JOURNAL')
  const results=await Promise.all(clients.map(async c=>{
-  const tx=await c.getTransaction({hash}).catch(e=>{if(e.name==='TransactionNotFoundError')return null;throw e})
-  if(!tx)return {tx:null}
   const receipt=await c.getTransactionReceipt({hash}).catch(e=>{if(e.name==='TransactionReceiptNotFoundError')return null;throw e})
+  if(!receipt)return {tx:null,receipt:null}
+  const tx=await c.getTransaction({hash}).catch(e=>{if(e.name==='TransactionNotFoundError')return null;throw e})
   return {tx,receipt}
  }))
- if(results.some(x=>!x.tx||!x.receipt))return {status:'PENDING_OR_RPC_DISAGREEMENT',hash,retry:false}
+ if(results.some(x=>!x.tx||!x.receipt))return {status:'PENDING_NO_RETRY',hash,retry:false}
  for(const {tx,receipt} of results){
   if(!SAME(tx.from,WALLET)||!SAME(tx.to,WALLET)||BigInt(tx.nonce)!==BigInt(nonce)||
    BigInt(tx.chainId)!==BigInt(CHAIN)||!['eip7702','0x4','0x04',4].includes(tx.type)||
@@ -90,11 +90,11 @@ export async function inspectHash(clients,hash,nonce){
  const receipt=results[0].receipt
  if(receipt.blockNumber!==results[1].receipt.blockNumber||
   !SAME(receipt.blockHash,results[1].receipt.blockHash))return {status:'CHAIN_DISAGREEMENT',hash,retry:false}
+ const blocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:receipt.blockNumber})))
+ if(blocks.some(b=>!SAME(b.hash,receipt.blockHash)))return {status:'REORG_OR_RPC_DISAGREEMENT',hash,retry:false}
  const finalized=await Promise.all(clients.map(c=>c.getBlock({blockTag:'finalized'})))
  if(finalized.some(b=>b.number===null||b.number<receipt.blockNumber))
   return {status:'AWAITING_FINALITY',hash,outerExecution:receipt.status,retry:false}
- const blocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:receipt.blockNumber})))
- if(blocks.some(b=>!SAME(b.hash,receipt.blockHash)))return {status:'REORG_OR_RPC_DISAGREEMENT',hash,retry:false}
  const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:receipt.blockNumber})))
  if(codes.some(code=>code!=='0x'))
   return {status:'DELEGATION_NOT_CLEARED_AT_FINALIZED_RECEIPT',hash,outerExecution:receipt.status,retry:false}
@@ -104,6 +104,9 @@ async function recover(path,clients){
  const saved=JSON.parse(await secureRead(path+'.hash'))
  if(saved.state!=='SIGNED_BEFORE_BROADCAST'||saved.chainId!==CHAIN||
   !/^0x[0-9a-fA-F]{64}$/.test(saved.hash)||!Number.isSafeInteger(saved.nonce))fail('INVALID_JOURNAL')
+ const attempt=JSON.parse(await secureRead(path+'.attempt'))
+ if(attempt.state!=='BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY'||!SAME(attempt.hash,saved.hash)||
+  attempt.nonce!==saved.nonce||attempt.chainId!==CHAIN)fail('ATTEMPT_JOURNAL_MISMATCH')
  return inspectHash(clients,saved.hash,saved.nonce)
 }
 async function main(){
