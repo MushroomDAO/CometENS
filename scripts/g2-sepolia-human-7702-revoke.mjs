@@ -4,9 +4,8 @@ import {readFile, open, lstat, realpath} from 'node:fs/promises'
 import {dirname, resolve} from 'node:path'
 import {createInterface} from 'node:readline/promises'
 import {stdin,stdout} from 'node:process'
-import {createPublicClient,createWalletClient,http,zeroAddress,keccak256,parseTransaction,recoverTransactionAddress} from 'viem'
+import {createPublicClient,createWalletClient,http,zeroAddress} from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
-import {recoverAuthorizationAddress} from 'viem/experimental'
 import {sepolia} from 'viem/chains'
 import {checkRemote,WALLET,DELEGATE,CHAIN} from './check-g2-sepolia-7702-revocation.mjs'
 const SAME=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase()
@@ -28,17 +27,6 @@ export async function verify(clients,o,checker=checkRemote){
  if(results.some(x=>!x.fees.maxFeePerGas||!x.fees.maxPriorityFeePerGas||x.fees.maxFeePerGas>BigInt(o.maxFeePerGasWei)||x.fees.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)))fail('FEE_EXCEEDED')
  if(a.height>b.height+2n||b.height>a.height+2n)fail('RPC_BLOCK_DRIFT')
  return a.snapshot.observedTransactionNonce
-}
-export async function assertRaw(raw,o,nonce){
- const tx=parseTransaction(raw)
- if(tx.type!=='eip7702'||!SAME(tx.to,WALLET)||tx.nonce!==nonce||tx.value!==0n||(tx.data??'0x')!=='0x'||tx.chainId!==CHAIN||!tx.gas||tx.gas>BigInt(o.maxGas)||!tx.maxFeePerGas||tx.maxFeePerGas>BigInt(o.maxFeePerGasWei)||tx.maxFeePerGas*tx.gas>1000000000000000n||tx.maxPriorityFeePerGas>BigInt(o.maxPriorityFeePerGasWei)||tx.authorizationList?.length!==1)fail('SIGNED_TX_MISMATCH')
- const a=tx.authorizationList[0]
- if(!SAME(a.address,zeroAddress)||BigInt(a.chainId)!==BigInt(CHAIN)||BigInt(a.nonce)!==BigInt(nonce+1))fail('SIGNED_AUTH_MISMATCH')
- const sender=await recoverTransactionAddress({serializedTransaction:raw})
- if(!SAME(sender,WALLET))fail('TX_SIGNER_MISMATCH')
- const authSigner=await recoverAuthorizationAddress({authorization:a})
- if(!SAME(authSigner,WALLET))fail('AUTH_SIGNER_MISMATCH')
- return keccak256(raw)
 }
 export async function prepare(o,clients){return {status:'UNSIGNED_ONLY',nonce:await verify(clients,o),target:zeroAddress,chainId:CHAIN,wallet:WALLET,delegate:DELEGATE}}
 export async function assertPrivatePath(path,{mustExist=false}={}){
@@ -76,16 +64,19 @@ async function main(){
  const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0})})
  const authorization=await wallet.signAuthorization({contractAddress:zeroAddress,executor:'self',chainId:CHAIN})
  if(!SAME(authorization.address,zeroAddress)||BigInt(authorization.nonce)!==BigInt(pre.nonce+1))fail('AUTH_NONCE_MISMATCH')
- const tx={account,chain:sepolia,type:'eip7702',to:WALLET,data:'0x',value:0n,nonce:pre.nonce,gas:BigInt(o.maxGas),maxFeePerGas:BigInt(o.maxFeePerGasWei),maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]}
- const raw=await wallet.signTransaction(tx)
- const hash=await assertRaw(raw,o,pre.nonce)
- // Journal hash BEFORE transmission: timeout must never lead to an automatic retry.
- await assertPrivatePath(journalPath+'.signed')
- await persistent(journalPath+'.signed',{state:'SIGNED_NOT_SENT',hash,nonce:pre.nonce,warning:'No automatic retry after unknown RPC response'})
- if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE_AFTER_SIGN')
- const sent=await clients[0].sendRawTransaction({serializedTransaction:raw})
- if(!SAME(sent,hash))fail('HASH_MISMATCH')
- console.log(JSON.stringify({status:'SUBMITTED',hash,journal:journalPath+'.signed'}))
+ // viem official EIP-7702 path: wallet client signs and sends the type-4 transaction.
+ // The journal is irreversible before entering the ambiguous RPC submit boundary.
+ if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE_AFTER_AUTHORIZATION')
+ await assertPrivatePath(journalPath+'.attempt')
+ await persistent(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',nonce:pre.nonce,
+   chainId:CHAIN,orderExpiresAt:o.expiresAt,warning:'NEVER REPEAT EXECUTE; inspect the wallet nonce and chain before any recovery'})
+ const hash=await wallet.sendTransaction({account,chain:sepolia,type:'eip7702',to:WALLET,
+   data:'0x',value:0n,nonce:pre.nonce,gas:BigInt(o.maxGas),
+   maxFeePerGas:BigInt(o.maxFeePerGasWei),maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),
+   authorizationList:[authorization]})
+ await assertPrivatePath(journalPath+'.hash')
+ await persistent(journalPath+'.hash',{state:'SUBMITTED',hash,nonce:pre.nonce,chainId:CHAIN})
+ console.log(JSON.stringify({status:'SUBMITTED',hash,journal:journalPath+'.hash'}))
  const receipt=await clients[0].waitForTransactionReceipt({hash,confirmations:2,timeout:120000})
  if(receipt.status!=='success')fail('REVERTED')
  const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET})))

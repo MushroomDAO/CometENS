@@ -1,6 +1,6 @@
-import {test} from 'vitest'
+import {test} from 'node:test'
 import {strict as assert} from 'node:assert'
-import {validate,verify,assertRaw} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
+import {validate,verify} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const order=()=>({version:1,action:'clear-7702',wallet:'0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C',chainId:11155111,maxGas:'60000',maxFeePerGasWei:'100000000',maxPriorityFeePerGasWei:'2000000',expiresAt:new Date(Date.now()+300000).toISOString()})
 test('validates fixed intent and rejects hostile inputs',()=>{
  assert.ok(validate(order()))
@@ -17,5 +17,5 @@ test('dual RPC rejects nonce disagreement, hostile fees and block drift',async()
  await assert.rejects(()=>verify([rpc(),rpc(100000001n)],order(),checker),/FEE_EXCEEDED/)
  await assert.rejects(()=>verify([rpc(100n,100n),rpc(100n,110n)],order(),checker),/RPC_BLOCK_DRIFT/)
  await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,status:'BLOCKED'})),/DELEGATION_OR_NONCE_CHANGED/)
- await assert.rejects(()=>assertRaw('0x',order(),7))
+
 })
