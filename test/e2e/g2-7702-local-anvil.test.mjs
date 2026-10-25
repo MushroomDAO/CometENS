@@ -2,13 +2,14 @@ import {it, expect} from 'vitest'
 import {spawn} from 'node:child_process'
 import {createServer} from 'node:net'
 import {access} from 'node:fs/promises'
+import {existsSync} from 'node:fs'
 import {createPublicClient, createWalletClient, defineChain, http, toHex, zeroAddress} from 'viem'
 import {generatePrivateKey, privateKeyToAccount} from 'viem/accounts'
 
 const executable = `${process.env.HOME}/.foundry/bin/anvil`
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-it('clears delegated code through a locally mined type-4 self-authorization', async () => {
+it.skipIf(!existsSync(executable))('clears delegated code through a locally mined type-4 self-authorization', async () => {
   await access(executable)
   const server = createServer()
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
