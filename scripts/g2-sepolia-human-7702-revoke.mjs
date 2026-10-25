@@ -37,6 +37,27 @@ export async function assertPrivatePath(path,{mustExist=false}={}){
  try{const st=await lstat(path);if(st.isSymbolicLink()||!st.isFile()||(st.mode&0o777)!==0o600||st.uid!==process.getuid())fail('UNSAFE_FILE');return st}catch(e){if(mustExist||e.code!=='ENOENT')throw e}
 }
 const persistent=async(path,obj)=>{const f=await open(path,'wx',0o600);try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}}
+export async function executeVerified({o,clients,wallet,account,nonce,journalPath,
+ recheck=verify,guard=assertPrivatePath,persist=persistent}){
+ validate(o)
+ if(!SAME(account?.address,WALLET))fail('WRONG_SIGNER')
+ const authorization=await wallet.signAuthorization({contractAddress:zeroAddress,executor:'self',chainId:CHAIN})
+ if(!SAME(authorization.address,zeroAddress)||BigInt(authorization.nonce)!==BigInt(nonce+1))fail('AUTH_NONCE_MISMATCH')
+ if(await recheck(clients,o)!==nonce)fail('NONCE_RACE_AFTER_AUTHORIZATION')
+ await guard(journalPath+'.attempt')
+ await persist(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',nonce,chainId:CHAIN,
+   warning:'NEVER REPEAT EXECUTE; inspect chain after any timeout'})
+ const hash=await wallet.sendTransaction({account,chain:sepolia,type:'eip7702',to:WALLET,
+  data:'0x',value:0n,nonce,gas:BigInt(o.maxGas),maxFeePerGas:BigInt(o.maxFeePerGasWei),
+  maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]})
+ await guard(journalPath+'.hash')
+ await persist(journalPath+'.hash',{state:'SUBMITTED',hash,nonce,chainId:CHAIN})
+ const receipt=await clients[0].waitForTransactionReceipt({hash,confirmations:2,timeout:120000})
+ if(receipt.status!=='success')fail('REVERTED')
+ const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET})))
+ if(codes.some(x=>x&&x!=='0x'))fail('POSTCONDITION_PENDING')
+ return {status:'DELEGATION_CLEARED',hash}
+}
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
  if(!['check','execute'].includes(mode)||!orderPath||process.argv.length!==(mode==='check'?4:6))fail('USAGE')
@@ -63,26 +84,6 @@ async function main(){
  const account=privateKeyToAccount(secret)
  if(!SAME(account.address,WALLET))fail('WRONG_SIGNER')
  const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0})})
- const authorization=await wallet.signAuthorization({contractAddress:zeroAddress,executor:'self',chainId:CHAIN})
- if(!SAME(authorization.address,zeroAddress)||BigInt(authorization.nonce)!==BigInt(pre.nonce+1))fail('AUTH_NONCE_MISMATCH')
- // viem official EIP-7702 path: wallet client signs and sends the type-4 transaction.
- // The journal is irreversible before entering the ambiguous RPC submit boundary.
- if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE_AFTER_AUTHORIZATION')
- await assertPrivatePath(journalPath+'.attempt')
- await persistent(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',nonce:pre.nonce,
-   chainId:CHAIN,orderExpiresAt:o.expiresAt,warning:'NEVER REPEAT EXECUTE; inspect the wallet nonce and chain before any recovery'})
- // The attempt journal remains even if the RPC reports a timeout; never retry automatically.
- const hash=await wallet.sendTransaction({account,chain:sepolia,type:'eip7702',to:WALLET,
-   data:'0x',value:0n,nonce:pre.nonce,gas:BigInt(o.maxGas),
-   maxFeePerGas:BigInt(o.maxFeePerGasWei),maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),
-   authorizationList:[authorization]})
- await assertPrivatePath(journalPath+'.hash')
- await persistent(journalPath+'.hash',{state:'SUBMITTED',hash,nonce:pre.nonce,chainId:CHAIN})
- console.log(JSON.stringify({status:'SUBMITTED',hash,journal:journalPath+'.hash'}))
- const receipt=await clients[0].waitForTransactionReceipt({hash,confirmations:2,timeout:120000})
- if(receipt.status!=='success')fail('REVERTED')
- const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET})))
- if(codes.some(x=>x&&x!=='0x'))fail('POSTCONDITION_PENDING')
- console.log(JSON.stringify({status:'DELEGATION_CLEARED',hash}))
+ return await executeVerified({o,clients,wallet,account,nonce:pre.nonce,journalPath})
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})

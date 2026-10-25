@@ -31,3 +31,26 @@ it('CLI refuses execution without human terminal before any RPC or key access',(
  expect(output).toMatch(/BLOCKED/)
  expect(output).not.toMatch(/private key|0x[a-f0-9]{64}/i)
 })
+import {executeVerified} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
+const fixedWallet='0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C'
+it('mocked positive Type-4 clears delegation and journals before send',async()=>{
+ const calls=[]; const account={address:fixedWallet}; const hash='0x'+'12'.repeat(32)
+ const wallet={signAuthorization:async args=>{calls.push(['auth',args]);return {address:'0x0000000000000000000000000000000000000000',nonce:8}},
+ sendTransaction:async tx=>{calls.push(['send',tx]);return hash}}
+ const clients=[{waitForTransactionReceipt:async()=>({status:'success'}),getBytecode:async()=> '0x'}, {getBytecode:async()=>undefined}]
+ const result=await executeVerified({o:order(),clients,wallet,account,nonce:7,journalPath:'/fake',
+ recheck:async()=>7,guard:async()=>{},persist:async(path,obj)=>{calls.push(['journal',path,obj.state])}})
+ expect(result).toEqual({status:'DELEGATION_CLEARED',hash})
+ expect(calls[0][1]).toMatchObject({contractAddress:'0x0000000000000000000000000000000000000000',executor:'self',chainId:11155111})
+ expect(calls[1]).toEqual(['journal','/fake.attempt','BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY'])
+ expect(calls[2][1]).toMatchObject({type:'eip7702',nonce:7,to:fixedWallet,authorizationList:[{nonce:8}],gas:60000n})
+ expect(calls[3]).toEqual(['journal','/fake.hash','SUBMITTED'])
+})
+it('timeout leaves attempt journal and never silently resends',async()=>{
+ let sends=0;const journals=[]
+ const wallet={signAuthorization:async()=>({address:'0x0000000000000000000000000000000000000000',nonce:8}),
+ sendTransaction:async()=>{sends++;throw Error('RPC_TIMEOUT')}}
+ await expect(executeVerified({o:order(),clients:[{},{}],wallet,account:{address:fixedWallet},nonce:7,journalPath:'/fake',
+ recheck:async()=>7,guard:async()=>{},persist:async(path)=>journals.push(path)})).rejects.toThrow('RPC_TIMEOUT')
+ expect(journals).toEqual(['/fake.attempt']);expect(sends).toBe(1)
+})
