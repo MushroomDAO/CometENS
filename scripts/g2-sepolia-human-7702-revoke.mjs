@@ -46,7 +46,13 @@ async function secureRead(path){
   return await f.readFile('utf8')
  }finally{await f.close()}
 }
-const persistent=async(path,obj)=>{const f=await open(path,'wx',0o600);try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}}
+const persistent=async(path,obj)=>{
+ const f=await open(path,'wx',0o600)
+ try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}
+ // Persist the newly created directory entry before signing or broadcasting.
+ const dir=await open(dirname(path),'r')
+ try{await dir.sync()}finally{await dir.close()}
+}
 export async function executeVerified({o,clients,wallet,account,nonce,journalPath,
  recheck=verify,guard=assertPrivatePath,persist=persistent}){
  validate(o)
