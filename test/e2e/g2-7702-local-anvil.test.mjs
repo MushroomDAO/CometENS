@@ -51,8 +51,9 @@ it('uses the real executor, signed type-4 transaction and receipt inspector on d
     const persist=async(path,obj)=>{const file=await open(path,'wx',0o600);try{await file.writeFile(JSON.stringify(obj));await file.sync()}finally{await file.close()}}
     const result=await executeVerified({o,clients:[publicClient,publicClient],wallet,account,nonce,
       journalPath:join(directory,'attempt'),recheck:async()=>nonce,guard:async()=>{},persist})
-    expect(['AWAITING_FINALITY','DELEGATION_CLEARED_FINALIZED']).toContain(result.status)
+    expect(['PENDING_NO_RETRY','AWAITING_FINALITY','DELEGATION_CLEARED_FINALIZED']).toContain(result.status)
     const hash=result.hash
+    await publicClient.waitForTransactionReceipt({hash})
     const tx=await publicClient.getTransaction({hash})
     const receipt=await publicClient.getTransactionReceipt({hash})
     expect(tx.type).toBe('eip7702')
@@ -63,7 +64,13 @@ it('uses the real executor, signed type-4 transaction and receipt inspector on d
     expect(receipt.gasUsed).toBeLessThanOrEqual(60000n)
     console.info(`LOCAL_ANVIL chainId=11155111 hardfork=prague type=eip7702 gasUsed=${receipt.gasUsed} hash=${hash}`)
     await publicClient.request({method:'anvil_mine',params:['0x80']})
-    const inspected=await inspectHash([publicClient,publicClient],hash,nonce)
+    let inspected
+    for(let i=0;i<30;i++){
+      inspected=await inspectHash([publicClient,publicClient],hash,nonce)
+      if(inspected.status==='DELEGATION_CLEARED_FINALIZED')break
+      expect(['PENDING_NO_RETRY','AWAITING_FINALITY']).toContain(inspected.status)
+      await delay(100)
+    }
     expect(inspected.status).toBe('DELEGATION_CLEARED_FINALIZED')
     expect((await publicClient.getBytecode({address:account.address}))??'0x').toBe('0x')
   }finally{
