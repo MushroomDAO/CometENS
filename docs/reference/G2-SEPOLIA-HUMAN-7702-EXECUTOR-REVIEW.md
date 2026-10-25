@@ -4,14 +4,14 @@ Only test wallet `0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C`, Sepolia `11155111
 
 Example order JSON keys: `version:1`, `action:'clear-7702'`, `chainId:11155111`, fixed `wallet`, `maxGas:'60000'`, `maxFeePerGasWei:'100000000'`, `maxPriorityFeePerGasWei:'2000000'`, `expiresAt:'<UTC ISO within 1 hour>'`. The suggested limits are illustrative, not live fee guidance.
 
-**Execution review blockers**: No full Anvil Sepolia fork execution test for the actual delegated wallet and revocation, and the second RPC may be stale/hostile. No code claims atomic nonce reservation. A trusted human must approve these gaps resolved before using execute. Do not ask AI agents to run execute or read key files. Clearing delegation breaks smart-account sessions and leaves prior storage intact.
+**Execution review blockers**: Local Anvil Sepolia fork proof uses a disposable signer, not the real target wallet. Live RPC consistency and real-wallet signing remain unverified; the second RPC may be stale/hostile. No code claims atomic nonce reservation. A trusted human must approve these gaps resolved before using execute. Do not ask AI agents to run execute or read key files. Clearing delegation breaks smart-account sessions and leaves prior storage intact.
 
 
 ## Security review update
 
 The executor signs a Type-4 transaction offline, derives its hash with keccak256(serialized), persists the hash before transmission, and uses exactly one raw-transaction submission. An RPC timeout leaves the .hash journal for manual chain inspection. The key is opened with O_NOFOLLOW and checked by descriptor fstat before reading. Network calls have explicit timeout and zero retries.
 
-A success receipt alone is insufficient: both providers must return the expected Type-4 transaction with the fixed sender, destination, nonce, and zero-address self-authorization at nonce + 1. The receipt must be included in finalized history reported by both providers, and code at the receipt block must be empty from both providers. Until that evidence is available, execution reports a blocked/pending result instead of declaring completion. Disposable local Anvil validation and external formal review are still required.
+A success receipt alone is insufficient: both providers must return the expected Type-4 transaction with the fixed sender, destination, nonce, and zero-address self-authorization at nonce + 1. The receipt must be included in finalized history reported by both providers, and code at the receipt block must be empty from both providers. Until that evidence is available, execution reports a blocked/pending result instead of declaring completion. Local signed Anvil Sepolia-fork validation has passed; independent formal review is still required.
 
 ## Read-only recovery and reverted outer execution
 
@@ -23,16 +23,20 @@ EIP-7702 authorization changes are applied before outer execution and persist if
 
 Recovery requires both protected journal.hash and journal.attempt records to agree on hash, nonce and Sepolia chain ID; a signed-but-never-attempted transaction cannot be described as submitted. Missing receipts or transactions yield PENDING_NO_RETRY. Each provider must agree on the receipt's mined block hash and its canonical block at that height. Both independently reported finalized heights must include that mined block, but need not be equal. EIP-7702 code is checked at that receipt block regardless of outer transaction status.
 
-Local signed EIP-7702 Type-4 Anvil test has passed using a disposable test key and local chain. This is not a Sepolia fork test, not an approval for live execution, and does not establish behavior on the target Sepolia wallet.
+Worker-1 reported a **local Anvil Sepolia fork** on chain ID 11155111 at block 11990416, with the actual pinned delegate code hash checked, a disposable **local** signer submitting a signed Type-4 self-revocation, gasUsed 36800, and resulting wallet code 0x. This is local fork evidence only: no signing with the real Sepolia wallet key and no live Sepolia broadcast. It does not grant execution approval.
 
 For every exclusive journal creation, both the file contents and the parent directory entry are fsynced before continuing. Failure to sync either is fatal; the executor must not broadcast on a journal durability error. This includes the prebroadcast .hash and .attempt files.
 
 ## Mac Terminal runbook — REVIEW ONLY, NOT APPROVED FOR EXECUTION
 
-These commands apply **only after this PR is merged** and run from the real repository root containing `scripts/g2-sepolia-human-7702-revoke.mjs`. They are documentation for independent human security review, **not authorization to execute**. Before any human execution: verify the **exact current PR head has formal independent APPROVED review and green CI**, all required security findings have been resolved, and the existing private key actually controls the fixed **Sepolia test wallet**. A local signed Anvil test passed, but neither a Sepolia fork nor an approved live revoke was completed.
+These commands apply **only after this PR is merged** and run from the real repository root containing `scripts/g2-sepolia-human-7702-revoke.mjs`. They are documentation for independent human security review, **not authorization to execute**. Before any human execution: verify the **exact current PR head has formal independent APPROVED review and green CI**, all required security findings have been resolved, and the existing private key actually controls the fixed **Sepolia test wallet**. A locally signed Anvil Sepolia-fork Type-4 revoke passed at fork block 11990416; no live Sepolia wallet signing, broadcast, or approval has occurred.
 
 ```sh
 cd /Users/jason/Dev/mycelium/CometENS
+if ! command -v node >/dev/null 2>&1; then
+  export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"
+fi
+node --version || { echo "Node.js not available"; exit 1; }
 umask 077
 mkdir -p -m 700 "$HOME/.config/cometens-g2-sepolia"
 PRIVATE_DIR="$HOME/.config/cometens-g2-sepolia"
