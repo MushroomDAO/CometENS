@@ -117,7 +117,8 @@ export async function inspectHash(clients,hash,nonce){
  // Independent finalized heights can differ; inspect their common canonical ancestor.
  const common=finalized[0].number<finalized[1].number?finalized[0].number:finalized[1].number
  const commonBlocks=await Promise.all(clients.map(c=>c.getBlock({blockNumber:common})))
- if(commonBlocks.some(b=>b.number!==common||!b.hash||!SAME(b.hash,commonBlocks[0].hash)))
+ if(commonBlocks.some((b,i)=>b.number!==common||!b.hash||!SAME(b.hash,commonBlocks[0].hash)||
+  (finalized[i].number===common&&!SAME(finalized[i].hash,b.hash))))
   return {status:'FINALIZED_CHAIN_DISAGREEMENT',hash,retry:false}
  const latestBlocks=await Promise.all(clients.map(c=>c.getBlock({blockTag:'latest'})))
  const latestCodes=await Promise.all(clients.map((c,i)=>c.getBytecode({address:WALLET,blockNumber:latestBlocks[i].number})))
