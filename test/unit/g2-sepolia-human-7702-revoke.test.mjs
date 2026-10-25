@@ -36,11 +36,11 @@ import {executeVerified,inspectHash} from '../../scripts/g2-sepolia-human-7702-r
 const fixedWallet='0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C'
 const signed='0x04'+'ab'.repeat(90)
 const hash=keccak256(signed)
-const finalizedClients=()=>[0,1].map(()=>({
+const finalizedClients=()=>[0,1].map((i)=>({
  getTransaction:async()=>({from:fixedWallet,to:fixedWallet,nonce:7,chainId:11155111,type:'eip7702',authorizationList:[{address:zeroAddress,nonce:8,chainId:11155111}]}),
  getTransactionReceipt:async()=>({transactionHash:hash,blockNumber:11n,blockHash:'0x'+'aa'.repeat(32),status:'success'}),
  getBlock:async()=>({number:12n,hash:'0x'+'aa'.repeat(32)}),
- getBytecode:async()=> '0x'
+ getBytecode:async()=> i===0?'0x':undefined
 }))
 it('mocked positive Type-4 clears delegation and journals before send',async()=>{
  const calls=[]; const account={address:fixedWallet}
