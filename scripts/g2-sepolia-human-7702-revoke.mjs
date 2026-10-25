@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /** Explicit human-only execution. NEVER invoke execute from automation. */
-import {readFile, open, lstat, realpath} from 'node:fs/promises'
+import {open, lstat, realpath} from 'node:fs/promises'
+import {constants} from 'node:fs'
 import {dirname, resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import {createInterface} from 'node:readline/promises'
 import {stdin,stdout} from 'node:process'
-import {createPublicClient,createWalletClient,http,zeroAddress} from 'viem'
+import {createPublicClient,createWalletClient,http,zeroAddress,keccak256} from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
 import {sepolia} from 'viem/chains'
 import {checkRemote,WALLET,DELEGATE,CHAIN} from './check-g2-sepolia-7702-revocation.mjs'
@@ -36,6 +37,15 @@ export async function assertPrivatePath(path,{mustExist=false}={}){
  if(!dir.isDirectory()||(dir.mode&0o077)!==0||dir.uid!==process.getuid()||await realpath(PRIVATE_DIR)!==PRIVATE_DIR)fail('UNSAFE_PRIVATE_DIR')
  try{const st=await lstat(path);if(st.isSymbolicLink()||!st.isFile()||(st.mode&0o777)!==0o600||st.uid!==process.getuid())fail('UNSAFE_FILE');return st}catch(e){if(mustExist||e.code!=='ENOENT')throw e}
 }
+async function secureRead(path){
+ await assertPrivatePath(path,{mustExist:true})
+ const f=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW)
+ try{
+  const st=await f.stat()
+  if(!st.isFile()||(st.mode&0o777)!==0o600||st.uid!==process.getuid())fail('UNSAFE_FILE_DESCRIPTOR')
+  return await f.readFile('utf8')
+ }finally{await f.close()}
+}
 const persistent=async(path,obj)=>{const f=await open(path,'wx',0o600);try{await f.writeFile(JSON.stringify(obj)+'\n');await f.sync()}finally{await f.close()}}
 export async function executeVerified({o,clients,wallet,account,nonce,journalPath,
  recheck=verify,guard=assertPrivatePath,persist=persistent}){
@@ -44,27 +54,45 @@ export async function executeVerified({o,clients,wallet,account,nonce,journalPat
  const authorization=await wallet.signAuthorization({contractAddress:zeroAddress,executor:'self',chainId:CHAIN})
  if(!SAME(authorization.address,zeroAddress)||BigInt(authorization.nonce)!==BigInt(nonce+1))fail('AUTH_NONCE_MISMATCH')
  if(await recheck(clients,o)!==nonce)fail('NONCE_RACE_AFTER_AUTHORIZATION')
- await guard(journalPath+'.attempt')
- await persist(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',nonce,chainId:CHAIN,
-   warning:'NEVER REPEAT EXECUTE; inspect chain after any timeout'})
- const hash=await wallet.sendTransaction({account,chain:sepolia,type:'eip7702',to:WALLET,
+ const tx={account,chain:sepolia,chainId:CHAIN,type:'eip7702',to:WALLET,
   data:'0x',value:0n,nonce,gas:BigInt(o.maxGas),maxFeePerGas:BigInt(o.maxFeePerGasWei),
-  maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]})
+  maxPriorityFeePerGas:BigInt(o.maxPriorityFeePerGasWei),authorizationList:[authorization]}
+ // signTransaction never broadcasts. Durable hash must exist before the first send.
+ const serialized=await wallet.signTransaction(tx)
+ const hash=keccak256(serialized)
  await guard(journalPath+'.hash')
- await persist(journalPath+'.hash',{state:'SUBMITTED',hash,nonce,chainId:CHAIN})
+ await persist(journalPath+'.hash',{state:'SIGNED_BEFORE_BROADCAST',hash,nonce,chainId:CHAIN,
+  warning:'Single send only. On uncertain outcome inspect hash across RPCs; never automatically retry.'})
+ await guard(journalPath+'.attempt')
+ await persist(journalPath+'.attempt',{state:'BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY',hash,nonce,chainId:CHAIN})
+ const returned=await wallet.sendRawTransaction({serializedTransaction:serialized})
+ if(!SAME(returned,hash))fail('BROADCAST_HASH_MISMATCH')
  const receipt=await clients[0].waitForTransactionReceipt({hash,confirmations:2,timeout:120000})
  if(receipt.status!=='success')fail('REVERTED')
- const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET})))
+ const transactions=await Promise.all(clients.map(c=>c.getTransaction({hash})))
+ for(const observed of transactions){
+  if(!observed||!SAME(observed.from,WALLET)||!SAME(observed.to,WALLET)||
+   BigInt(observed.nonce)!==BigInt(nonce)||!['eip7702','0x4','0x04',4].includes(observed.type)||
+   !Array.isArray(observed.authorizationList)||observed.authorizationList.length!==1)fail('TYPE4_MISMATCH')
+  const a=observed.authorizationList[0]
+  if(!SAME(a.address,zeroAddress)||BigInt(a.nonce)!==BigInt(nonce+1)||
+   BigInt(a.chainId)!==BigInt(CHAIN))fail('AUTHORIZATION_MISMATCH')
+ }
+ // Two confirmations are not finality. Require finalized block on both RPC providers.
+ const finalized=await Promise.all(clients.map(c=>c.getBlock({blockTag:'finalized'})))
+ if(finalized.some(b=>b.number===null||b.number<receipt.blockNumber)||
+  !SAME(finalized[0].hash,finalized[1].hash))fail('FINALITY_PENDING')
+ const codes=await Promise.all(clients.map(c=>c.getBytecode({address:WALLET,blockNumber:receipt.blockNumber})))
  if(codes.some(x=>x&&x!=='0x'))fail('POSTCONDITION_PENDING')
- return {status:'DELEGATION_CLEARED',hash}
+ return {status:'DELEGATION_CLEARED_FINALIZED',hash}
 }
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
  if(!['check','execute'].includes(mode)||!orderPath||process.argv.length!==(mode==='check'?4:6))fail('USAGE')
  await assertPrivatePath(orderPath,{mustExist:true})
- const o=validate(JSON.parse(await readFile(orderPath,'utf8')))
+ const o=validate(JSON.parse(await secureRead(orderPath)))
  if(mode==='execute'&&(!stdin.isTTY||!stdout.isTTY))fail('HUMAN_TTY_REQUIRED')
- const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0}),ccipRead:false}))
+ const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0,timeout:15000}),ccipRead:false}))
  const pre=await prepare(o,clients)
  console.log(JSON.stringify(pre))
  if(mode==='check')return
@@ -79,11 +107,11 @@ async function main(){
  if(await verify(clients,o)!==pre.nonce)fail('NONCE_RACE')
  const st=await assertPrivatePath(keyPath,{mustExist:true})
  if((st.mode&0o777)!==0o600||!st.isFile()||st.uid!==process.getuid())fail('UNSAFE_KEY_FILE')
- const secret=(await readFile(keyPath,'utf8')).trim()
+ const secret=(await secureRead(keyPath)).trim()
  if(!/^0x[0-9a-fA-F]{64}$/.test(secret))fail('KEY_FORMAT')
  const account=privateKeyToAccount(secret)
  if(!SAME(account.address,WALLET))fail('WRONG_SIGNER')
- const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0})})
+ const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0,timeout:15000})})
  return await executeVerified({o,clients,wallet,account,nonce:pre.nonce,journalPath})
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
