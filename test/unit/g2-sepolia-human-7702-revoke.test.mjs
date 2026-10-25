@@ -36,7 +36,7 @@ it('CLI refuses execution without human terminal before any RPC or key access',(
  expect(output).toMatch(/BLOCKED/)
  expect(output).not.toMatch(/private key|0x[a-f0-9]{64}/i)
 })
-import {executeVerified,inspectHash} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
+import {executeVerified,inspectHash,reserveNonce} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const fixedWallet='0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C'
 const signed='0x04'+'ab'.repeat(90)
 const hash=keccak256(signed)
@@ -106,4 +106,45 @@ it('symlinked CLI invocation fails closed for absent arguments',()=>{
    expect(String(error?.stderr)).toMatch(/BLOCKED/)
   }
  }finally{rmSync(dir,{recursive:true,force:true})}
+})
+
+it('expiry mutation between authorization, transaction signing and broadcast fails closed',async()=>{
+ const expired=()=>new Date(Date.now()-10000).toISOString()
+ for(const stage of ['authorization','transaction','persist']){
+  const o=order();let sends=0;let signs=0
+  const wallet={
+   signAuthorization:async()=>{if(stage==='authorization')o.expiresAt=expired();return {address:zeroAddress,nonce:8}},
+   signTransaction:async()=>{signs++;if(stage==='transaction')o.expiresAt=expired();return signed},
+   sendRawTransaction:async()=>{sends++;return hash}}
+  await expect(executeVerified({o,clients:finalizedClients(),wallet,account:{address:fixedWallet},nonce:7,journalPath:'/fake',recheck:async()=>7,guard:async()=>{},persist:async()=>{if(stage==='persist')o.expiresAt=expired()}})).rejects.toThrow('EXPIRED')
+  expect(sends).toBe(0)
+  if(stage==='authorization')expect(signs).toBe(0)
+ }
+})
+it('nonce lock uses wallet and nonce independent of journal filename, rejects collision',async()=>{
+ const locks=new Set(),writes=[]
+ const persist=async(path,obj)=>{if(locks.has(path)){const e=Error('EEXIST');e.code='EEXIST';throw e}locks.add(path);writes.push(obj)}
+ const guard=async()=>{}
+ const first=await reserveNonce(7,persist,guard)
+ expect(first).toContain('nonce-'+fixedWallet.toLowerCase()+'-7.lock')
+ await expect(reserveNonce(7,persist,guard)).rejects.toThrow('EEXIST')
+ expect((await reserveNonce(8,persist,guard))).not.toBe(first)
+ expect(writes.every(x=>x.state==='NONCE_RESERVED_NO_RETRY')).toBe(true)
+})
+it('reorg after finality lookup never reports cleared',async()=>{
+ let reads=0
+ const clients=finalizedClients().map(c=>({...c,getBlock:async args=>{
+  if(args.blockTag==='finalized'||args.blockTag==='latest')return {number:12n,hash:'0x'+'aa'.repeat(32)}
+  if(args.blockNumber===12n)return {number:12n,hash:'0x'+'aa'.repeat(32)}
+  reads++;return {number:11n,hash: reads>2?'0x'+'cc'.repeat(32):'0x'+'aa'.repeat(32)}
+ }}))
+ expect((await inspectHash(clients,hash,7)).status).toBe('REORG_AFTER_FINALITY_CHECK_NO_RETRY')
+})
+it('missing receipt distinguishes replaced nonce from dropped hash without automatic retry',async()=>{
+ const noReceipt=nonce=>[0,1].map(()=>({
+  getTransactionReceipt:async()=>{const e=Error('missing');e.name='TransactionReceiptNotFoundError';throw e},
+  getTransaction:async()=>{const e=Error('missing');e.name='TransactionNotFoundError';throw e},
+  getTransactionCount:async()=>nonce}))
+ expect((await inspectHash(noReceipt(8),hash,7)).status).toBe('NONCE_CONSUMED_OR_TX_REPLACED_NO_RETRY')
+ expect((await inspectHash(noReceipt(7),hash,7)).status).toBe('TX_NOT_FOUND_OR_DROPPED_NO_RETRY')
 })
