@@ -4,7 +4,7 @@
 
 ## Evidence and its limits
 
-The repository's `test/e2e/g2-7702-local-anvil.test.mjs` exercises a disposable randomly generated wallet against locally started Anvil, Prague hardfork, with chain ID **11155111**. It creates delegated code, runs the exported `executeVerified` and `inspectHash` functions with the test-only wallet constant substituted through Vitest's module mock, mines a real locally signed EIP-7702 transaction, checks the finality result, and logs measured `gasUsed`. No production wallet private key is used. This is **plain local Anvil, not a Sepolia fork**; chain ID matching alone does not reproduce Sepolia state, fees, RPC behavior or wallet custody. Run `pnpm vitest run test/e2e/g2-7702-local-anvil.test.mjs` with Foundry Anvil installed to reproduce. A previous reviewer reported an independent manual local Anvil run; that result is not Sepolia-fork or real-wallet evidence.
+The repository's `test/e2e/g2-7702-local-anvil.test.mjs` exercises a disposable randomly generated wallet against locally started Anvil, Prague hardfork, with chain ID **11155111**. It creates delegated code, runs the exported `executeVerified` and `inspectHash` functions with the test-only wallet constant substituted through Vitest's module mock, mines a real locally signed EIP-7702 transaction, polls `inspectHash` after mining and logs measured `gasUsed`. The first `executeVerified` status must be pending or awaiting finality. `recheck`, `guard`, `persist` and `checkRemote` are replaced in the test, and both RPC slots use the **same Anvil client**. Neither the actual CLI entry points (`main()` and `recover()`), filesystem permissions and persistence, two independent RPCs, nor production `verify` are tested here. No production wallet private key is used. This is **plain local Anvil, not a Sepolia fork**; chain ID matching alone does not reproduce Sepolia state, fees, RPC behavior or wallet custody. Run `pnpm vitest run test/e2e/g2-7702-local-anvil.test.mjs` with Foundry Anvil installed to reproduce. A previous reviewer reported an independent manual local Anvil run; that result is not Sepolia-fork or real-wallet evidence.
 
 ## Read-only preflight for an operator
 
@@ -39,15 +39,23 @@ This is a **template, not a valid order**. Calculate fee caps anew from both tru
 node scripts/g2-sepolia-human-7702-revoke.mjs check "$ORDER_FILE"
 ```
 
-Do not run `execute` at this stage. The `check` mode returns an unsigned snapshot only, after checking the current delegation and fee caps. The order may expire at any time. In current runtime code, a recheck happens after the authorization signature but **before the outer transaction is signed**; expiry is not independently revalidated at every signing and sending boundary. Treat this as an open execution gate.
+Do not run `execute` at this stage. The `check` mode returns an unsigned snapshot only, after checking the current delegation and fee caps. The order may expire at any time. The merged #189 runtime rechecks after authorization, revalidates expiry before signing and again before broadcast. These checks still require independent execution-security approval of the exact runtime SHA.
 
 ## Recovery gates before any human execution
 
 - An observed `PENDING_NO_RETRY` means **do not resubmit**. Immediately after a send, a missing receipt or a lagging RPC can leave that normal pending state; command exit status is not evidence of transaction failure.
-- The journal `.hash` is written before `.attempt` and before a single broadcast. A `.hash` without `.attempt` can indicate interrupted preparation; `recover` currently errors on absent `.attempt`. Preserve the artifacts for investigation, never reconstruct or retry automatically.
-- If a transaction was dropped, superseded or replaced, inspect both RPCs for the recorded hash, the account's pending/latest nonce, canonical receipts, current delegation and any replacement hash. A consumed nonce with a missing original hash is **not success**. The current inspector lacks a distinct `NONCE_CONSUMED_BY_OTHER_TX` state.
-- Reservation is currently exclusive **per journal filename**, not globally per wallet nonce. A global per-wallet/per-nonce lock, verified before the secret is read, is required before opening execution to concurrent operators.
-- Canonical receipt block identity should be checked again after the finality read. The existing code can attribute finality to an orphaned receipt in a deep reorganization.
+- The journal `.hash` is written before `.attempt` and before a single broadcast. A `.hash` without `.attempt` can indicate interrupted preparation; `recover` returns `MISSING_ATTEMPT_JOURNAL_NO_RETRY` when `.attempt` is absent. Preserve the artifacts for investigation, never reconstruct or retry automatically.
+- If a transaction was dropped, superseded or replaced, inspect both RPCs for the recorded hash, the account's pending/latest nonce, canonical receipts, current delegation and any replacement hash. A consumed nonce with a missing original hash is **not success**. The merged runtime returns `NONCE_CONSUMED_OR_TX_REPLACED_NO_RETRY` when it observes a consumed nonce; this does not identify the replacement transaction or prove successful clearing.
+- The merged #189 runtime creates an exclusive wallet-and-nonce `.lock` after human confirmation and a fresh verification, before reading the signing key. Locks intentionally remain after uncertain outcomes; a stranded lock must be investigated manually using both RPCs and the preserved journals. Never delete a lock merely to retry.
+- The merged runtime repeats canonical receipt-block and receipt identity checks after finality reads. Independent RPC disagreement and deeper reorganization remain review considerations.
 - A returned `DELEGATION_CLEARED_FINALIZED` reports receipt-block code after finality; inspect the **latest** current code too, because later redelegation can occur. Verify both RPCs agree.
+
+For read-only recovery with the existing journal basename (do not append `.hash` or `.attempt`):
+
+```sh
+node scripts/g2-sepolia-human-7702-revoke.mjs recover "$JOURNAL_BASE"
+```
+
+A nonfinal or inconclusive recovery result can exit with status 2 and must never be interpreted as permission to resend. Never provide private-key bytes to an agent or authorize AI-driven `execute`. **Approval to merge this PR is not approval to EXECUTE.**
 
 Record the independent security reviewer, exact reviewed SHA, review timestamp, intended account, order expiration, and the wallet owner's affirmative authorization before reconsidering `execute`. Merge approval alone is insufficient.
