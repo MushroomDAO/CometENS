@@ -2,6 +2,7 @@ import {it,expect} from 'vitest'
 import {execFileSync} from 'node:child_process'
 import {existsSync} from 'node:fs'
 import {strict as assert} from 'node:assert'
+import {keccak256,zeroAddress} from 'viem'
 import {validate,verify} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const order=()=>({version:1,action:'clear-7702',wallet:'0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C',chainId:11155111,maxGas:'60000',maxFeePerGasWei:'100000000',maxPriorityFeePerGasWei:'2000000',expiresAt:new Date(Date.now()+300000).toISOString()})
 it('validates fixed intent and rejects hostile inputs',()=>{
@@ -31,26 +32,41 @@ it('CLI refuses execution without human terminal before any RPC or key access',(
  expect(output).toMatch(/BLOCKED/)
  expect(output).not.toMatch(/private key|0x[a-f0-9]{64}/i)
 })
-import {executeVerified} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
+import {executeVerified,inspectHash} from '../../scripts/g2-sepolia-human-7702-revoke.mjs'
 const fixedWallet='0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C'
+const signed='0x04'+'ab'.repeat(90)
+const hash=keccak256(signed)
+const finalizedClients=()=>[0,1].map(()=>({
+ getTransaction:async()=>({from:fixedWallet,to:fixedWallet,nonce:7,chainId:11155111,type:'eip7702',authorizationList:[{address:zeroAddress,nonce:8,chainId:11155111}]}),
+ getTransactionReceipt:async()=>({transactionHash:hash,blockNumber:11n,blockHash:'0x'+'aa'.repeat(32),status:'success'}),
+ getBlock:async()=>({number:12n,hash:'0x'+'aa'.repeat(32)}),
+ getBytecode:async()=> '0x'
+}))
 it('mocked positive Type-4 clears delegation and journals before send',async()=>{
- const calls=[]; const account={address:fixedWallet}; const hash='0x'+'12'.repeat(32)
+ const calls=[]; const account={address:fixedWallet}
  const wallet={signAuthorization:async args=>{calls.push(['auth',args]);return {address:'0x0000000000000000000000000000000000000000',nonce:8}},
- sendTransaction:async tx=>{calls.push(['send',tx]);return hash}}
- const clients=[{waitForTransactionReceipt:async()=>({status:'success'}),getBytecode:async()=> '0x'}, {getBytecode:async()=>undefined}]
+ signTransaction:async tx=>{calls.push(['sign',tx]);return signed},
+ sendRawTransaction:async tx=>{calls.push(['send',tx]);return hash}}
+ const clients=finalizedClients()
  const result=await executeVerified({o:order(),clients,wallet,account,nonce:7,journalPath:'/fake',
  recheck:async()=>7,guard:async()=>{},persist:async(path,obj)=>{calls.push(['journal',path,obj.state])}})
- expect(result).toEqual({status:'DELEGATION_CLEARED',hash})
+ expect(result).toEqual({status:'DELEGATION_CLEARED_FINALIZED',hash,outerExecution:'success',retry:false})
  expect(calls[0][1]).toMatchObject({contractAddress:'0x0000000000000000000000000000000000000000',executor:'self',chainId:11155111})
- expect(calls[1]).toEqual(['journal','/fake.attempt','BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY'])
- expect(calls[2][1]).toMatchObject({type:'eip7702',nonce:7,to:fixedWallet,authorizationList:[{nonce:8}],gas:60000n})
- expect(calls[3]).toEqual(['journal','/fake.hash','SUBMITTED'])
+ expect(calls[1][1]).toMatchObject({type:'eip7702',nonce:7,to:fixedWallet,authorizationList:[{nonce:8}],gas:60000n})
+ expect(calls[2]).toEqual(['journal','/fake.hash','SIGNED_BEFORE_BROADCAST'])
+ expect(calls[3]).toEqual(['journal','/fake.attempt','BROADCAST_ATTEMPT_UNKNOWN_NO_RETRY'])
+ expect(calls[4]).toEqual(['send',{serializedTransaction:signed}])
 })
-it('timeout leaves attempt journal and never silently resends',async()=>{
+it('ambiguous send preserves offline hash before first send and can recover after finality without resending',async()=>{
  let sends=0;const journals=[]
  const wallet={signAuthorization:async()=>({address:'0x0000000000000000000000000000000000000000',nonce:8}),
- sendTransaction:async()=>{sends++;throw Error('RPC_TIMEOUT')}}
+ signTransaction:async()=>signed,
+ sendRawTransaction:async()=>{sends++;expect(journals.map(x=>x.path)).toEqual(['/fake.hash','/fake.attempt']);throw Error('RPC_TIMEOUT')}}
  await expect(executeVerified({o:order(),clients:[{},{}],wallet,account:{address:fixedWallet},nonce:7,journalPath:'/fake',
- recheck:async()=>7,guard:async()=>{},persist:async(path)=>journals.push(path)})).rejects.toThrow('RPC_TIMEOUT')
- expect(journals).toEqual(['/fake.attempt']);expect(sends).toBe(1)
+ recheck:async()=>7,guard:async()=>{},persist:async(path,obj)=>journals.push({path,obj})})).rejects.toThrow('RPC_TIMEOUT')
+ expect(journals[0].obj.hash).toBe(hash)
+ expect(journals[0].obj.state).toBe('SIGNED_BEFORE_BROADCAST')
+ expect(sends).toBe(1)
+ expect(await inspectHash(finalizedClients(),journals[0].obj.hash,7)).toEqual({status:'DELEGATION_CLEARED_FINALIZED',hash,outerExecution:'success',retry:false})
+ expect(sends).toBe(1)
 })
