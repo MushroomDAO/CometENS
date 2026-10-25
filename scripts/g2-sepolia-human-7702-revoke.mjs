@@ -72,7 +72,7 @@ export async function executeVerified({o,clients,wallet,account,nonce,journalPat
  const transactions=await Promise.all(clients.map(c=>c.getTransaction({hash})))
  for(const observed of transactions){
   if(!observed||!SAME(observed.from,WALLET)||!SAME(observed.to,WALLET)||
-   BigInt(observed.nonce)!==BigInt(nonce)||!['eip7702','0x4','0x04',4].includes(observed.type)||
+   BigInt(observed.nonce)!==BigInt(nonce)||BigInt(observed.chainId)!==BigInt(CHAIN)||!['eip7702','0x4','0x04',4].includes(observed.type)||
    !Array.isArray(observed.authorizationList)||observed.authorizationList.length!==1)fail('TYPE4_MISMATCH')
   const a=observed.authorizationList[0]
   if(!SAME(a.address,zeroAddress)||BigInt(a.nonce)!==BigInt(nonce+1)||
