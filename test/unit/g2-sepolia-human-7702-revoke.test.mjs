@@ -19,3 +19,13 @@ test('dual RPC rejects nonce disagreement, hostile fees and block drift',async()
  await assert.rejects(()=>verify([rpc(),rpc()],order(),async()=>({...base,status:'BLOCKED'})),/DELEGATION_OR_NONCE_CHANGED/)
  assert.throws(()=>assertRaw('0x',order(),7))
 })
+
+
+test('CLI actual entrypoint rejects missing args rather than silently succeeding',async()=>{
+ const {spawnSync}=await import('node:child_process')
+ const {fileURLToPath}=await import('node:url')
+ const script=fileURLToPath(new URL('../../scripts/g2-sepolia-human-7702-revoke.mjs',import.meta.url))
+ const r=spawnSync(process.execPath,[script],{encoding:'utf8',timeout:4000})
+ assert.equal(r.status,2)
+ assert.match(r.stderr,/BLOCKED/)
+})
