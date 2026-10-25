@@ -75,4 +75,4 @@ async function main(){
  if(codes.some(x=>x&&x!=='0x'))fail('POSTCONDITION_PENDING')
  console.log(JSON.stringify({status:'DELEGATION_CLEARED',hash}))
 }
-if(process.argv[1]?.endsWith('revoke-human.mjs'))main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
+if(process.argv[1]?.endsWith('g2-sepolia-human-7702-revoke.mjs'))main().catch(e=>{console.error('BLOCKED',e.message,'No automatic retry; inspect journal and chain.');process.exitCode=2})
