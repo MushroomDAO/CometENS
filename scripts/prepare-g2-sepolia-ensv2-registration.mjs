@@ -113,7 +113,7 @@ export async function loadOrCreateSalt(file, m, { create = false, entropy = () =
 }
 
 /** Public-client-only checks, with 0x-prefixed calldata returned for external user inspection. */
-export async function prepareSepoliaRegistration({ manifest, saltFile, phase, client }) {
+async function prepareAtSingleHead({ manifest, saltFile, phase, client }) {
   let m
   try { m = validateRegistrationManifest(manifest) } catch { return fail('INVALID_MANIFEST') }
   if (phase !== 'commit' && phase !== 'reveal') return fail('INVALID_PHASE')
@@ -217,6 +217,19 @@ export async function prepareSepoliaRegistration({ manifest, saltFile, phase, cl
         walletMustRecheckAllowanceBeforeSigning: phase === 'reveal' },
     }
   } catch { return blocked('RPC_OR_SIMULATION_FAILED') }
+}
+
+/** Bounded complete revalidation after a moving head; never reuse stale quote. */
+export async function retryMovingHead(input, attempt = prepareAtSingleHead) {
+  const first = await attempt(input)
+  if (input.phase !== 'reveal' || first.reason !== 'QUOTE_HEAD_ADVANCED') return first
+  // Each attempt independently re-pins code, commitment, quote, allowance,
+  // simulation and the tip. Never blend data across block snapshots.
+  return attempt(input)
+}
+
+export async function prepareSepoliaRegistration(input) {
+  return retryMovingHead(input)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
