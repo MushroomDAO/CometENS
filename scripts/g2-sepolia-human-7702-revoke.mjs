@@ -159,6 +159,43 @@ async function recover(path,clients){
   attempt.nonce!==saved.nonce||attempt.chainId!==CHAIN)fail('ATTEMPT_JOURNAL_MISMATCH')
  return inspectHash(clients,saved.hash,saved.nonce)
 }
+export function parseTestWalletKey(raw, derive=privateKeyToAccount){
+ if(typeof raw!=='string')fail('KEY_FORMAT')
+ const value=raw.trim()
+ if(!/^(?:0x)?[0-9a-fA-F]{64}$/.test(value))fail('KEY_FORMAT')
+ const account=derive(value.startsWith('0x')?value:`0x${value}`)
+ if(!SAME(account.address,WALLET))fail('WRONG_SIGNER')
+ return account
+}
+// The recovery is an audit-only, one-shot terminal operation. It never unlocks,
+// deletes, signs or retries an existing nonce reservation.
+export async function recoverPreSign({journalPath,clients,ask,
+ read=secureRead,guard=assertPrivatePath,persist=persistent,check=verify,
+ order}){
+ await guard(journalPath,{mustExist:true})
+ for(const suffix of ['.hash','.attempt','.pre-sign-recovery']){
+  try{await guard(journalPath+suffix,{mustExist:true});fail('SIGNED_OR_RECOVERY_ARTIFACT_EXISTS')}
+  catch(e){if(e.code!=='ENOENT')throw e}
+ }
+ const journal=JSON.parse(await read(journalPath))
+ if(Object.keys(journal).sort().join(',')!=='createdAt,nonce,state,wallet'||
+  journal.state!=='RESERVED_NO_RETRY'||!SAME(journal.wallet,WALLET)||
+  !Number.isSafeInteger(journal.nonce)||journal.nonce<0)fail('INVALID_ORIGINAL_JOURNAL')
+ const nonce=await check(clients,order)
+ if(nonce!==journal.nonce)fail('RECOVERY_NONCE_OR_DELEGATION_CHANGED')
+ if(await ask()!==`RECOVER PRE-SIGN NONCE ${nonce}`)fail('DECLINED')
+ // Durable, exclusive recovery claim. No deletion of reservation or old evidence.
+ await guard(journalPath+'.pre-sign-recovery')
+ await persist(journalPath+'.pre-sign-recovery',{state:'PRE_SIGN_LOCK_EVIDENCE_ONLY',
+  nonce,wallet:WALLET,originalJournal:journalPath,authorizationSigned:false,broadcast:false,
+  note:'Do not run execute automatically; operator must independently review a new attempt.'})
+ if(await check(clients,order)!==nonce)fail('RECOVERY_STATE_CHANGED_AFTER_CLAIM')
+ for(const suffix of ['.hash','.attempt']){
+  try{await guard(journalPath+suffix,{mustExist:true});fail('LATE_SIGNED_ARTIFACT_COLLISION')}
+  catch(e){if(e.code!=='ENOENT')throw e}
+ }
+ return {status:'PRE_SIGN_RECOVERY_EVIDENCE_RECORDED',nonce,retry:false,broadcast:false}
+}
 export async function confirmAndReserve({ask,o,clients,nonce,journalPath,check=verify,lock=reserveNonce,persist=persistent}){
  if(await ask()!=='CLEAR SEPOLIA DELEGATION')fail('DECLINED')
  validate(o)
@@ -168,27 +205,34 @@ export async function confirmAndReserve({ask,o,clients,nonce,journalPath,check=v
 }
 async function main(){
  const [mode,orderPath,keyPath,journalPath]=process.argv.slice(2)
- if(!['check','execute','recover'].includes(mode))fail('USAGE')
- if(mode==='recover'&&(!orderPath||process.argv.length!==4))fail('USAGE')
- if(mode!=='recover'&&(!orderPath||process.argv.length!==(mode==='check'?4:6)))fail('USAGE')
- if(mode==='execute'&&(!stdin.isTTY||!stdout.isTTY))fail('HUMAN_TTY_REQUIRED')
+ if(!['check','execute','recover','recover-pre-sign'].includes(mode))fail('USAGE')
+ if(['recover','recover-pre-sign'].includes(mode)&&(!orderPath||process.argv.length!==4))fail('USAGE')
+ if(!['recover','recover-pre-sign'].includes(mode)&&(!orderPath||process.argv.length!==(mode==='check'?4:6)))fail('USAGE')
+ if(['execute','recover-pre-sign'].includes(mode)&&(!stdin.isTTY||!stdout.isTTY))fail('HUMAN_TTY_REQUIRED')
  const clients=RPC.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0,timeout:15000}),ccipRead:false}))
  if(mode==='recover'){const result=await recover(orderPath,clients);console.log(JSON.stringify(result));if(result.status!=='DELEGATION_CLEARED_FINALIZED')process.exitCode=2;return}
+ if(mode==='recover-pre-sign'){
+  const ui=createInterface({input:stdin,output:stdout})
+  try{const result=await recoverPreSign({journalPath:orderPath,clients,
+   order:validate({version:1,action:'clear-7702',chainId:CHAIN,wallet:WALLET,
+    maxGas:'60000',maxFeePerGasWei:'1000000000',maxPriorityFeePerGasWei:'100000000',
+    expiresAt:new Date(Date.now()+120000).toISOString()}),
+   ask:()=>ui.question('Type RECOVER PRE-SIGN NONCE <nonce>: ')});console.log(JSON.stringify(result))}
+  finally{ui.close()}return
+ }
  const o=validate(JSON.parse(await secureRead(orderPath)))
  const pre=await prepare(o,clients)
  console.log(JSON.stringify(pre))
  if(mode==='check')return
  await assertPrivatePath(keyPath,{mustExist:true})
  await assertPrivatePath(journalPath)
+ // Validate the complete key, including wallet address, before any nonce lock.
+ // This deliberately reads the user key only within explicit human execute.
+ const account=parseTestWalletKey(await secureRead(keyPath))
  const ui=createInterface({input:stdin,output:stdout})
  try{await confirmAndReserve({ask:()=>ui.question('This removes delegated smart-account capabilities. Type CLEAR SEPOLIA DELEGATION: '),o,clients,nonce:pre.nonce,journalPath})}
  finally{ui.close()}
- const st=await assertPrivatePath(keyPath,{mustExist:true})
- if((st.mode&0o777)!==0o600||!st.isFile()||st.uid!==process.getuid())fail('UNSAFE_KEY_FILE')
- const secret=(await secureRead(keyPath)).trim()
- if(!/^0x[0-9a-fA-F]{64}$/.test(secret))fail('KEY_FORMAT')
- const account=privateKeyToAccount(secret)
- if(!SAME(account.address,WALLET))fail('WRONG_SIGNER')
+ // The earlier prelock key identity check already succeeded.
  const wallet=createWalletClient({account,chain:sepolia,transport:http(RPC[0],{retryCount:0,timeout:15000})})
  const result=await executeVerified({o,clients,wallet,account,nonce:pre.nonce,journalPath})
  console.log(JSON.stringify(result))
