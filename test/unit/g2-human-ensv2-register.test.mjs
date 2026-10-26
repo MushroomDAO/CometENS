@@ -2,7 +2,7 @@ import { it,expect } from 'vitest'
 import { mkdtemp,readFile,rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { reserveBeforeSend,recordSignedHash,corroborateReceipt,requireReady,validateFeeSafety,signThenSend } from '../../scripts/g2-human-ensv2-register.mjs'
+import { reserveBeforeSend,recordSignedHash,corroborateReceipt,requireReady,validateFeeSafety,signThenSend,SEPOLIA_RPC_URLS } from '../../scripts/g2-human-ensv2-register.mjs'
 
 it('rejects anything except dual RPC ready preflight',()=>{
   expect(()=>requireReady({reason:'CHAIN_PREFLIGHT_FAILED'})).toThrow()
@@ -49,4 +49,11 @@ it('enforces durable journal before signing and hash before a single send; ambig
   await expect(signThenSend({journal,commitment:'0xabc',orderExpiresAt:new Date(Date.now()+3600000).toISOString(),sign:async()=>{throw Error('must never sign')},send:async()=>{sends++}})).rejects.toMatchObject({code:'EEXIST'})
   expect(sends).toBe(1)
  } finally {await rm(dir,{recursive:true,force:true})}
+})
+
+it('pins two independently served Sepolia RPC hosts and rejects the DNS-broken old alias',()=>{
+ const urls=SEPOLIA_RPC_URLS.map(x=>new URL(x))
+ expect(urls.map(x=>x.protocol)).toEqual(['https:','https:'])
+ expect(urls.map(x=>x.hostname)).toEqual(['sepolia.drpc.org','ethereum-sepolia.publicnode.com'])
+ expect(new Set(urls.map(x=>x.hostname)).size).toBe(2)
 })

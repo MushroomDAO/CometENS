@@ -11,9 +11,9 @@ import { assertPrivateFile } from './g2-local-sepolia-signer.mjs'
 import { REG_ABI, REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
 
 const DIR = `${process.env.HOME}/.config/cometens-g2-sepolia`
-const URLS = ['https://sepolia.drpc.org', 'https://ethereum-sepolia-rpc.publicnode.com']
+export const SEPOLIA_RPC_URLS = Object.freeze(['https://sepolia.drpc.org', 'https://ethereum-sepolia.publicnode.com'])
 const same = (a,b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
-const clients = () => URLS.map(url => createPublicClient({ chain: sepolia, transport: http(url,{ retryCount:0 }), ccipRead:false }))
+const clients = () => SEPOLIA_RPC_URLS.map(url => createPublicClient({ chain: sepolia, transport: http(url,{ retryCount:0 }), ccipRead:false }))
 const parse = async path => { const b = await readFile(path); if (b.length>4096) throw Error('file-too-large'); return JSON.parse(b.toString()) }
 
 export function requireReady(result) {
@@ -137,7 +137,7 @@ async function main() {
       value:0n,data,gas:fees.gas,
       maxFeePerGas:fees.maxFeePerGas,maxPriorityFeePerGas:fees.maxPriorityFeePerGas})
     return {raw,nonce:Number(nonceA),calldataHash:keccak256(data),preflightBlock:second.block.hash}
-    },send:raw=>createWalletClient({chain:sepolia,transport:http(URLS[0],{retryCount:0})})
+    },send:raw=>createWalletClient({chain:sepolia,transport:http(SEPOLIA_RPC_URLS[0],{retryCount:0})})
       .sendRawTransaction({serializedTransaction:raw})})
   console.log(JSON.stringify({status:'SUBMITTED_NO_RETRY',hash:signed.hash,journal}))
   console.log(JSON.stringify(await corroborateReceipt(...pair,signed.hash)))
