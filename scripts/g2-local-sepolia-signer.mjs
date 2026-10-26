@@ -19,7 +19,7 @@ const MANIFEST = `${PRIVATE_DIR}/cometens-g2-20261023.public-manifest.json`
 const SALT = `${PRIVATE_DIR}/cometens-g2-20261023.salt.json`
 const KEY = `${PRIVATE_DIR}/test-wallet.key`
 const ERC20 = parseAbi(['function allowance(address,address) view returns (uint256)', 'function balanceOf(address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'])
-const REG = parseAbi(['function commit(bytes32 commitment)', 'function commitmentAt(bytes32) view returns (uint64)', 'function isAvailable(string) view returns (bool)', 'function getRegisterPrice(string,uint64,address) view returns (uint256,uint256)', 'function makeCommitment(string,address,bytes32,address,address,uint64,bytes32) pure returns (bytes32)'])
+const REG = parseAbi(['function commit(bytes32 commitment)', 'function commitmentAt(bytes32) view returns (uint64)', 'function MAX_COMMITMENT_AGE() view returns (uint64)', 'function isAvailable(string) view returns (bool)', 'function getRegisterPrice(string,uint64,address) view returns (uint256,uint256)', 'function makeCommitment(string,address,bytes32,address,address,uint64,bytes32) pure returns (bytes32)'])
 const same = (a,b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
 const is32 = x => /^0x[0-9a-f]{64}$/i.test(x ?? '')
 export function validateOrder(o, m, s) {
@@ -66,8 +66,18 @@ export async function validateChain(client,o,m) {
     if(await client.readContract({address:TOKEN,abi:ERC20,functionName:'balanceOf',args:[ADDRESS]})<price)throw Error('insufficient-token')
     return {abi:ERC20,functionName:'approve',address:TOKEN,args:[REGISTRAR,price],price}
   }
-  const committed=await client.readContract({address:REGISTRAR,abi:REG,functionName:'commitmentAt',args:[o.commitment]})
-  if(committed!==0n)throw Error('commitment-already-exists')
+  // ENSv2 allows re-committing a hash after its previous reveal window expires.
+  // Read its age and commitment against one L1 block, never local wall-clock time.
+  const head=await client.getBlock({blockTag:'latest'})
+  if(typeof head?.number!=='bigint'||typeof head.timestamp!=='bigint'||head.timestamp<=0n)
+    throw Error('commitment-block-unverified')
+  const [committed,maxAge]=await Promise.all([
+    client.readContract({address:REGISTRAR,abi:REG,functionName:'commitmentAt',args:[o.commitment],blockNumber:head.number}),
+    client.readContract({address:REGISTRAR,abi:REG,functionName:'MAX_COMMITMENT_AGE',blockNumber:head.number}),
+  ])
+  if(typeof committed!=='bigint'||typeof maxAge!=='bigint'||maxAge<=0n)
+    throw Error('commitment-window-unverified')
+  if(committed!==0n && head.timestamp<committed+maxAge)throw Error('commitment-already-live')
   return {abi:REG,functionName:'commit',address:REGISTRAR,args:[o.commitment],price}
 }
 export async function awaitSubmittedReceipt(client,hash,action,log=console.error) {

@@ -31,11 +31,13 @@ describe('G2 manual only signer input gate',()=>{
 })
 
 describe('actual Sepolia chain guards with deterministic fake RPC',()=>{
- const fixed = {allowance:0n,balance:9000000n,base:8000021n,premium:0n,available:true,commitmentAt:0n}
+ const timestamp=BigInt(Math.floor(Date.now()/1000))
+ const fixed = {allowance:0n,balance:9000000n,base:8000021n,premium:0n,available:true,commitmentAt:0n,MAX_COMMITMENT_AGE:86400n}
  function fake(change={}) {
   const state={...fixed,...change}
   return {
    getChainId:async()=>11155111,
+   getBlock:async()=>({number:123n,timestamp:change.timestamp??timestamp}),
    getBytecode:async({address})=>address.toLowerCase()==='0xf633e7fc17e2bbe0d0965d18ec1821dcb754a3d3' ? '0x01' : '0x02',
    readContract:async({functionName})=>functionName==='getRegisterPrice' ? [state.base,state.premium] : functionName==='isAvailable'?state.available:functionName==='balanceOf'?state.balance:state[functionName]
   }
@@ -54,7 +56,13 @@ describe('actual Sepolia chain guards with deterministic fake RPC',()=>{
   await expect(validateChain(fake({balance:8000020n}),a,pinned)).rejects.toThrow('insufficient-token')
   await expect(validateChain(fake({available:false}),a,pinned)).rejects.toThrow('name-unavailable')
   await expect(validateChain(fake(),b,pinned)).resolves.toMatchObject({functionName:'commit'})
-  await expect(validateChain(fake({commitmentAt:1n}),b,pinned)).rejects.toThrow('commitment-already-exists')
+  await expect(validateChain(fake({commitmentAt:timestamp-60n}),b,pinned)).rejects.toThrow('commitment-already-live')
+  await expect(validateChain(fake({commitmentAt:timestamp-86400n+1n}),b,pinned)).rejects.toThrow('commitment-already-live')
+  await expect(validateChain(fake({commitmentAt:timestamp-86400n}),b,pinned)).resolves.toMatchObject({functionName:'commit'})
+  await expect(validateChain(fake({commitmentAt:timestamp-86401n}),b,pinned)).resolves.toMatchObject({functionName:'commit'})
+  await expect(validateChain(fake({commitmentAt:timestamp-86401n,MAX_COMMITMENT_AGE:0n}),b,pinned)).rejects.toThrow('commitment-window-unverified')
+  await expect(validateChain(fake({commitmentAt:timestamp-86401n,MAX_COMMITMENT_AGE:undefined}),b,pinned)).rejects.toThrow('commitment-window-unverified')
+  await expect(validateChain(fake({commitmentAt:timestamp-86401n,timestamp:0n}),b,pinned)).rejects.toThrow('commitment-block-unverified')
  })
 })
 it('keeps submitted hash and forbids retry when receipt waiting fails',async()=>{
