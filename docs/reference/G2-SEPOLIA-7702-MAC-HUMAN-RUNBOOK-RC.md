@@ -2,14 +2,19 @@
 
 **NOT AUTHORIZED TO EXECUTE.** This is a candidate operator procedure, not permission to sign or broadcast. Require (1) independent security clearance explicitly stating **EXECUTE** for the exact two runtime scripts and SHA, and (2) the wallet owner's separate affirmative authorization and confirmation that their existing private key controls the pinned wallet. A merge approval, passing CI, and `check` success grant neither permission. Never give private-key bytes to an AI, terminal transcript, reviewer, or automation. A human must type the execute command and its exact terminal confirmation personally. G3 remains blocked.
 
+**Historical status (2026-10-26):** Project evidence records the Sepolia EIP-7702 delegation as already cleared. This document is preserved as a review-only release candidate; it is **not** a current request or authorization to run a second clearing transaction. Do not execute the historical revoke command. Any future operation would require a fresh independently reviewed procedure, fresh on-chain checks, and separate explicit wallet-owner authorization.
+
 ## 1. Verify and materialize pinned code (read-only GitHub requests)
 
-The reviewed candidate is **main commit `d28ab52166f9ecc28c22668f6eafbb6e1914bc5f`**, comprising merged #187/#189. If an independent EXECUTE reviewer approves a different runtime commit, **stop and replace this entire candidate only after renewed review**, including digest and dependency checking. On the operator Mac, start at the actual repository root with installed project dependencies (`node_modules/viem`). Do **not** run the pre-existing local `scripts/g2-sepolia-human-7702-revoke.mjs`: its observed SHA256 `cbb747fb...` differs from merged code `ecebd459...`. Do not overwrite the old file.
+The reviewed candidate is **main commit `d28ab52166f9ecc28c22668f6eafbb6e1914bc5f`**, comprising merged #187/#189. If an independent EXECUTE reviewer approves a different runtime commit, **stop and replace this entire candidate only after renewed review**, including digest and dependency checking. On the operator Mac, start at the actual repository root with installed project dependencies (`node_modules/viem`). Install from the reviewed `pnpm-lock.yaml` using `pnpm install --frozen-lockfile` if needed; **do not use `npm ci`/`npm install`** because `package-lock.json` pins a different viem version. Do **not** run the pre-existing local `scripts/g2-sepolia-human-7702-revoke.mjs`: its observed SHA256 `cbb747fb...` differs from merged code `ecebd459...`. Do not overwrite the old file.
 
 ```sh
+if [ -n "${ZSH_VERSION:-}" ]; then setopt interactivecomments; fi
+# macOS zsh defaults to treating pasted `#` lines as commands; now comments are enabled.
 # HUMAN: inspect current directory; stop if this is not the CometENS repository root.
 pwd
-set -euo pipefail
+# Do NOT use set -e in this interactive shell: expected nonzero execution/recovery exits
+# must not terminate the Terminal or discard RUNNER/JOURNAL variables.
 # Mac terminal/agent shell may omit the installed nvm Node directory from PATH.
 if ! command -v node >/dev/null 2>&1; then
   NVM_NODE_DIR="$HOME/.nvm/versions/node/v22.22.2/bin"
@@ -50,7 +55,7 @@ The runner is a direct child of the repository, so the ESM import `viem` resolve
 
 ## 2. Owner-controlled private files and expiring order
 
-The exact runtime accepts only direct-child paths inside `$HOME/.config/cometens-g2-sepolia`, which must be owned by the current macOS user, non-symlink, and mode **0700**. Order, existing key, journals and locks must be regular files mode **0600**. Do not print or `cat` the private key; the human wallet owner must already possess the matching Sepolia key in the required directory. The process must never import or copy a key from an AI workspace. Stop if the wallet, network or key ownership cannot be confirmed out of band.
+The exact runtime accepts only direct-child paths inside `$HOME/.config/cometens-g2-sepolia`, which must be owned by the current macOS user, non-symlink, and have **no group/other permissions** (0700 recommended; the code checks group/other bits, not exact 0700). Order, existing key, journals and locks must be regular files mode **0600**. Do not print or `cat` the private key; the human wallet owner must already possess the matching Sepolia key in the required directory. The process must never import or copy a key from an AI workspace. Stop if the wallet, network or key ownership cannot be confirmed out of band.
 
 ```sh
 umask 077
@@ -66,12 +71,12 @@ grep '^export const WALLET' "$RUNNER/scripts/check-g2-sepolia-7702-revocation.mj
 # Manually enter the EXACT pinned wallet address into a shell variable; no key material.
 printf 'Pinned wallet address (0x...): '
 read -r TARGET_WALLET
-# Create a fresh, unique, non-preexisting order file. Expiry is dynamic, 10 minutes from now (<=15 minutes).
+# Create a fresh, unique, non-preexisting order file. Our human procedure uses 10 minutes (<=15 minutes), stricter than the runtime's 1-hour maximum.
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 ORDER="$PRIVATE/order-$STAMP.json"
 JOURNAL="$PRIVATE/journal-$STAMP"
 test ! -e "$ORDER" && test ! -e "$JOURNAL" && test ! -e "$JOURNAL.hash" && test ! -e "$JOURNAL.attempt" || { echo 'STOP: collision'; exit 2; }
-EXPIRY=$(date -u -v+10M +%Y-%m-%dT%H:%M:%SZ)
+EXPIRY=$(node -e 'process.stdout.write(new Date(Date.now()+600000).toISOString())')
 # Fees are strict caps, NOT recommended current fees. Both RPCs must pass the runtime's live fee checks.
 ORDER="$ORDER" TARGET_WALLET="$TARGET_WALLET" EXPIRY="$EXPIRY" node -e 'const fs=require("fs"); const o={version:1,action:"clear-7702",chainId:11155111,wallet:process.env.TARGET_WALLET,expiresAt:process.env.EXPIRY,maxGas:"60000",maxFeePerGasWei:"2000000000",maxPriorityFeePerGasWei:"1000000000"};fs.writeFileSync(process.env.ORDER,JSON.stringify(o,null,2)+"\n",{flag:"wx",mode:0o600})'
 test "$(stat -f %Lp "$ORDER")" = 600 || { echo 'STOP: insecure order'; exit 2; }
@@ -85,7 +90,7 @@ The pinned script validates `chainId=11155111`, the specific wallet address and 
 node "$RUNNER/scripts/g2-sepolia-human-7702-revoke.mjs" check "$ORDER"
 ```
 
-Review `UNSIGNED_ONLY`, pinned wallet, observed transaction nonce, delegation, code hashes, common canonical block, and fee caps from **both distinct configured public RPCs**. Investigate any error, difference, stale result or code change; stop on failure. The `check` command neither signs nor broadcasts. Record the independent reviewer's name, UTC decision, the **exact pinned SHA and both SHA256 values**, wallet, order expiration, and an explicit written approval **for EXECUTE**, plus the wallet owner's separate recorded authorization. Do not proceed without both. Approval must evaluate the actual source, two-RPC checks, nonce reservation, journal durability, exit statuses, and recovery; approval of this documentation PR is only for merging documentation.
+A successful `check` prints only `status: UNSIGNED_ONLY`, `nonce`, `target`, `chainId`, `wallet` and `delegate`; it does **not** print code hashes, block number/hash, or fee values. The runtime checks code identity, a common canonical block, chain/nonce/delegation agreement and live fee caps internally against **both distinct configured public RPCs**. Review those assertions in the exact pinned source and independently inspect additional read-only RPC evidence as required; do not approve on the basis of fields absent from the output. Investigate any error, difference, stale result or code change; stop on failure. The `check` command neither signs nor broadcasts. Record the independent reviewer's name, UTC decision, the **exact pinned SHA and both SHA256 values**, wallet, order expiration, and an explicit written approval **for EXECUTE**, plus the wallet owner's separate recorded authorization. Do not proceed without both. Approval must evaluate the actual source, two-RPC checks, nonce reservation, journal durability, exit statuses, and recovery; approval of this documentation PR is only for merging documentation.
 
 ## 4. ONE human execute, only AFTER both external approvals
 
@@ -100,9 +105,14 @@ The runtime requires a real input/output TTY and the operator to type exactly `C
 
 ## 5. Human read-only recovery and postcondition
 
-After any nonzero or status **exit 2** (including `PENDING_NO_RETRY`, `AWAITING_FINALITY`, unknown receipt or process interruption), preserve the order and journal and inspect the two configured RPCs. Only when a real `.hash` journal exists use:
+After any nonzero or status **exit 2** (including `PENDING_NO_RETRY`, `AWAITING_FINALITY`, unknown receipt or process interruption), preserve the order and journal and inspect the two configured RPCs. Never re-execute after an interrupted attempt. If the Terminal or its variables were lost, start again at the repository root and reconstruct `RUNNER` from the pinned commit in §1. List journal candidates under `$HOME/.config/cometens-g2-sepolia` without opening keys (`ls -ld "$HOME/.config/cometens-g2-sepolia"/journal-*`), then manually set `JOURNAL` to the exact **existing** journal prefix associated with the original attempt. If the association is ambiguous, stop and seek independent investigation. Only when a real `.hash` journal exists use:
 
 ```sh
+# If RUNNER was lost, while in the same reviewed repository root:
+PIN=d28ab52166f9ecc28c22668f6eafbb6e1914bc5f
+RUNNER="$PWD/.g2-7702-human-runner-$PIN"
+# JOURNAL must be restored from the observed original attempt, never guessed or newly generated.
+test -n "${JOURNAL:-}" && test -f "$JOURNAL.hash" || { echo "STOP: exact existing journal hash required"; exit 2; }
 node "$RUNNER/scripts/g2-sepolia-human-7702-revoke.mjs" recover "$JOURNAL"
 ```
 
