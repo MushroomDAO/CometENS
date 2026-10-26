@@ -4,7 +4,7 @@
   "from": "0xF7Bf79AcB7F3702b9DbD397d8140ac9DE6Ce642C",
   "action": "register",
   "to": "0xf633e7fc17e2bbe0d0965d18ec1821dcb754a3d3",
-  "commitment": "0x2f960f05f42a357bbadfd04487066d5e429ccea0329860ea5a7211e5a7c2ec35",
+  "commitment": "0x1111111111111111111111111111111111111111111111111111111111111111",
   "maxTotalCost": "9000000",
   "expiresAt": "2026-10-27T00:00:00.000Z"
 }
