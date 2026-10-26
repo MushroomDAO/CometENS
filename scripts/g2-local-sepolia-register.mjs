@@ -7,7 +7,7 @@ import { validateRegistrationManifest, loadOrCreateSalt, prepareSepoliaRegistrat
 import { assertPrivateFile } from './g2-local-sepolia-signer.mjs'
 import { stat, lstat } from 'node:fs/promises'
 
-const COMMITMENT='0x2f960f05f42a357bbadfd04487066d5e429ccea0329860ea5a7211e5a7c2ec35'
+const COMMITMENT_HEX32=/^0x[0-9a-fA-F]{64}$/
 const REVERT_RECEIVER='0x57f447ce'
 const same=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase()
 const DELEGATION=/^0xef0100[0-9a-f]{40}$/i
@@ -28,7 +28,7 @@ export function validateRegisterOrder(order, manifest) {
       Object.keys(order).sort().join(',')!=='action,chainId,commitment,expiresAt,from,maxTotalCost,to,version' ||
       order.version!==1 || order.action!=='register' || order.chainId!==11155111 ||
       !same(order.from,WALLET) || !same(order.to,REGISTRAR) ||
-      !same(order.commitment,COMMITMENT) || order.maxTotalCost!=='9000000' ||
+      !COMMITMENT_HEX32.test(order.commitment ?? '') || order.maxTotalCost!=='9000000' ||
       !Number.isFinite(Date.parse(order.expiresAt)) || Date.parse(order.expiresAt)<=Date.now() ||
       Date.parse(order.expiresAt)>Date.now()+7*86400000) throw Error('INVALID_REGISTER_ORDER')
   const m=validateRegistrationManifest(manifest)

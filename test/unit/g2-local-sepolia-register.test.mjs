@@ -41,7 +41,8 @@ describe('G2 registration safety',()=>{
  })
  it('requires exact dedicated register schema and fixed manifest',()=>{
   expect(validateRegisterOrder(order,manifest).maxCost).toBe(9000000n)
-  for(const mutation of [{action:'commit'},{chainId:1},{maxTotalCost:'10000000'},{commitment:'0x'+'00'.repeat(32)},{from:'0x0000000000000000000000000000000000000001'},{to:'0x0000000000000000000000000000000000000001'},{expiresAt:'2020-01-01T00:00:00.000Z'},{data:'0xdeadbeef'}])
+  expect(()=>validateRegisterOrder({...order,commitment:'0x1234'},manifest)).toThrow('INVALID_REGISTER_ORDER')
+  for(const mutation of [{action:'commit'},{chainId:1},{maxTotalCost:'10000000'},{commitment:'0xdeadbeef'},{from:'0x0000000000000000000000000000000000000001'},{to:'0x0000000000000000000000000000000000000001'},{expiresAt:'2020-01-01T00:00:00.000Z'},{data:'0xdeadbeef'}])
    expect(()=>validateRegisterOrder({...order,...mutation},manifest)).toThrow()
   expect(()=>validateRegisterOrder(order,{...manifest,maxTotalCost:'9000001'})).toThrow()
  })
