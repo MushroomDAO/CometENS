@@ -38,9 +38,44 @@ export async function reserveBeforeSend(path, details) {
 
 export async function recordSignedHash(file, details) {
   const bytes=Buffer.from(JSON.stringify({state:'SIGNED_NO_RETRY',...details})+'\n')
-  await file.write(bytes,0,bytes.length,0)
+  let offset=0
+  while(offset<bytes.length) {
+    const {bytesWritten}=await file.write(bytes,offset,bytes.length-offset,offset)
+    if(bytesWritten<=0) throw Error('journal-short-write')
+    offset+=bytesWritten
+  }
   await file.truncate(bytes.length)
   await file.sync()
+}
+
+export function validateFeeSafety({gasA,gasB,feeA,feeB,balanceA,balanceB}) {
+  const cap=100n*10n**9n // Absolute Sepolia maximum 100 gwei.
+  const limit=(gasA>gasB?gasA:gasB)*12n/10n
+  if([gasA,gasB,feeA?.maxFeePerGas,feeB?.maxFeePerGas,feeA?.maxPriorityFeePerGas,
+    feeB?.maxPriorityFeePerGas,balanceA,balanceB].some(v=>typeof v!=='bigint'||v<=0n) ||
+    gasA>gasB*12n/10n || gasB>gasA*12n/10n ||
+    feeA.maxFeePerGas>cap || feeB.maxFeePerGas>cap ||
+    feeA.maxFeePerGas>feeB.maxFeePerGas*12n/10n ||
+    feeB.maxFeePerGas>feeA.maxFeePerGas*12n/10n ||
+    feeA.maxPriorityFeePerGas>feeA.maxFeePerGas || feeB.maxPriorityFeePerGas>feeB.maxFeePerGas ||
+    limit*feeA.maxFeePerGas>50_000_000_000_000_000n ||
+    balanceA<limit*feeA.maxFeePerGas || balanceB<limit*feeA.maxFeePerGas)
+    throw Error('unsafe-fee-or-gas')
+  return {gas:limit,maxFeePerGas:feeA.maxFeePerGas,maxPriorityFeePerGas:feeA.maxPriorityFeePerGas}
+}
+
+/** Real file journal orchestration; send is invoked at most once after persisted hash. */
+export async function signThenSend({journal,commitment,orderExpiresAt,sign,send}) {
+  const file=await reserveBeforeSend(journal,{commitment,orderExpiresAt})
+  try {
+    const {raw,nonce,calldataHash,preflightBlock}=await sign()
+    const hash=keccak256(raw)
+    await recordSignedHash(file,{commitment,hash,nonce,chainId:11155111,calldataHash,preflightBlock})
+    if(Date.parse(orderExpiresAt)<=Date.now()) throw Error('order-expired-before-broadcast')
+    const sent=await send(raw)
+    if(!same(sent,hash)) throw Error('broadcast-hash-mismatch')
+    return {hash,journal}
+  } finally {await file.close()}
 }
 
 export async function corroborateReceipt(a,b,hash) {
@@ -80,9 +115,9 @@ async function main() {
   const data=encodeFunctionData({abi:REG_ABI,functionName:'register',args})
   if(!same(secret.commitment,order.commitment)) throw Error('commitment-mismatch')
   // Reserve before accessing any signer. A failure leaves the durable NO_RETRY lock.
-  const journal=`${DIR}/ensv2-register-${order.commitment.slice(2)}.journal.json`
-  const file=await reserveBeforeSend(journal,{commitment:order.commitment,orderExpiresAt:order.expiresAt})
-  try {
+  const journal=`${DIR}/ensv2-register-${order.commitment.slice(2).toLowerCase()}.journal.json`
+  const signed=await signThenSend({journal,commitment:order.commitment,orderExpiresAt:order.expiresAt,
+    sign:async()=>{
     const keyPath=`${DIR}/test-wallet.key`
     await assertPrivateFile(await stat(keyPath))
     const key=(await readFile(keyPath,'utf8')).trim()
@@ -90,26 +125,22 @@ async function main() {
     const account=privateKeyToAccount(key.startsWith('0x')?key:`0x${key}`)
     if(!same(account.address,WALLET)) throw Error('wrong-wallet')
     const a=pair[0], b=pair[1]
-    const [nonceA,nonceB,gasA,gasB,chainA,chainB]=await Promise.all([
+    const [nonceA,nonceB,gasA,gasB,chainA,chainB,feeA,feeB,balanceA,balanceB]=await Promise.all([
       a.getTransactionCount({address:WALLET,blockTag:'pending'}),b.getTransactionCount({address:WALLET,blockTag:'pending'}),
       a.estimateGas({account:WALLET,to:REGISTRAR,data}),b.estimateGas({account:WALLET,to:REGISTRAR,data}),
-      a.getChainId(),b.getChainId()])
+      a.getChainId(),b.getChainId(),a.estimateFeesPerGas(),b.estimateFeesPerGas(),
+      a.getBalance({address:WALLET}),b.getBalance({address:WALLET})])
     if(nonceA!==nonceB||chainA!==11155111||chainB!==11155111||gasA<=0n||gasB<=0n) throw Error('rpc-nonce-or-gas-disagreement')
-    const fees=await a.estimateFeesPerGas()
-    if(!fees.maxFeePerGas||!fees.maxPriorityFeePerGas) throw Error('unverifiable-fees')
+    const fees=validateFeeSafety({gasA,gasB,feeA,feeB,balanceA,balanceB})
+    if(Date.parse(order.expiresAt)<=Date.now()) throw Error('order-expired-before-sign')
     const raw=await account.signTransaction({chainId:11155111,type:'eip1559',nonce:nonceA,to:REGISTRAR,
-      value:0n,data,gas:(gasA>gasB?gasA:gasB)*12n/10n,
+      value:0n,data,gas:fees.gas,
       maxFeePerGas:fees.maxFeePerGas,maxPriorityFeePerGas:fees.maxPriorityFeePerGas})
-    const hash=keccak256(raw)
-    await recordSignedHash(file,{commitment:order.commitment,hash,nonce:Number(nonceA),chainId:11155111,
-      calldataHash:keccak256(data),preflightBlock:second.block.hash})
-    // ONE raw broadcast only. On timeout or error, keep journal; query hash manually.
-    const sent=await createWalletClient({chain:sepolia,transport:http(URLS[0],{retryCount:0})}).sendRawTransaction({serializedTransaction:raw})
-    if(!same(sent,hash)) throw Error('broadcast-hash-mismatch')
-    console.log(JSON.stringify({status:'SUBMITTED_NO_RETRY',hash,journal}))
-    const receipt=await corroborateReceipt(...pair,hash)
-    console.log(JSON.stringify(receipt))
-  } finally {await file.close()}
+    return {raw,nonce:Number(nonceA),calldataHash:keccak256(data),preflightBlock:second.block.hash}
+    },send:raw=>createWalletClient({chain:sepolia,transport:http(URLS[0],{retryCount:0})})
+      .sendRawTransaction({serializedTransaction:raw})})
+  console.log(JSON.stringify({status:'SUBMITTED_NO_RETRY',hash:signed.hash,journal}))
+  console.log(JSON.stringify(await corroborateReceipt(...pair,signed.hash)))
 }
 if(process.argv[1]?.endsWith('g2-human-ensv2-register.mjs')) main().catch(()=>{
   console.error('REGISTER BLOCKED OR AMBIGUOUS: inspect private journal and chain hash; NEVER auto retry')
