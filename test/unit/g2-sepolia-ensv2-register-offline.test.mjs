@@ -31,12 +31,11 @@ function fake(config = {}) {
   const publicClient = {
     async getChainId() { calls.push(['chain']); return config.wrongChain ? 1 : 11155111 },
     async getBlock(args) { calls.push(['block', args]);
-      if (args.blockTag === 'latest' && ++latestReads > 1 && config.newHeadDuringPreparation) {
-        return { number: 201n, hash: h(201), timestamp: unix + 1n }
-      }
-      return { number: 200n,
-      hash: config.reorg && args.blockNumber !== undefined ? h(201) : h(200),
-      timestamp: config.stale ? unix - 900n : unix } },
+      const advancing = config.newHeadDuringPreparation || config.advanceTwice
+      const number = args.blockNumber ?? (advancing && args.blockTag === 'latest' && ++latestReads > 1
+        ? (config.advanceTwice && latestReads > 3 ? 202n : 201n) : 200n)
+      return { number, hash: config.reorg && args.blockNumber !== undefined ? h(201) : h(number),
+        timestamp: config.stale ? unix - 900n : unix + number - 200n } },
     async getBytecode({ address, blockNumber }) { calls.push(['code', address, blockNumber]);
       if (config.badCode === address) return '0x1234'
       return address === REGISTRAR ? '0x6001' : address === MOCK_USDC ? '0x6002' : '0x'
@@ -235,7 +234,7 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
     ['too old', { commitmentTime: now() - 86500n }, 'COMMITMENT_NOT_IN_WINDOW'],
     ['low allowance', { commitmentTime: now() - 100n, lowAllowance: true }, 'ALLOWANCE_TOO_LOW'],
     ['over-cap allowance', { commitmentTime: now() - 100n, excessAllowance: true }, 'ALLOWANCE_EXCEEDS_CAP'],
-    ['head advances after quote', { commitmentTime: now() - 100n, newHeadDuringPreparation: true }, 'QUOTE_HEAD_ADVANCED'],
+    ['head advances twice', { commitmentTime: now() - 100n, advanceTwice: true }, 'QUOTE_HEAD_ADVANCED'],
     ['simulation revert', { commitmentTime: now() - 100n, simulateFails: true }, 'RPC_OR_SIMULATION_FAILED'],
   ])('reveal guards %s without exposing salt', async (_, options, reason) => {
     const f = await privateFixture()
@@ -256,6 +255,31 @@ describe('G2 ENSv2 Sepolia user-wallet offline registration drafting', () => {
         expect(d.args[1]).toBe(9000000n)
       }
     } finally { await f.done() }
+  })
+
+  it('one advancing head reruns full reads and simulates only the newer block for final release', async () => {
+    const f = await privateFixture()
+    try {
+      await loadOrCreateSalt(f.path,validateRegistrationManifest(manifest()),{create:true,entropy:()=>fixedSalt})
+      const {client,calls}=fake({commitmentTime:now()-100n,newHeadDuringPreparation:true})
+      const r=await prepareSepoliaRegistration({manifest:manifest(),saltFile:f.path,phase:'reveal',client})
+      expect(r).toMatchObject({reason:'EXTERNAL_WALLET_ACTION_REQUIRED',simulated:true,simulationBlock:{number:'201'}})
+      expect(r.revealDraft.data).toBeTruthy()
+      expect(calls.filter(c=>c[0]==='simulate').map(c=>c.at(-1))).toEqual([200n,201n])
+      expect(calls.filter(c=>c[0]==='read'&&c[2]==='getRegisterPrice').map(c=>c.at(-1))).toEqual([200n,201n])
+      expect(calls.filter(c=>c[0]==='code').map(c=>c.at(-1))).toEqual([200n,200n,201n,201n])
+    } finally {await f.done()}
+  })
+  it('two advancing heads retain fail-closed with no reveal draft', async () => {
+    const f=await privateFixture()
+    try {
+      await loadOrCreateSalt(f.path,validateRegistrationManifest(manifest()),{create:true,entropy:()=>fixedSalt})
+      const {client,calls}=fake({commitmentTime:now()-100n,advanceTwice:true})
+      const r=await prepareSepoliaRegistration({manifest:manifest(),saltFile:f.path,phase:'reveal',client})
+      expect(r.reason).toBe('QUOTE_HEAD_ADVANCED')
+      expect(r).not.toHaveProperty('revealDraft')
+      expect(calls.filter(c=>c[0]==='simulate').map(c=>c.at(-1))).toEqual([200n,201n])
+    } finally {await f.done()}
   })
 
   it('CLI requires 6 explicit arguments, holds salt in restricted dir, stays blocked and never prints secret', async () => {
