@@ -21,9 +21,11 @@ describe('G2 manual only signer input gate',()=>{
   for(const x of [{chainId:1},{from:'0x0000000000000000000000000000000000000001'},{to:b.to},{amountBaseUnits:'9000001'},{amountBaseUnits:'115792089237316195423570985008687907853269984665640564039457584007913129639935'},{extra:1}])expect(()=>validateOrder({...a,...x},m,salt)).toThrow()
  })
  it('rejects mismatched commit secret/commitment and malformed action',()=>{
-  expect(()=>validateOrder({...b,commitment:'0x'+'11'.repeat(32)},m,salt)).toThrow('commitment-binding')
-  expect(()=>validateOrder(b,m,salt)).toThrow('invalid-order')
-  expect(()=>validateOrder({...b,action:'register'},m,salt)).toThrow()
+  const commitment='0x'+'11'.repeat(32)
+  expect(()=>validateOrder({...b,commitment},m,salt)).toThrow('unsafe-commit')
+  expect(()=>validateOrder({...b,commitment},m,{...salt,commitment})).toThrow('commitment-binding')
+  expect(()=>validateOrder(b,m,salt)).toThrow('commitment-binding')
+  expect(()=>validateOrder({...b,action:'register'},m,salt)).toThrow('unsupported-action')
  })
  it('denies expiry and obsolete application intents',()=>{
   for(const x of [{expiresAt:'2020-01-01T00:00:00Z'},{expiresAt:'2040-01-01T00:00:00Z'}])expect(()=>validateOrder({...a,...x},m,salt)).toThrow()
