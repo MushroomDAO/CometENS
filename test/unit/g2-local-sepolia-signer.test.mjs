@@ -2,7 +2,10 @@ import { describe,it,expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { validateOrder,validateChain,assertPrivateFile,awaitSubmittedReceipt } from '../../scripts/g2-local-sepolia-signer.mjs'
 const a=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/01-approve.json',import.meta.url)))
+// Historical example orders expire. Freshen test-only orders, never actual human orders.
+a.expiresAt=new Date(Date.now()+3600000).toISOString()
 const b=JSON.parse(readFileSync(new URL('../../examples/g2-sepolia/02-commit.json',import.meta.url)))
+b.expiresAt=new Date(Date.now()+3600000).toISOString()
 const m={label:'cometens-g2-20261023',wallet:a.from,durationSeconds:'31536000',maxTotalCost:'9000000',expectedRegistrarCodeHash:'0xb025a7edb8e81862c2d28857211a7a91c1fb2b17c5bcf28b983987067f083c2a',expectedTokenCodeHash:'0xa9a4749f886f5035336f6e16dce5ca6f339ae73f76e94ad4b8f46a447dc335f3'}
 const salt={...m,commitment:b.commitment,salt:`0x${'33'.repeat(32)}`}
 describe('G2 manual only signer input gate',()=>{
