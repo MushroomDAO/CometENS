@@ -46,6 +46,15 @@ against the strict G2.4 requirement**, not a passing transfer-safety proof.
 Foundry's `vm.chainId` switching is a controlled two-domain simulation, not
 two independent finalized chains or a real cross-chain proof.
 
+Additional negative coverage shows that the former L1 holder can **create a
+new OP delegate after transfer**, and that delegate can issue before freeze
+delivery. Thus the window permits new privilege expansion, not just use of an
+old grant. A separate recovery test rejects reordered checkpoints, old epochs
+with newer sequences, and same-epoch unfreeze attempts; a valid new-controller
+epoch does not revive the former delegate. Existing member tokens remain with
+their holder through freeze and rotation. These are local fixture observations:
+eventual rejection does not repair transfer-time safety or prove native handoff.
+
 ## Minimal supporting L1-only component delivered in this package
 
 `contracts/src/G2LegacyL1NativeActionGuard.sol` is a small abstract guard for
