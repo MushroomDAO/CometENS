@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /** Read-only recovery for an ambiguous owner-signed ENSv2 register submission. */
 import { readFile, lstat } from 'node:fs/promises'
-import { createPublicClient, http } from 'viem'
+import { createPublicClient, http, keccak256 } from 'viem'
 import { sepolia } from 'viem/chains'
 import { REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
 const URLS=['https://sepolia.drpc.org','https://ethereum-sepolia.publicnode.com']
 const HEX32=/^0x[0-9a-f]{64}$/i
-const eq=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase()
+const eq=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase()
+const validBlock=b=>typeof b?.number==='bigint'&&b.number>=0n&&HEX32.test(b.hash??'')
 export function validateJournal(j){
  if(j?.state!=='SIGNED_NO_RETRY'||!HEX32.test(j.hash??'')||
   !HEX32.test(j.commitment??'')||!HEX32.test(j.calldataHash??'')||
@@ -26,18 +27,30 @@ export async function inspectRegister(clients,j){
  if(observations.some(x=>x.chain!==11155111))return {status:'WRONG_CHAIN_NO_RETRY',hash:j.hash}
  if(observations.some(x=>!x.tx||!x.receipt))return {status:'UNKNOWN_DO_NOT_RETRY',hash:j.hash}
  for(const {tx,receipt} of observations){
+  if(typeof receipt.blockNumber!=='bigint'||receipt.blockNumber<0n||
+   !HEX32.test(receipt.blockHash??'')||!['success','reverted'].includes(receipt.status))
+   return {status:'INVALID_RECEIPT_NO_RETRY',hash:j.hash}
   if(!eq(tx.from,WALLET)||!eq(tx.to,REGISTRAR)||tx.nonce!==j.nonce||
+   tx.chainId!==11155111||tx.type!=='eip1559'||tx.value!==0n||
+   tx.blockNumber!==receipt.blockNumber||!eq(tx.blockHash,receipt.blockHash)||
    !eq(receipt.transactionHash,j.hash)||!eq(tx.hash,j.hash)||
-   !eq((await import('viem')).keccak256(tx.input??tx.data),j.calldataHash))
+   typeof tx.input!=='string'||!/^0x(?:[0-9a-f]{2})*$/i.test(tx.input)||
+   !eq(keccak256(tx.input),j.calldataHash))
    return {status:'TX_MISMATCH_NO_RETRY',hash:j.hash}
  }
  const [a,b]=observations.map(x=>x.receipt)
  if(!eq(a.blockHash,b.blockHash)||a.blockNumber!==b.blockNumber||a.status!==b.status)
   return {status:'RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
- const canonical=await Promise.all(clients.map(c=>c.getBlock({blockNumber:a.blockNumber})))
- if(canonical.some(b=>!eq(b.hash,a.blockHash)))return {status:'REORG_OR_RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
  const finalized=await Promise.all(clients.map(c=>c.getBlock({blockTag:'finalized'})))
+ if(finalized.some(b=>!validBlock(b)))return {status:'INVALID_FINALITY_NO_RETRY',hash:j.hash}
+ if(finalized[0].number===finalized[1].number&&!eq(finalized[0].hash,finalized[1].hash))
+  return {status:'RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
  if(finalized.some(b=>b.number<a.blockNumber))return {status:'AWAITING_FINALITY_NO_RETRY',hash:j.hash}
+ if(finalized.some(b=>b.number===a.blockNumber&&!eq(b.hash,a.blockHash)))
+  return {status:'REORG_OR_RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
+ const canonical=await Promise.all(clients.map(c=>c.getBlock({blockNumber:a.blockNumber})))
+ if(canonical.some(b=>!validBlock(b)||b.number!==a.blockNumber||!eq(b.hash,a.blockHash)))
+  return {status:'REORG_OR_RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
  return {status:a.status==='success'?'REGISTER_TX_FINALIZED':'REGISTER_TX_REVERTED_NO_RETRY',hash:j.hash,block:String(a.blockNumber)}
 }
 async function main(){
