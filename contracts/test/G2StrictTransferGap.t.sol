@@ -81,6 +81,10 @@ contract G2StrictTransferGapTest is Test {
     }
 
     function _checkpoint(address controller, uint64 epoch, uint64 seq, uint64 secondsAhead) private {
+        _deliverCheckpoint(controller, epoch, seq, secondsAhead, false);
+    }
+
+    function _deliverCheckpoint(address controller, uint64 epoch, uint64 seq, uint64 secondsAhead, bool rejected) private {
         G2RootCheckpointInbox.RootCheckpoint memory c = G2RootCheckpointInbox.RootCheckpoint({
             sourceChainId: 11155111,
             destinationChainId: 11155420,
@@ -94,7 +98,9 @@ contract G2StrictTransferGapTest is Test {
             l1ValidUntil: controller == address(0) ? 0 : uint64(block.timestamp + secondsAhead + 3600),
             authorityVersion: inbox.MESSAGE_VERSION()
         });
-        vm.prank(inbox.OP_MESSENGER());
+        address messenger = inbox.OP_MESSENGER();
+        if (rejected) vm.expectRevert(G2RootCheckpointInbox.InvalidCheckpoint.selector);
+        vm.prank(messenger);
         inbox.acceptCheckpoint(c);
     }
 
@@ -156,6 +162,64 @@ contract G2StrictTransferGapTest is Test {
         vm.prank(delegate);
         vm.expectRevert(G2ManagedLeaseIssuer.LeaseInactive.selector);
         issuer.issue("late-delegate", member, address(0));
+    }
+
+    function test_transferWindowAllowsFormerHolderToCreateNewIssuingDelegate() public {
+        _transferL1();
+        vm.chainId(11155420);
+        address lateDelegate = makeAddr("delegate-created-after-native-transfer");
+        uint256 capIssue = issuer.CAP_ISSUE();
+        vm.prank(owner);
+        issuer.grant(lateDelegate, capIssue, 2, uint64(block.timestamp + 1800));
+        // Counterexample: privileges can expand AFTER native transfer, not
+        // merely survive as a grant created while the owner was legitimate.
+        vm.prank(lateDelegate);
+        bytes32 node = issuer.issue("post-transfer-grant", member, address(0));
+        assertEq(records.subnodeOwner(node), member);
+        assertEq(issuer.grantorOf(lateDelegate), owner);
+        (, uint64 quota,, uint64 epoch) = issuer.grants(lateDelegate);
+        assertEq(quota, 1);
+        assertEq(epoch, 1);
+
+        _checkpoint(address(0), 2, 2, 0);
+        vm.prank(owner);
+        vm.expectRevert(G2ManagedLeaseIssuer.LeaseInactive.selector);
+        issuer.grant(lateDelegate, capIssue, 9, uint64(block.timestamp + 1800));
+        vm.prank(lateDelegate);
+        vm.expectRevert(G2ManagedLeaseIssuer.LeaseInactive.selector);
+        issuer.issue("post-freeze-grant", member, address(0));
+        assertEq(records.subnodeOwner(node), member);
+    }
+
+    function test_freezeRejectsDelayedCheckpointsAndNewEpochDoesNotReviveOldGrant() public {
+        _transferL1();
+        vm.chainId(11155420);
+        vm.prank(delegate);
+        bytes32 node = issuer.issue("before-freeze", member, address(0));
+        _checkpoint(address(0), 2, 2, 0);
+        // Reject reordered sequence, old epoch even with a fresh sequence,
+        // and an attempted unfreeze without an epoch advance.
+        _deliverCheckpoint(owner, 1, 1, 3600, true);
+        _deliverCheckpoint(owner, 1, 3, 3600, true);
+        _deliverCheckpoint(owner, 2, 3, 3600, true);
+        assertEq(inbox.activeController(), address(0));
+        assertEq(inbox.sequence(), 2);
+        assertEq(inbox.sourceEpoch(), 2);
+
+        _checkpoint(nextOwner, 3, 3, 3600);
+        vm.prank(owner);
+        vm.expectRevert(G2ManagedLeaseIssuer.Unauthorized.selector);
+        issuer.issue("former-holder", member, address(0));
+        vm.prank(delegate);
+        vm.expectRevert(G2ManagedLeaseIssuer.Unauthorized.selector);
+        issuer.issue("former-delegate", member, address(0));
+        (, uint64 quota,, uint64 epoch) = issuer.grants(delegate);
+        assertEq(quota, 1);
+        assertEq(epoch, 1);
+        vm.prank(nextOwner);
+        bytes32 fresh = issuer.issue("new-holder", member, address(0));
+        assertEq(records.subnodeOwner(fresh), member);
+        assertEq(records.subnodeOwner(node), member);
     }
 
     function test_guardRejectsExpiryNetworkAndRuntimeMismatch() public {
