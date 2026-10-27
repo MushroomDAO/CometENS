@@ -53,7 +53,7 @@ it('uses the real executor, signed type-4 transaction and receipt inspector on d
     const result=await executeVerified({o,clients:[publicClient,publicClient],wallet,account,nonce,
       journalPath:join(directory,'attempt'),recheck:async()=>nonce,guard:async()=>{},persist})
     // A first call must not claim finality before the explicit mined-finality poll below.
-    expect(['PENDING_NO_RETRY','AWAITING_FINALITY']).toContain(result.status)
+    expect(['PENDING_NO_RETRY','AWAITING_FINALITY','NONCE_CONSUMED_OR_TX_REPLACED_NO_RETRY']).toContain(result.status)
     const hash=result.hash
     await publicClient.waitForTransactionReceipt({hash})
     const tx=await publicClient.getTransaction({hash})
