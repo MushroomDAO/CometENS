@@ -40,13 +40,12 @@ export async function checkedPreflight(input, check = checkRegister) {
   let last
   for (let attempt = 0; attempt < 2; attempt++) {
     try { last = await check(input) }
-    catch { last = {status:'BLOCKED',reason:'RPC_PREFLIGHT_THROWN'} }
+    catch { last = {status:'BLOCKED',reason:'PREFLIGHT_EXCEPTION'} }
     if (last?.reason === 'REGISTER_EXECUTION_NOT_REVIEWED') return requireReady(last)
     const reasons = last?.reason === 'CHAIN_PREFLIGHT_FAILED' ? last.details : null
     const transient = (Array.isArray(reasons) && reasons.length === 2 &&
-      reasons.some(x => ['RPC_OR_SIMULATION_FAILED','QUOTE_HEAD_ADVANCED','CHAIN_OR_BLOCK_DRIFT'].includes(x)) &&
-      reasons.every(x => ['RPC_OR_SIMULATION_FAILED','QUOTE_HEAD_ADVANCED','CHAIN_OR_BLOCK_DRIFT','EXTERNAL_WALLET_ACTION_REQUIRED'].includes(x))) ||
-      last?.reason === 'RPC_PREFLIGHT_THROWN'
+      reasons.includes('QUOTE_HEAD_ADVANCED') &&
+      reasons.every(x => ['QUOTE_HEAD_ADVANCED','EXTERNAL_WALLET_ACTION_REQUIRED'].includes(x)))
     if (!transient || attempt === 1) {
       const err = Error(`register-preflight:${last?.reason ?? 'UNKNOWN'}`)
       err.preflight = {reason:last?.reason ?? 'UNKNOWN',details:Array.isArray(last?.details)?last.details:undefined,attempts:attempt+1}
