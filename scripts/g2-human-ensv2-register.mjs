@@ -11,16 +11,16 @@ import { assertPrivateFile } from './g2-local-sepolia-signer.mjs'
 import { REG_ABI, REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
 
 const DIR = `${process.env.HOME}/.config/cometens-g2-sepolia`
-export const SEPOLIA_RPC_URLS = Object.freeze(['https://1rpc.io/sepolia', 'https://ethereum-sepolia.publicnode.com'])
+export const SEPOLIA_RPC_URLS = Object.freeze(['https://sepolia.rpc.thirdweb.com', 'https://ethereum-sepolia.publicnode.com'])
 export function assertIndependentRpcPair(urls) {
   if (!Array.isArray(urls) || urls.length !== 2) throw Error('dual-rpc-required')
   const hosts = urls.map(value => {
     const url = new URL(value)
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
-        (url.hostname === '1rpc.io' ? url.pathname !== '/sepolia' : url.pathname !== '/')) throw Error('unsafe-rpc-url')
+        (url.pathname !== '/')) throw Error('unsafe-rpc-url')
     return url.hostname.toLowerCase()
   })
-  if (new Set(hosts).size !== 2 || !hosts.includes('1rpc.io') ||
+  if (new Set(hosts).size !== 2 || !hosts.includes('sepolia.rpc.thirdweb.com') ||
       !hosts.includes('ethereum-sepolia.publicnode.com')) throw Error('unverified-rpc-hosts')
   return urls
 }
