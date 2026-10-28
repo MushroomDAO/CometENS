@@ -4,7 +4,7 @@ import { readFile, lstat } from 'node:fs/promises'
 import { createPublicClient, http, keccak256 } from 'viem'
 import { sepolia } from 'viem/chains'
 import { REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
-const URLS=['https://sepolia.drpc.org','https://ethereum-sepolia.publicnode.com']
+export const URLS=['https://sepolia.rpc.thirdweb.com','https://ethereum-sepolia.publicnode.com']
 const HEX32=/^0x[0-9a-f]{64}$/i
 const eq=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase()
 const validBlock=b=>typeof b?.number==='bigint'&&b.number>=0n&&HEX32.test(b.hash??'')
@@ -53,12 +53,15 @@ export async function inspectRegister(clients,j){
   return {status:'REORG_OR_RPC_DISAGREEMENT_NO_RETRY',hash:j.hash}
  return {status:a.status==='success'?'REGISTER_TX_FINALIZED':'REGISTER_TX_REVERTED_NO_RETRY',hash:j.hash,block:String(a.blockNumber)}
 }
+export async function readJournal(path){
+ const st=await lstat(path)
+ if(!st.isFile()||st.isSymbolicLink()||st.size<2||st.size>4096||(st.mode&0o077)!==0)throw Error('UNSAFE_JOURNAL')
+ return validateJournal(JSON.parse(await readFile(path,'utf8')))
+}
 async function main(){
  if(process.argv.length!==3)throw Error('USAGE')
  const path=process.argv[2]
- const st=await lstat(path)
- if(!st.isFile()||st.isSymbolicLink()||st.size>4096)throw Error('UNSAFE_JOURNAL')
- const j=validateJournal(JSON.parse(await readFile(path,'utf8')))
+ const j=await readJournal(path)
  const clients=URLS.map(url=>createPublicClient({chain:sepolia,transport:http(url,{retryCount:0,timeout:12000})}))
  const result=await inspectRegister(clients,j)
  console.log(JSON.stringify(result))

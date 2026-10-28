@@ -63,3 +63,22 @@ it('rejects a finalized receipt-height hash that contradicts the receipt',async(
  c.getBlock=async p=>p.blockTag?{number:100n,hash:'0x'+'ef'.repeat(32)}:original(p)
  expect((await inspectRegister([c,c],journal)).status).toBe('REORG_OR_RPC_DISAGREEMENT_NO_RETRY')
 })
+
+it.each([{from:'0x0000000000000000000000000000000000000001'},{nonce:752}])('rejects signed identity mismatch %#',async patch=>{
+ const c=stub(), tx=await c.getTransaction();c.getTransaction=async()=>({...tx,...patch})
+ expect((await inspectRegister([c,stub()],journal)).status).toBe('TX_MISMATCH_NO_RETRY')
+})
+it('rejects symlink, world-readable and oversize journals before JSON access',async()=>{
+ const {readJournal,URLS}=await import('../../scripts/g2-ensv2-register-recover.mjs')
+ const {mkdtemp,writeFile,symlink,chmod,rm}=await import('node:fs/promises')
+ const {tmpdir}=await import('node:os'),{join}=await import('node:path')
+ const dir=await mkdtemp(join(tmpdir(),'recover-'))
+ try{
+  const p=join(dir,'journal.json'), link=join(dir,'link.json')
+  await writeFile(p,JSON.stringify(journal),{mode:0o600});await symlink(p,link)
+  await expect(readJournal(link)).rejects.toThrow('UNSAFE_JOURNAL')
+  await chmod(p,0o644);await expect(readJournal(p)).rejects.toThrow('UNSAFE_JOURNAL')
+  await chmod(p,0o600);await writeFile(p,'x'.repeat(4097));await expect(readJournal(p)).rejects.toThrow('UNSAFE_JOURNAL')
+  expect(URLS).toEqual(['https://sepolia.rpc.thirdweb.com','https://ethereum-sepolia.publicnode.com'])
+ }finally{await rm(dir,{recursive:true,force:true})}
+})
