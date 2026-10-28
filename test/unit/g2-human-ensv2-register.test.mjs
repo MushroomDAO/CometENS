@@ -54,9 +54,9 @@ it('enforces durable journal before signing and hash before a single send; ambig
 it('pins two independently served Sepolia RPC hosts and rejects the DNS-broken old alias',()=>{
  const urls=SEPOLIA_RPC_URLS.map(x=>new URL(x))
  expect(urls.map(x=>x.protocol)).toEqual(['https:','https:'])
- expect(urls.map(x=>x.hostname)).toEqual(['sepolia.gateway.tenderly.co','ethereum-sepolia.publicnode.com'])
+ expect(urls.map(x=>x.hostname)).toEqual(['1rpc.io','ethereum-sepolia.publicnode.com'])
  expect(new Set(urls.map(x=>x.hostname)).size).toBe(2)
  expect(assertIndependentRpcPair(SEPOLIA_RPC_URLS)).toEqual(SEPOLIA_RPC_URLS)
- for (const pair of [[SEPOLIA_RPC_URLS[0],SEPOLIA_RPC_URLS[0]],['https://sepolia.drpc.org',SEPOLIA_RPC_URLS[1]],['http://sepolia.gateway.tenderly.co',SEPOLIA_RPC_URLS[1]],['https://user:pass@sepolia.gateway.tenderly.co',SEPOLIA_RPC_URLS[1]]])
+ for (const pair of [[SEPOLIA_RPC_URLS[0],SEPOLIA_RPC_URLS[0]],['https://sepolia.gateway.tenderly.co',SEPOLIA_RPC_URLS[1]],['http://1rpc.io/sepolia',SEPOLIA_RPC_URLS[1]],['https://user:pass@1rpc.io/sepolia',SEPOLIA_RPC_URLS[1]]])
   expect(()=>assertIndependentRpcPair(pair)).toThrow()
 })
