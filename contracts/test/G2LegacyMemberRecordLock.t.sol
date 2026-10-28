@@ -218,4 +218,25 @@ contract G2LegacyMemberRecordLockTest is Test {
             "community", "alice", bytes32(uint256(1)), bytes32(uint256(1)), bytes32(uint256(1))
         );
     }
+    function test_lockedRecordsRemainImmutableAfterNativeTransferButNeverClaimNativeResolverLock() public {
+        _lock();
+        bytes32 originalCommitment = store.recordCommitment();
+        wrapper.setData(uint256(CHILD), outsider, 1 | (1 << 16), uint64(block.timestamp + 7 days));
+        vm.prank(member);
+        vm.expectRevert(G2LegacyMemberRecordLock.AlreadyLocked.selector);
+        store.lock(member, hex"ff", "name", "former holder override");
+        vm.prank(outsider);
+        vm.expectRevert(G2LegacyMemberRecordLock.AlreadyLocked.selector);
+        store.lock(outsider, hex"ff", "name", "new holder override");
+        vm.prank(parentHolder);
+        vm.expectRevert(G2LegacyMemberRecordLock.AlreadyLocked.selector);
+        store.lock(parentHolder, hex"ff", "name", "parent override");
+        assertEq(store.recordCommitment(), originalCommitment);
+        assertEq(store.addr(CHILD), member);
+        assertEq(store.text(CHILD, "name"), "Alice");
+        assertFalse(store.sovereignReceipt());
+        assertFalse(store.ensV2AuthorityVerified());
+        assertFalse(store.nativeResolverPointerLockedVerified());
+    }
+
 }
