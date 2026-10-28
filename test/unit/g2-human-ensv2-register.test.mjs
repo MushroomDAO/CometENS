@@ -2,7 +2,38 @@ import { it,expect } from 'vitest'
 import { mkdtemp,readFile,rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { reserveBeforeSend,recordSignedHash,corroborateReceipt,requireReady,validateFeeSafety,signThenSend,SEPOLIA_RPC_URLS,assertIndependentRpcPair } from '../../scripts/g2-human-ensv2-register.mjs'
+import { reserveBeforeSend,recordSignedHash,corroborateReceipt,requireReady,validateFeeSafety,signThenSend,SEPOLIA_RPC_URLS,assertIndependentRpcPair,checkedPreflight } from '../../scripts/g2-human-ensv2-register.mjs'
+
+it('fresh complete preflight retry succeeds only after both RPC gates pass',async()=>{
+  let n=0
+  const ok={reason:'REGISTER_EXECUTION_NOT_REVIEWED',broadcasts:false,block:{hash:'0x12'},quotedPrice:'2',allowance:'2'}
+  const out=await checkedPreflight({},async()=>++n===1?
+    {reason:'CHAIN_PREFLIGHT_FAILED',details:['QUOTE_HEAD_ADVANCED','EXTERNAL_WALLET_ACTION_REQUIRED']}:ok)
+  expect(n).toBe(2);expect(out).toEqual(ok)
+})
+it('fails closed after two transient failures with structured detail',async()=>{
+  let n=0
+  await expect(checkedPreflight({},async()=>{n++;return {reason:'CHAIN_PREFLIGHT_FAILED',details:['QUOTE_HEAD_ADVANCED','QUOTE_HEAD_ADVANCED']}}))
+    .rejects.toMatchObject({preflight:{reason:'CHAIN_PREFLIGHT_FAILED',details:['QUOTE_HEAD_ADVANCED','QUOTE_HEAD_ADVANCED'],attempts:2}})
+  expect(n).toBe(2)
+})
+it('never retries permanent quote, allowance, order or wallet failures',async()=>{
+  for(const reason of ['INVALID_REGISTER_ORDER','RPC_DISAGREEMENT_OR_CAP','WALLET_CODE_UNVERIFIED']) {
+    let n=0
+    await expect(checkedPreflight({},async()=>{n++;return {reason}})).rejects.toMatchObject({preflight:{reason,attempts:1}})
+    expect(n).toBe(1)
+  }
+})
+it('does not retry generic simulation failures, mixed permanent errors or thrown programmer errors',async()=>{
+  for (const details of [['RPC_OR_SIMULATION_FAILED','EXTERNAL_WALLET_ACTION_REQUIRED'],['QUOTE_HEAD_ADVANCED','RPC_OR_SIMULATION_FAILED'],['CHAIN_OR_BLOCK_DRIFT','EXTERNAL_WALLET_ACTION_REQUIRED']]) {
+    let n=0
+    await expect(checkedPreflight({},async()=>{n++;return {reason:'CHAIN_PREFLIGHT_FAILED',details}})).rejects.toMatchObject({preflight:{attempts:1,details}})
+    expect(n).toBe(1)
+  }
+  let n=0
+  await expect(checkedPreflight({},async()=>{n++;throw new TypeError('programmer bug')})).rejects.toMatchObject({preflight:{reason:'PREFLIGHT_EXCEPTION',attempts:1}})
+  expect(n).toBe(1)
+})
 
 it('rejects anything except dual RPC ready preflight',()=>{
   expect(()=>requireReady({reason:'CHAIN_PREFLIGHT_FAILED'})).toThrow()

@@ -35,6 +35,25 @@ export function requireReady(result) {
   return result
 }
 
+/** Retry only transient read-only failures; each attempt runs both RPC preflights afresh. */
+export async function checkedPreflight(input, check = checkRegister) {
+  let last
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { last = await check(input) }
+    catch { last = {status:'BLOCKED',reason:'PREFLIGHT_EXCEPTION'} }
+    if (last?.reason === 'REGISTER_EXECUTION_NOT_REVIEWED') return requireReady(last)
+    const reasons = last?.reason === 'CHAIN_PREFLIGHT_FAILED' ? last.details : null
+    const transient = (Array.isArray(reasons) && reasons.length === 2 &&
+      reasons.includes('QUOTE_HEAD_ADVANCED') &&
+      reasons.every(x => ['QUOTE_HEAD_ADVANCED','EXTERNAL_WALLET_ACTION_REQUIRED'].includes(x)))
+    if (!transient || attempt === 1) {
+      const err = Error(`register-preflight:${last?.reason ?? 'UNKNOWN'}`)
+      err.preflight = {reason:last?.reason ?? 'UNKNOWN',details:Array.isArray(last?.details)?last.details:undefined,attempts:attempt+1}
+      throw err
+    }
+  }
+}
+
 /** O_EXCL reservation blocks concurrent invocations and all retries after ambiguity. */
 export async function reserveBeforeSend(path, details) {
   const f = await open(path,'wx',0o600)
@@ -108,7 +127,7 @@ async function main() {
   await Promise.all([manifestPath,saltPath].map(async p=>assertPrivateFile(await stat(p))))
   const [manifest,order]=await Promise.all([parse(manifestPath),readPublicOrder(orderPath)])
   const pair=clients()
-  const ready=requireReady(await checkRegister({order,manifest,saltFile:saltPath,clients:pair}))
+  const ready=await checkedPreflight({order,manifest,saltFile:saltPath,clients:pair})
   console.log(JSON.stringify({status:'CHECKED',chainId:11155111,action:'register',from:WALLET,to:REGISTRAR,
     quotedPrice:ready.quotedPrice,allowance:ready.allowance,block:ready.block,submitted:false}))
   if(mode==='check') return
@@ -117,7 +136,7 @@ async function main() {
   try { if(await prompt.question('Type EXECUTE REGISTER SEPOLIA (ONE ATTEMPT): ')!=='EXECUTE REGISTER SEPOLIA') throw Error('declined') }
   finally { prompt.close() }
   if(Date.parse(order.expiresAt)<=Date.now()) throw Error('order-expired')
-  const second=requireReady(await checkRegister({order,manifest,saltFile:saltPath,clients:pair}))
+  const second=await checkedPreflight({order,manifest,saltFile:saltPath,clients:pair})
   const { loadOrCreateSalt, validateRegistrationManifest }=await import('./prepare-g2-sepolia-ensv2-registration.mjs')
   const m=validateRegistrationManifest(manifest)
   const secret=await loadOrCreateSalt(saltPath,m,{create:false})
@@ -154,7 +173,8 @@ async function main() {
   console.log(JSON.stringify({status:'SUBMITTED_NO_RETRY',hash:signed.hash,journal}))
   console.log(JSON.stringify(await corroborateReceipt(...pair,signed.hash)))
 }
-if(process.argv[1]?.endsWith('g2-human-ensv2-register.mjs')) main().catch(()=>{
+if(process.argv[1]?.endsWith('g2-human-ensv2-register.mjs')) main().catch((error)=>{
+  if(error?.preflight) console.error(JSON.stringify({status:'BLOCKED',stage:'PRE_JOURNAL_PREFLIGHT',...error.preflight}))
   console.error('REGISTER BLOCKED OR AMBIGUOUS: inspect private journal and chain hash; NEVER auto retry')
   process.exitCode=2
 })
