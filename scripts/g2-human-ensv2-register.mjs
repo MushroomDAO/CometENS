@@ -11,9 +11,20 @@ import { assertPrivateFile } from './g2-local-sepolia-signer.mjs'
 import { REG_ABI, REGISTRAR, WALLET } from './prepare-g2-sepolia-ensv2-registration.mjs'
 
 const DIR = `${process.env.HOME}/.config/cometens-g2-sepolia`
-export const SEPOLIA_RPC_URLS = Object.freeze(['https://sepolia.drpc.org', 'https://ethereum-sepolia.publicnode.com'])
+export const SEPOLIA_RPC_URLS = Object.freeze(['https://sepolia.gateway.tenderly.co', 'https://ethereum-sepolia.publicnode.com'])
+export function assertIndependentRpcPair(urls) {
+  if (!Array.isArray(urls) || urls.length !== 2) throw Error('dual-rpc-required')
+  const hosts = urls.map(value => {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw Error('unsafe-rpc-url')
+    return url.hostname.toLowerCase()
+  })
+  if (new Set(hosts).size !== 2 || !hosts.includes('sepolia.gateway.tenderly.co') ||
+      !hosts.includes('ethereum-sepolia.publicnode.com')) throw Error('unverified-rpc-hosts')
+  return urls
+}
 const same = (a,b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
-const clients = () => SEPOLIA_RPC_URLS.map(url => createPublicClient({ chain: sepolia, transport: http(url,{ retryCount:0 }), ccipRead:false }))
+const clients = () => assertIndependentRpcPair(SEPOLIA_RPC_URLS).map(url => createPublicClient({ chain: sepolia, transport: http(url,{ retryCount:0 }), ccipRead:false }))
 const parse = async path => { const b = await readFile(path); if (b.length>4096) throw Error('file-too-large'); return JSON.parse(b.toString()) }
 
 export function requireReady(result) {
