@@ -251,4 +251,33 @@ contract G2StrictTransferGapTest is Test {
         vm.expectRevert(G2LegacyL1NativeActionGuard.InvalidNativeSource.selector);
         new GuardedL1ActionFixture(address(0), bytes32(uint256(123)), parent);
     }
+    function _rejectDelayedPositive(address controller, uint64 epoch) private {
+        G2RootCheckpointInbox.RootCheckpoint memory c = G2RootCheckpointInbox.RootCheckpoint({
+            sourceChainId: 11155111, destinationChainId: 11155420,
+            sourceAdapter: L1_RELAY, destinationInbox: address(inbox),
+            parentNode: source.parentNode(), controller: controller,
+            sourceEpoch: epoch, sequence: 4,
+            leaseUntil: uint64(block.timestamp + 3600),
+            l1ValidUntil: uint64(block.timestamp + 7200),
+            authorityVersion: inbox.MESSAGE_VERSION()
+        });
+        vm.prank(inbox.OP_MESSENGER());
+        vm.expectRevert(G2RootCheckpointInbox.InvalidCheckpoint.selector);
+        inbox.acceptCheckpoint(c);
+    }
+
+    function test_delayedPositiveCheckpointCannotResurrectAfterAuthenticatedFreeze() public {
+        _transferL1();
+        vm.chainId(11155420);
+        assertEq(inbox.activeController(), owner);
+        _checkpoint(address(0), 2, 2, 0);
+        assertEq(inbox.activeController(), address(0));
+        vm.prank(owner);
+        vm.expectRevert(G2ManagedLeaseIssuer.LeaseInactive.selector);
+        issuer.issue("blocked-after-freeze", member, address(0));
+        _rejectDelayedPositive(owner, 1);
+        _rejectDelayedPositive(owner, 2);
+        assertEq(inbox.activeController(), address(0));
+    }
+
 }
