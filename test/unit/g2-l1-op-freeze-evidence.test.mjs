@@ -15,3 +15,23 @@ it('same client or same provider URL fails closed',async()=>{const a=c(),b=c();e
 it('finalized lag 780 seconds is permitted but never authorizes',async()=>{expect((await run({},{},1780)).decision).toBe('EVIDENCE_MATCH_ONLY_NOT_AUTHORIZATION')})
 it('malformed expiry, max age and missing priorOwner freeze',async()=>{for(const expiry of ['bad',null])expect((await run({expiry},{})).decision).toBe('FREEZE_OP_AUTHORITY');expect((await evaluateL1OpFreeze({clients:[c(),c()],label:'x',expectedOwner:owner,nowSeconds:1020})).decision).toBe('FREEZE_OP_AUTHORITY');expect((await evaluateL1OpFreeze({clients:[c(),c()],label:'x',expectedOwner:owner,priorOwner:owner,nowSeconds:1020,maxAgeSeconds:'bad'})).decision).toBe('FREEZE_OP_AUTHORITY')})
 it('chainId, zero owner, expiry boundary, expected owner, reorg and future block freeze',async()=>{const a=c(),b=c();a.getChainId=async()=>1;expect((await evaluateL1OpFreeze({clients:[a,b],label:'x',expectedOwner:owner,priorOwner:owner,nowSeconds:1020})).decision).toBe('FREEZE_OP_AUTHORITY');for(const opts of [{who:'0x0000000000000000000000000000000000000000'},{expiry:1020n},{delay:true},{timestamp:2000n}])expect((await run(opts,{})).decision).toBe('FREEZE_OP_AUTHORITY');expect((await run({}, {},1020,other)).decision).toBe('FREEZE_OP_AUTHORITY')})
+
+it('normalizes provider identity and rejects two URLs on same host',async()=>{
+ const {providerIdentity}=await import('../../scripts/g2-l1-op-freeze-evidence.mjs')
+ const a=c(),b=c();a.transport.url='https://RPC.EXAMPLE:443/a';b.transport.url='https://rpc.example/b'
+ expect(providerIdentity(a)).toBe('rpc.example')
+ expect((await evaluateL1OpFreeze({clients:[a,b],label:'x',expectedOwner:owner,priorOwner:owner,nowSeconds:1020})).reason).toBe('INVALID_EVIDENCE_INPUT')
+})
+it('correct prior owner and pinned block pass only as non-authorization; block mismatches fail',async()=>{
+ const a=c(),b=c();let pinned=0
+ a.readContract=async args=>{expect(args.blockNumber).toBe(200n);pinned++;return [2,3000n,owner,0n,0n]}
+ b.readContract=a.readContract
+ expect((await evaluateL1OpFreeze({clients:[a,b],label:'x',expectedOwner:owner,priorOwner:owner,nowSeconds:1020})).decision).toBe('EVIDENCE_MATCH_ONLY_NOT_AUTHORIZATION')
+ expect(pinned).toBe(2)
+ a.getBlock=async ({blockTag})=>({number:200n,hash:'0x'+(blockTag?'ab':'cd').repeat(32),timestamp:1000n})
+ expect((await evaluateL1OpFreeze({clients:[a,b],label:'x',expectedOwner:owner,priorOwner:owner,nowSeconds:1020})).decision).toBe('FREEZE_OP_AUTHORITY')
+})
+it('explicit valid-status negative, zero owner and expiry boundary freeze',async()=>{
+ for(const v of [{status:1},{status:0},{who:'0x0000000000000000000000000000000000000000'},{expiry:1020n}])
+ expect((await run(v,{})).decision).toBe('FREEZE_OP_AUTHORITY')
+})
