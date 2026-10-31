@@ -7,13 +7,14 @@ const HEX32=/^0x[0-9a-f]{64}$/i
 const ADDR=/^0x[0-9a-f]{40}$/i
 const same=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase()
 const denied=(reason)=>({decision:'FREEZE_OP_AUTHORITY',reason,nativeAuthorityVerified:false,sovereign:false})
+/** Minimum same-host screening only; distinct hostnames do not prove operator independence. */
 export function providerIdentity(client) {
  try {
   const raw=client?.transport?.url
   if(typeof raw!=='string')return null
   const u=new URL(raw)
   if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash)return null
-  const host=u.hostname.toLowerCase()
+  const host=u.hostname.toLowerCase().replace(/\.+$/,'')
   if(!host||u.port&&u.port!=='443')return null
   return host
  }catch{return null}
@@ -23,7 +24,7 @@ function withDeadline(work,ms) {
  return Promise.race([work(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('RPC_DEADLINE')),ms)})])
   .finally(()=>clearTimeout(timer))
 }
-/** snapshots are independent, pinned per provider, and always require live L1 evidence. */
+/** Snapshots are pinned per provider and always require live L1 evidence. */
 export async function evaluateL1OpFreeze({clients,label,expectedOwner,priorOwner,nowSeconds,maxAgeSeconds=1800n,timeoutMs=8000}){
  if(!Array.isArray(clients)||clients.length!==2||clients[0]===clients[1]||!providerIdentity(clients[0])||!providerIdentity(clients[1])||providerIdentity(clients[0])===providerIdentity(clients[1])||!ADDR.test(expectedOwner??'')||!ADDR.test(priorOwner??'')||!Number.isSafeInteger(nowSeconds)||typeof maxAgeSeconds!=='bigint'||maxAgeSeconds<1200n||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000||typeof label!=='string'||!(/^[a-z0-9-]{1,63}$/).test(label))return denied('INVALID_EVIDENCE_INPUT')
  const id=BigInt(keccak256(toHex(label)))
@@ -38,7 +39,7 @@ export async function evaluateL1OpFreeze({clients,label,expectedOwner,priorOwner
  },timeoutMs)))
  if(results.some(r=>r.status!=='fulfilled'))return denied('RPC_OR_FINALITY_UNVERIFIED')
  const [a,b]=results.map(r=>r.value)
- if(a.block.number!==b.block.number||!same(a.block.hash,b.block.hash))return denied('L1_RPC_FINALITY_DISAGREEMENT')
+ if(a.block.number!==b.block.number||!same(a.block.hash,b.block.hash)||a.block.timestamp!==b.block.timestamp)return denied('L1_RPC_FINALITY_DISAGREEMENT')
  if(BigInt(nowSeconds)<a.block.timestamp||BigInt(nowSeconds)-a.block.timestamp>maxAgeSeconds)return denied('STALE_L1_FINALITY_EVIDENCE')
  const parse=s=>Array.isArray(s)?{status:s[0],expiry:s[1],owner:s[2]}:s&&typeof s==='object'?{status:s.status,expiry:s.expiry,owner:s.latestOwner}:null
  const x=parse(a.state),y=parse(b.state)
