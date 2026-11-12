@@ -25,11 +25,14 @@ import {
   decodeAbiParameters,
   toHex,
   namehash,
-  type Hex,
   type Address,
+  type Hex,
+  type HttpTransport,
+  type PublicClient,
+  type WalletClient,
 } from 'viem'
 import { optimismSepolia, sepolia } from 'viem/chains'
-import { privateKeyToAccount } from 'viem/accounts'
+import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts'
 import { liveTestOptIn } from './live-opt-in'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -79,11 +82,15 @@ function makeNode(parentNode: Hex, label: string): Hex {
 
 const ROOT = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
 
+type OpPublicClient = PublicClient<HttpTransport, typeof optimismSepolia>
+type SepoliaPublicClient = PublicClient<HttpTransport, typeof sepolia>
+type OpWalletClient = WalletClient<HttpTransport, typeof optimismSepolia, PrivateKeyAccount>
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
-  let opPub: ReturnType<typeof createPublicClient>
-  let opWallet: ReturnType<typeof createWalletClient>
+  let opPub: OpPublicClient
+  let opWallet: OpWalletClient
   let deployer: ReturnType<typeof privateKeyToAccount>
   const testLabel = `test-${Date.now()}`
 
@@ -139,7 +146,7 @@ describe.skipIf(SKIP)('Integration: L2Records on OP Sepolia', () => {
 })
 
 describe.skipIf(!LIVE_READS || !L1_RPC || !L1_ADDR)('Integration: OffchainResolver on Sepolia', () => {
-  let l1Pub: ReturnType<typeof createPublicClient>
+  let l1Pub: SepoliaPublicClient
 
   beforeAll(() => {
     l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })
@@ -230,9 +237,9 @@ const RESOLVER_FULL_ABI = [
 ] as const
 
 describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
-  let l1Pub: ReturnType<typeof createPublicClient>
-  let opPub: ReturnType<typeof createPublicClient>
-  let opWallet: ReturnType<typeof createWalletClient>
+  let l1Pub: SepoliaPublicClient
+  let opPub: OpPublicClient
+  let opWallet: OpWalletClient
   let deployer: ReturnType<typeof privateKeyToAccount>
   let signerAccount: ReturnType<typeof privateKeyToAccount>
 
@@ -315,7 +322,7 @@ describe.skipIf(SKIP_E2E)('Integration: aastar.eth CCIP-Read flow', () => {
 // ─── D6: forest.aastar.eth setup ─────────────────────────────────────────────
 
 describe.skipIf(!LIVE_READS || !L1_RPC || !L1_OP_RESOLVER)('Integration: forest.aastar.eth setup', () => {
-  let l1Pub: ReturnType<typeof createPublicClient>
+  let l1Pub: SepoliaPublicClient
 
   beforeAll(() => {
     l1Pub = createPublicClient({ chain: sepolia, transport: http(L1_RPC, { timeout: 30_000, retryCount: 2 }) })

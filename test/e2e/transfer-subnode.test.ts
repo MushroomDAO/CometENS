@@ -18,9 +18,13 @@ import {
   keccak256,
   toBytes,
   encodePacked,
+  type Abi,
   type Hex,
   type Address,
-  type Abi,} from 'viem'
+  type HttpTransport,
+  type PublicClient,
+  type WalletClient,
+} from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { foundry } from 'viem/chains'
 import { spawn, type ChildProcess } from 'child_process'
@@ -47,6 +51,9 @@ const anvilChain = {
   id: 31337,
   rpcUrls: { default: { http: [`http://127.0.0.1:${ANVIL_PORT}`] } },
 }
+
+type AnvilPublicClient = PublicClient<HttpTransport, typeof anvilChain>
+type AnvilWalletClient = WalletClient<HttpTransport, typeof anvilChain, typeof deployer>
 
 // ─── ABI ──────────────────────────────────────────────────────────────────────
 
@@ -107,8 +114,8 @@ let anvilProc: ChildProcess
 
 describe('E2E: transfer-subnode flow on local Anvil', () => {
   let contractAddress: Address
-  let publicClient: ReturnType<typeof createPublicClient>
-  let deployerWallet: ReturnType<typeof createWalletClient>
+  let publicClient: AnvilPublicClient
+  let deployerWallet: AnvilWalletClient
 
   beforeAll(async () => {
     anvilProc = spawn('anvil', ['--port', String(ANVIL_PORT), '--hardfork', 'prague', '--disable-code-size-limit', '--silent'])
