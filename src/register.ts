@@ -2,7 +2,7 @@ import { createWalletClient, createPublicClient, http, custom } from 'viem'
 import { optimismSepolia, optimism } from 'viem/chains'
 import { namehash } from 'viem/ens'
 import { config } from './config'
-import { ApplyTypes, buildDomain } from '../server/gateway/manage/schemas'
+import { ApplyTypes, buildDomain, type ApplyMessage } from '../server/gateway/manage/schemas'
 import { OpPanel } from './ui-state'
 import {
   classifyOutcome, describeOutcome, isNameUsable, submitLabel,
@@ -372,7 +372,9 @@ async function register(): Promise<void> {
     const wallet = createWalletClient({ chain, transport: custom(ethereum) })
 
     const domain = buildDomain(chain.id, config.l2RecordsAddress)
-    const message = buildApplyMessage(parent, label, connectedAddress)
+    // buildApplyMessage widens owner to string. The signed value is still the connected address.
+    const drafted = buildApplyMessage(parent, label, connectedAddress)
+    const message: ApplyMessage = { ...drafted, owner: connectedAddress }
 
     // Apply, not Register: the two schemas are field-for-field identical and are told apart
     // only by the primaryType in the struct hash — which is exactly what stops this signature
@@ -381,8 +383,8 @@ async function register(): Promise<void> {
       account: connectedAddress,
       domain,
       primaryType: 'Apply',
-      types: ApplyTypes as any,
-      message: message as any,
+      types: ApplyTypes,
+      message,
     })
 
     if (registerBtn) registerBtn.textContent = 'Submitting…'
