@@ -267,8 +267,8 @@ async function signAndSubmitSetAddr(): Promise<void> {
       account: from,
       domain,
       primaryType: 'SetAddr',
-      types: SetAddrTypes as any,
-      message: message as any,
+      types: SetAddrTypes,
+      message,
     })
 
     if (setAddrBtn) setAddrBtn.textContent = 'Submitting…'
@@ -355,8 +355,8 @@ async function decideOnApplication(
       account: from,
       domain: buildDomain(chain.id, CONTRACT),
       primaryType: 'ApproveApplication',
-      types: ApproveApplicationTypes as any,
-      message: message as any,
+      types: ApproveApplicationTypes,
+      message,
     })
 
     panel.pending('提交中…')
@@ -427,8 +427,8 @@ async function signAndSubmitRegister(): Promise<void> {
       account: from,
       domain: buildDomain(chain.id, CONTRACT),
       primaryType: 'Register',
-      types: RegisterTypes as any,
-      message: message as any,
+      types: RegisterTypes,
+      message,
     })
 
     panel.pending('提交中,等待上链…')
@@ -499,8 +499,8 @@ async function signAndSubmitSetText(): Promise<void> {
       account: from,
       domain,
       primaryType: 'SetText',
-      types: SetTextTypes as any,
-      message: message as any,
+      types: SetTextTypes,
+      message,
     })
 
     if (setTextBtn) setTextBtn.textContent = 'Submitting…'
@@ -602,8 +602,8 @@ async function signAndSubmitAddRegistrar(): Promise<void> {
       account: connectedAddress,
       domain,
       primaryType: 'AddRegistrar',
-      types: AddRegistrarTypes as any,
-      message: message as any,
+      types: AddRegistrarTypes,
+      message,
     })
 
     if (addBtn) addBtn.textContent = 'Submitting...'
@@ -724,8 +724,8 @@ async function signAndSubmitRemoveRegistrar(): Promise<void> {
       account: connectedAddress,
       domain,
       primaryType: 'RemoveRegistrar',
-      types: RemoveRegistrarTypes as any,
-      message: message as any,
+      types: RemoveRegistrarTypes,
+      message,
     })
 
     if (removeBtn) removeBtn.textContent = 'Submitting...'
@@ -792,8 +792,8 @@ async function signAndSubmitSetContenthash(): Promise<void> {
       account: from,
       domain,
       primaryType: 'SetContenthash',
-      types: SetContenthashTypes as any,
-      message: message as any,
+      types: SetContenthashTypes,
+      message,
     })
 
     if (setChBtn) setChBtn.textContent = 'Submitting…'
@@ -861,8 +861,8 @@ async function signAndSubmitTransferSubnode(): Promise<void> {
       account: from,
       domain,
       primaryType: 'TransferSubnode',
-      types: TransferSubnodeTypes as any,
-      message: message as any,
+      types: TransferSubnodeTypes,
+      message,
     })
 
     if (transferBtn) transferBtn.textContent = 'Submitting…'
