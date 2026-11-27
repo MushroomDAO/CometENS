@@ -9,3 +9,12 @@ remappings = [
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# Build only src/L2CommunityRecordsV4.sol with this profile for controller deployments.
+[profile.v4_controller]
+solc = "0.8.33"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+out = "out/v4-controller"
+cache_path = "cache/v4-controller"
