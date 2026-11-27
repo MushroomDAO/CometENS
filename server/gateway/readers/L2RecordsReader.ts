@@ -1,11 +1,18 @@
-import type { PublicClient } from 'viem'
+import type { Account, Chain, PublicClient, Transport } from 'viem'
 import { L2RecordsV2ABI } from '../abi'
 
-export class L2RecordsReader {
-  private client: PublicClient
+// Default PublicClient fixes chain to `Chain | undefined`. A client bound to a
+// concrete chain (optimismSepolia adds deposit txs on getBlock) is a different
+// type, not a subtype, so the chain has to stay a parameter.
+export class L2RecordsReader<
+  transport extends Transport = Transport,
+  chain extends Chain | undefined = Chain | undefined,
+  account extends Account | undefined = undefined,
+> {
+  private client: PublicClient<transport, chain, account>
   private contractAddress: `0x${string}`
 
-  constructor(client: PublicClient, contractAddress: `0x${string}`) {
+  constructor(client: PublicClient<transport, chain, account>, contractAddress: `0x${string}`) {
     this.client = client
     this.contractAddress = contractAddress
   }

@@ -19,22 +19,15 @@
  */
 import { execFileSync } from 'node:child_process'
 
-const BUDGET = 5
+const BUDGET = 0
 
 /**
- * The remaining errors are ONE design decision, not five unrelated bugs: how to annotate a
- * chain-bound viem client. `let x: ReturnType<typeof createPublicClient>` is the
- * UNPARAMETERISED return type, while the real client carries chain generics, so the two are
- * unrelated types rather than super/subtype. Casting each site away would remove the errors
- * and the distinction with them, so they are left for a deliberate pass. Listed here so the
- * next person does not rediscover it.
+ * Chain-bound viem clients are annotated with their chain (and account) generic.
+ * `ReturnType<typeof createPublicClient>` is the unparameterised return type and is not
+ * a supertype of a client that carries a chain, so it is not a valid annotation here.
+ * KNOWN stays empty while the wide scope is clean; a new error has to name its file.
  */
-const KNOWN = [
-  'server/gateway/index.ts',
-  'test/e2e/register-multi-root.test.ts',
-  'test/e2e/transfer-subnode.test.ts',
-  'test/integration/deployed.test.ts',
-]
+const KNOWN = []
 
 /**
  * Every worker source file must be ACCOUNTED FOR: either compiled, or listed below with a
